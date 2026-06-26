@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ノンブル検版 — 位置統一・表裏チェック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  /* ---- light (default, 白より) ---- */
+  :root{
+    --bg:#f7f6f2; --bg-glow:#ffffff;
+    --panel:#ffffff; --panel2:#f4f2ec; --line:#e6e1d6;
+    --ink:#2b2419; --ink-dim:#6b6358; --ink-faint:#a49a89;
+    --amber:#b9791a; --amber-soft:#f6ecd6;
+    --red:#c8362a; --cyan:#0e7c93; --ok:#2e7d46; --warn:#b07d14;
+    --reticle:#b3aa99; --cand:rgba(120,110,90,.40); --pair:#7b52c9;
+    --stage:#ffffff; --ovbg:#ffffff;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  }
+  /* ---- dark (matches 下版チェッカー) ---- */
+  html[data-theme="dark"]{
+    --bg:#14110e; --bg-glow:#241d15;
+    --panel:#1d1916; --panel2:#262017; --line:#3a3128;
+    --ink:#ece5da; --ink-dim:#a99e8c; --ink-faint:#6f6557;
+    --amber:#e0a23a; --amber-soft:#3a2d16;
+    --red:#ff5a4d; --cyan:#46c8da; --ok:#7ec86b; --warn:#e0a23a;
+    --reticle:#6f6557; --cand:rgba(200,190,170,.40); --pair:#b89cff;
+    --stage:#ffffff; --ovbg:#201b16;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:var(--ui);color:var(--ink);overflow:hidden;
+    background:radial-gradient(1200px 600px at 80% -10%,var(--bg-glow) 0,transparent 60%),var(--bg);
+    -webkit-font-smoothing:antialiased}
+  .app{display:flex;flex-direction:column;height:100vh}
+
+  header{display:flex;align-items:center;gap:16px;padding:10px 18px;flex:0 0 auto;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,color-mix(in srgb,var(--panel) 80%,transparent),transparent)}
+  .brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+  .mk{width:11px;height:24px;border-radius:1px;
+    background:linear-gradient(180deg,#46c8da 0 25%,#d94f9a 25% 50%,#e0a23a 50% 75%,#2b2419 75% 100%)}
+  .brand h1{font-size:15px;font-weight:700;margin:0;letter-spacing:.02em}
+  .brand .sub{font-size:10px;color:var(--ink-faint);letter-spacing:.16em;text-transform:uppercase}
+  .controls{display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap}
+  .field{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim)}
+  .field select,.field input{font-family:var(--mono);font-size:12px;color:var(--ink);
+    background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 6px}
+  .field input[type=number]{width:56px;text-align:right}
+  .btn{font-family:var(--ui);font-size:12px;cursor:pointer;border-radius:4px;padding:6px 12px;
+    border:1px solid var(--amber);background:var(--amber);color:#fff;font-weight:500}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--ink-dim);border-color:var(--line)}
+  .btn.ghost:hover{border-color:var(--amber);color:var(--ink)}
+  .btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+  .icobtn{display:inline-flex;align-items:center;gap:6px}
+
+  main{flex:1;display:grid;grid-template-columns:210px 1fr 374px;min-height:0}
+  .col{min-height:0;overflow:auto}
+  .pagelist{border-right:1px solid var(--line);padding:8px}
+  .viewer{display:flex;flex-direction:column;padding:0;min-height:0}
+  .viewport{flex:1 1 auto;min-height:0;position:relative;overflow:hidden}
+  .viewport .stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+  .viewport .drop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .viewport.zoomed{cursor:grab}
+  .viewport.panning{cursor:grabbing}
+  .panel{background:var(--panel);border-left:1px solid var(--line);padding:0;
+    display:flex;flex-direction:column;overflow:hidden}
+  .panel-top{padding:14px 16px 10px;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .panel-scroll{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 16px}
+  .panel-bottom{padding:11px 16px 13px;border-top:1px solid var(--line);flex:0 0 auto;
+    background:var(--panel)}
+  .panel-top .eyebrow,.panel-bottom .eyebrow{margin-bottom:8px}
+
+  .plitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;cursor:pointer;
+    color:var(--ink-dim);font-size:12px;border:1px solid transparent}
+  .plitem:hover{background:var(--panel2)}
+  .plitem.active{background:var(--panel2);border-color:var(--amber)}
+  .plitem .pno{font-family:var(--mono);width:28px;color:var(--ink-faint)}
+  .plitem .rd{font-family:var(--mono);margin-left:auto;font-size:11px;color:var(--ink-faint)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.ok{background:var(--ok)} .dot.ng{background:var(--red)} .dot.warn{background:var(--warn)} .dot.pair{background:var(--pair)}
+  .plitem.sel{background:color-mix(in srgb,var(--amber) 16%,var(--panel));box-shadow:inset 2px 0 0 var(--amber)}
+  .selbar{position:sticky;top:0;z-index:2;background:var(--panel);border:1px solid var(--amber);
+    border-radius:6px;padding:8px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+  .selbar .selnum{font-size:12px;font-weight:600;color:var(--amber)}
+  .selbar .selbtns{display:flex;gap:6px;flex-wrap:wrap}
+  .selbar .selb{padding:5px 8px;font-size:11px;flex:1;min-width:78px}
+
+  .stage{position:relative;background:var(--stage);line-height:0;
+    box-shadow:0 1px 0 rgba(0,0,0,.18),0 10px 34px rgba(0,0,0,.22)}
+  .stage canvas{display:block}
+  #overlay{position:absolute;inset:0;cursor:crosshair}
+  .vbar{display:flex;align-items:center;gap:14px;color:var(--ink-dim);font-size:12px;flex-wrap:wrap;
+    justify-content:center;flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:10px 12px}
+  .vbar .hint{color:var(--ink-faint)}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim);cursor:pointer}
+  .zoomgrp{display:flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid var(--line);
+    border-radius:6px;background:var(--panel2);margin-left:auto}
+  .zoomgrp .nav{font-family:var(--mono);font-size:12px;color:var(--ink);min-width:46px;text-align:center}
+
+  /* header page-nav group */
+  .navgrp{display:flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--line);
+    border-radius:6px;background:var(--panel2)}
+  .navgrp .navbtn{padding:4px 8px;font-size:12px;border-color:transparent;background:transparent;color:var(--ink-dim)}
+  .navgrp .navbtn:hover{color:var(--ink);background:color-mix(in srgb,var(--amber) 14%,transparent)}
+  .navgrp .nav{font-family:var(--mono);font-size:12px;color:var(--ink-faint);text-align:center}
+  .navgrp .navinput{font-family:var(--mono);font-size:12px;width:48px;text-align:center;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:3px 4px}
+
+  /* big "ノンブル無し" toggle */
+  .bigtoggle{display:inline-flex;align-items:center;gap:12px;cursor:pointer;
+    border:2px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 18px 8px 10px;
+    font-family:var(--ui);font-size:14px;font-weight:600;color:var(--ink-dim);transition:.15s}
+  .panel-top .bigtoggle{display:flex;width:100%;margin-top:10px;justify-content:flex-start}
+  .bigtoggle:hover{border-color:var(--amber)}
+  .bigtoggle .sw{width:46px;height:26px;border-radius:999px;background:var(--line);position:relative;
+    flex:none;transition:.18s}
+  .bigtoggle .sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:.18s}
+  .bigtoggle .lbl small{font-weight:400;color:var(--ink-faint);margin-left:4px}
+  .bigtoggle[aria-pressed="true"]{border-color:var(--warn);color:var(--warn);
+    background:color-mix(in srgb,var(--warn) 12%,var(--panel))}
+  .bigtoggle[aria-pressed="true"] .sw{background:var(--warn)}
+  .bigtoggle[aria-pressed="true"] .sw::after{left:23px}
+
+  .drop{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    text-align:center;width:min(620px,92%);margin:auto;padding:54px 40px;cursor:pointer;
+    border:2px dashed var(--line);border-radius:12px;background:var(--panel);
+    transition:border-color .15s,background .15s,transform .15s}
+  .drop:hover{border-color:var(--amber)}
+  .drop.drag{border-color:var(--amber);background:var(--amber-soft);transform:scale(1.01)}
+  .drop .ico{width:54px;height:54px;border:2px solid var(--amber);border-radius:10px;
+    display:flex;align-items:center;justify-content:center;color:var(--amber);font-size:24px}
+  .drop .big{font-size:15px;color:var(--ink);font-weight:500}
+  .drop .or{font-size:12px;color:var(--ink-faint)}
+  .drop .desc{font-size:12px;color:var(--ink-dim);line-height:1.7;max-width:440px}
+  .drop .pick{margin-top:4px}
+
+  .eyebrow{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+    margin:0 0 8px;font-weight:600}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:0}
+  .tiles3{grid-template-columns:1fr 1fr 1fr}
+  .tile.warn .n{color:var(--warn)}
+  #clusters{margin:0 0 18px}
+  .grp{font-size:11.5px;color:var(--ink);padding:5px 8px;border:1px solid var(--line);border-radius:5px;
+    margin-bottom:5px;display:flex;align-items:center;gap:8px}
+  .grp .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+  .grp.minor{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,var(--panel))}
+  .grp.minor .cnt{color:var(--warn)}
+  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;
+    cursor:pointer;user-select:none;transition:.12s}
+  .tile:hover{border-color:var(--amber)}
+  .tile .n{font-family:var(--mono);font-size:24px;line-height:1;color:var(--ink)}
+  .tile .l{font-size:11px;color:var(--ink-dim);margin-top:5px}
+  .tile.ng .n{color:var(--red)} .tile.ok .n{color:var(--ok)}
+
+  .ovwrap{border:1px solid var(--line);border-radius:6px;background:var(--ovbg);
+    padding:8px;margin-bottom:6px;display:flex;justify-content:center}
+  #ovcanvas{display:block}
+  .ovnote{font-size:10.5px;color:var(--ink-dim);line-height:1.55;margin:0 0 18px}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--ink-dim);margin:6px 0 0;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .swatch{width:9px;height:9px;display:inline-block;border-radius:2px}
+
+  .pairtable{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:8px}
+  .pairtable th,.pairtable td{border-bottom:1px solid var(--line);padding:5px 4px;text-align:right;color:var(--ink)}
+  .pairtable th{color:var(--ink-faint);font-weight:600}
+  .pairtable th:first-child,.pairtable td:first-child{text-align:left}
+  .pairtable td.mono{font-family:var(--mono)}
+  .pairtable .st{font-weight:700}
+  .st.ok{color:var(--ok)} .st.ng{color:var(--red)} .st.na{color:var(--ink-faint)}
+
+  .findings{font-size:11.5px;line-height:1.6}
+  .findings .f{padding:8px 10px;border-left:3px solid var(--red);border-radius:0 4px 4px 0;margin-bottom:7px;
+    background:color-mix(in srgb,var(--red) 9%,var(--panel))}
+  .findings .f .p{font-family:var(--mono);font-weight:600;color:var(--red)}
+  .findings .f.warn{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--panel))}
+  .findings .f.warn .p{color:var(--warn)}
+  .findings .none{color:var(--ink-faint)}
+
+  .exportrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:0}
+  .exportrow .btn{flex:1;min-width:84px;text-align:center}
+
+  .ocrbar{display:flex;align-items:center;gap:12px;flex:0 0 auto;padding:9px 18px;
+    border-bottom:1px solid var(--line);font-size:13px;color:var(--ink);
+    background:color-mix(in srgb,var(--amber) 12%,var(--panel))}
+  .ocrbar .ocrico{color:var(--amber)}
+  .ocrbar #ocrmsg{flex:1 1 auto}
+  .ocrbar .btn{flex:0 0 auto}
+  .progress{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 82%,transparent);
+    display:none;align-items:center;justify-content:center;color:var(--ink);
+    font-family:var(--mono);font-size:13px;letter-spacing:.06em;z-index:50}
+
+  @media (max-width:1080px){
+    main{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+    .pagelist{display:flex;gap:6px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}
+    .panel{border-left:0;border-top:1px solid var(--line);overflow:visible}
+    .panel-scroll{overflow:visible}
+  }
+  @media print{
+    body{background:#fff;height:auto;overflow:visible}
+    header,.pagelist,.viewer,.panel-bottom{display:none!important}
+    main{display:block}
+    .panel{border:0;overflow:visible;display:block}
+    .panel-top{border:0}.panel-scroll{overflow:visible}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand">
+    <span class="mk"></span>
+    <div><h1>ノンブル検版</h1><div class="sub">position &amp; backup register</div></div>
+  </div>
+  <div class="controls">
+    <div class="navgrp" id="navgrp" style="display:none">
+      <button class="btn ghost navbtn" id="first" title="先頭">⏮</button>
+      <button class="btn ghost navbtn" id="prev" title="前へ">◀</button>
+      <input class="navinput" id="pageInput" type="number" min="1" value="1" title="ページ番号を入力して移動">
+      <span class="nav" id="navtotal">/ —</span>
+      <button class="btn ghost navbtn" id="next" title="次へ">▶</button>
+      <button class="btn ghost navbtn" id="last" title="末尾">⏭</button>
+    </div>
+    <label class="field">綴じ
+      <select id="binding">
+        <option value="left">左綴じ（横書き）</option>
+        <option value="right">右綴じ（縦書き）</option>
+        <option value="none">単票</option>
+      </select>
+    </label>
+    <label class="field">許容差<input id="tol" type="number" step="0.1" min="0" value="1.5">mm</label>
+    <label class="field">探索幅<input id="band" type="number" step="1" min="5" value="45">mm</label>
+    <label class="field" title="塗り足し（仕上がりからの外側余白）。入力すると小口・天地の数値を仕上がり基準に補正します">塗り足し<input id="bleed" type="number" step="0.5" min="0" value="0">mm</label>
+    <button class="btn ghost icobtn" id="themeBtn" title="明暗を切り替え"><span id="themeIco">◐</span><span id="themeTxt">ダーク</span></button>
+    <button class="btn ghost" id="resetBtn" disabled>リセット</button>
+    <button class="btn" id="loadBtn">PDFを開く</button>
+    <input id="fileInput" type="file" accept="application/pdf" style="display:none">
+  </div>
+</header>
+
+<div class="ocrbar" id="ocrbar" style="display:none">
+  <span class="ocrico">⚠</span>
+  <span id="ocrmsg"></span>
+  <button class="btn" id="ocrBtn">OCRで検出</button>
+</div>
+
+<main>
+  <div class="col pagelist" id="pagelist"></div>
+
+  <div class="col viewer" id="viewer">
+    <div class="viewport" id="viewport">
+      <div class="drop" id="drop">
+        <div class="ico">⤓</div>
+        <div class="big">PDFをここにドラッグ＆ドロップ</div>
+        <div class="or">— または —</div>
+        <button class="btn pick" id="pickBtn">PDFを選択</button>
+        <div class="desc">開くと全ページのノンブルを自動で拾い出し、位置がそろっているか・表裏で見当が合うかを判定します。ノンブルが空白入り・全角・約物付き・紙面センター寄りでも検出します。外れたページは画像上のノンブルをクリックで指定し直せます。ファイルは外部に送信されず、すべてこのブラウザ内で処理されます。</div>
+      </div>
+      <div class="stage" id="stage" style="display:none">
+        <canvas id="pdfcanvas"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+    </div>
+    <div class="vbar" id="vbar" style="display:none">
+      <label class="toggle"><input type="checkbox" id="ghostChk" checked> ずれを重ねて表示</label>
+      <label class="toggle"><input type="checkbox" id="markChk" checked> 記号</label>
+      <label class="toggle"><input type="checkbox" id="numChk" checked> 数値</label>
+      <span class="hint">ホイール=ズーム / ドラッグ=移動 / クリック=ノンブル指定</span>
+      <div class="zoomgrp">
+        <button class="btn ghost navbtn" id="zoomOut" title="縮小">−</button>
+        <span class="nav" id="zoomLabel">100%</span>
+        <button class="btn ghost navbtn" id="zoomIn" title="拡大">＋</button>
+        <button class="btn ghost" id="zoomReset" title="ページ全体を表示">全体表示</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col panel" id="panel">
+    <div class="panel-top">
+      <p class="eyebrow">判定サマリー</p>
+      <div class="tiles tiles3">
+        <div class="tile" id="tilePos" title="クリックで位置NGのページを順に表示"><div class="n">—</div><div class="l">位置NG</div></div>
+        <div class="tile" id="tilePair" title="クリックで表裏NGのページを順に表示"><div class="n">—</div><div class="l">表裏NG</div></div>
+        <div class="tile" id="tileWarn" title="クリックで要確認のページを順に表示"><div class="n">—</div><div class="l">要確認</div></div>
+      </div>
+      <button class="bigtoggle" id="exclBtn" type="button" aria-pressed="false" style="display:none">
+        <span class="sw"></span>
+        <span class="lbl">このページはノンブル無し<small>扉・白ページ等</small></span>
+      </button>
+    </div>
+
+    <div class="panel-scroll">
+      <p class="eyebrow">位置オーバービュー（見当）</p>
+      <div class="ovwrap"><canvas id="ovcanvas" width="300" height="396"></canvas></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--ok)"></span>OK</span>
+        <span><span class="swatch" style="background:var(--red)"></span>位置NG</span>
+        <span><span class="swatch" style="background:var(--pair)"></span>表裏NG</span>
+        <span><span class="swatch" style="background:var(--warn)"></span>要確認</span>
+        <span>● 表（奇数）</span><span>▲ 裏（偶数）</span>
+      </div>
+      <p class="ovnote">全ページのノンブルを「小口を右にそろえた状態」に正規化して重ねた図です。点が密集していれば位置が統一されています。表（●）と裏（▲）が重なれば、両面で見当が合っています。実線リング＝設計グループ、破線リング＝少数派（要確認）。</p>
+
+      <div id="clusters"></div>
+
+      <p class="eyebrow">表裏チェック</p>
+      <table class="pairtable" id="pairtable"><tbody></tbody></table>
+
+      <p class="eyebrow">指摘</p>
+      <div class="findings" id="findings"></div>
+    </div>
+
+    <div class="panel-bottom">
+      <p class="eyebrow">書き出し</p>
+      <div class="exportrow">
+        <button class="btn ghost" id="expReport" disabled>レポート</button>
+        <button class="btn ghost" id="expCsv" disabled>CSV</button>
+        <button class="btn ghost" id="expJson" disabled>JSON</button>
+        <button class="btn ghost" id="expPng" disabled>PNG</button>
+        <button class="btn ghost" id="expPrint" disabled>印刷</button>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+
+<div class="progress" id="progress">解析中 …</div>
+
+<script>
+"use strict";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+const CMAP_URL="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/";
+
+const PT_MM = 25.4/72;
+const mm = pt => pt*PT_MM;
+const round2 = v => Math.round(v*100)/100;
+// 正規化(全角→半角)＋空白・約物除去
+const SEP_RE = /[\s.\-,()\[\]·\u30fb\u2010-\u2015]/g;
+const ROM_RE = /^[ivxlcdm]{1,7}$/;
+const EDGE_MM = 5; // 端から5mm以内はトンボ/スラグとみなし除外
+const $ = id => document.getElementById(id);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+
+// ---- state ----
+let pdf=null, fileName="";
+let pageMeta=[], overrides=[], records=[], analysis=null;
+let cur=0, curViewport=null, curScale=1, zoom=1, ghostImg=null;
+let ocrByPage=[], ocrRunning=false, ocrCancel=false;
+
+// ---- detection ----
+function romanVal(t){ const M={i:1,v:5,x:10,l:50,c:100,d:500,m:1000}; let n=0,prev=0;
+  for(let k=t.length-1;k>=0;k--){ const v=M[t[k]]; if(v<prev) n-=v; else { n+=v; prev=v; } } return n; }
+// ノンブル候補を {value, system, raw} で返す（数字・ローマ数字、空白/約物許容）
+function parseFolio(s){
+  if(!s) return null;
+  const c=s.normalize("NFKC").replace(SEP_RE,"");
+  if(/^\d{1,4}$/.test(c)) return {value:+c, system:"arabic", raw:s.trim()};
+  const low=c.toLowerCase();
+  if(ROM_RE.test(low)){ const v=romanVal(low); if(v>0&&v<=400) return {value:v, system:"roman", raw:s.trim()}; }
+  return null;
+}
+// 柱（ランニングヘッド）と連結している場合の先頭ノンブル抽出（数字/ローマ＋空白区切り）
+function leadingFolio(s){
+  if(!s) return null;
+  const c=s.normalize("NFKC");
+  let m=c.match(/^\s*(\d{1,4})(?:\s|\u3000|$)/); if(m) return {value:+m[1], system:"arabic", raw:m[1]};
+  m=c.match(/^\s*([ivxlcdm]{1,7})(?:\s|\u3000)/i);
+  if(m && ROM_RE.test(m[1].toLowerCase())){ const v=romanVal(m[1].toLowerCase()); if(v>0&&v<=400) return {value:v, system:"roman", raw:m[1]}; }
+  return null;
+}
+function bandPt(){ return (parseFloat($("band").value)||45)/PT_MM; }
+function tolMm(){ return parseFloat($("tol").value)||1.5; }
+function bleedMm(){ return Math.max(0, parseFloat($("bleed").value)||0); }
+function binding(){ return $("binding").value; }
+function zoneOf(yabs, meta){ const cyb=yabs-meta.view[1], b=bandPt();
+  if(cyb<=b) return "bottom"; if(cyb>=meta.ph-b) return "top"; return cyb<meta.ph/2?"bottom":"top"; }
+
+async function pageHasLargeImage(page){
+  try{
+    const ops=await page.getOperatorList();
+    const I=pdfjsLib.OPS||{};
+    const imgFns=[I.paintImageXObject,I.paintJpegXObject,I.paintImageMaskXObject,I.paintInlineImageXObject].filter(v=>v!=null);
+    for(let k=0;k<ops.fnArray.length;k++){ if(imgFns.indexOf(ops.fnArray[k])>=0) return true; }
+  }catch(e){}
+  return false;
+}
+
+async function extract(){
+  pageMeta=[];
+  const edge=EDGE_MM/PT_MM;
+  for(let i=1;i<=pdf.numPages;i++){
+    const page=await pdf.getPage(i);
+    const view=page.view.slice();
+    const pw=view[2]-view[0], ph=view[3]-view[1], b=bandPt();
+    let tc; try{ tc=await page.getTextContent(); }catch(e){ tc={items:[]}; }
+    let textLen=0;
+    const cands=[];
+    for(const it of tc.items){
+      if(it.str===undefined || it.str.trim()==="") continue;
+      textLen+=it.str.trim().length;
+      const f=parseFolio(it.str) || leadingFolio(it.str); if(!f) continue;
+      const t=it.transform, w=it.width||0, h=it.height||(Math.abs(t[3])||8);
+      const xabs=t[4]+w/2, yabs=t[5]+h/2, cyb=yabs-view[1];
+      const inBottom=(cyb>=edge && cyb<=b), inTop=(cyb<=ph-edge && cyb>=ph-b);
+      if(inBottom||inTop) cands.push({value:f.value, system:f.system, raw:f.raw, xabs, yabs, font:it.fontName||"", size:round2(h)});
+    }
+    // OCR結果（スキャンページ）を併合：帯・端の条件で再フィルタ
+    const ocr=ocrByPage[i-1];
+    if(ocr) for(const c of ocr){ const cyb=c.yabs-view[1];
+      const inBottom=(cyb>=edge && cyb<=b), inTop=(cyb<=ph-edge && cyb>=ph-b);
+      if(inBottom||inTop) cands.push(c); }
+    // 「テキストがほぼ無い」かつ「実際に大きな画像が貼ってある」ページだけスキャン扱い
+    const isImage = (textLen<3) && (ocr?true:await pageHasLargeImage(page));
+    pageMeta.push({view, pw, ph, cands, textLen, isImage});
+    $("progress").textContent=`解析中 … ${i}/${pdf.numPages}`;
+  }
+}
+
+// ---- OCR（スキャンPDF用：ノンブル位置検査の補助） ----
+const OCR_WHITELIST="0123456789ivxlcdmIVXLCDM().,-–—‐ ";
+let ocrWorker=null;
+async function getOcrWorker(){
+  if(ocrWorker) return ocrWorker;
+  if(typeof Tesseract==="undefined") throw new Error("OCRエンジンを読み込めませんでした（ネットワークを確認してください）");
+  const w=await Tesseract.createWorker("eng");
+  await w.setParameters({ tessedit_char_whitelist:OCR_WHITELIST, tessedit_pageseg_mode:"11", preserve_interword_spaces:"0" });
+  ocrWorker=w; return w;
+}
+// 1ページの天地マージン帯をOCRしてノンブル候補を返す
+async function ocrPage(i, worker){
+  const page=await pdf.getPage(i);
+  const S=3; // ≈216dpi（活字が読める程度）
+  const vpt=page.getViewport({scale:S});
+  const full=document.createElement("canvas"); full.width=Math.ceil(vpt.width); full.height=Math.ceil(vpt.height);
+  await page.render({canvasContext:full.getContext("2d"), viewport:vpt}).promise;
+  const bandMM=Math.max(45,(parseFloat($("band").value)||45)+6);
+  const bandPx=Math.min(full.height/2, Math.round(bandMM/25.4*72*S));
+  const out=[];
+  for(const zone of ["top","bottom"]){
+    const sy=zone==="top"?0:full.height-bandPx;
+    const strip=document.createElement("canvas"); strip.width=full.width; strip.height=bandPx;
+    strip.getContext("2d").drawImage(full,0,sy,full.width,bandPx,0,0,full.width,bandPx);
+    let data; try{ data=(await worker.recognize(strip, {}, { blocks:true })).data; }catch(e){ continue; }
+    const words=[];
+    (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>(l.words||[]).forEach(w=>words.push(w)))));
+    if(!words.length && data.words) words.push(...data.words);
+    for(const wd of words){
+      const raw=(wd.text||"").trim(); if(!raw) continue;
+      if((wd.confidence||0)<35) continue;
+      const f=parseFolio(raw)||leadingFolio(raw); if(!f) continue;
+      const bb=wd.bbox||wd; const bx=((bb.x0+bb.x1)/2), by=((bb.y0+bb.y1)/2)+sy;
+      const [Xp,Yp]=vpt.convertToPdfPoint(bx,by);
+      const hpt=Math.abs(bb.y1-bb.y0)/S;
+      out.push({value:f.value, system:f.system, raw:f.raw, xabs:Xp, yabs:Yp, font:"OCR", size:round2(hpt), ocr:true, conf:Math.round(wd.confidence)});
+    }
+  }
+  return out;
+}
+async function ocrPass(){
+  if(!pdf||ocrRunning) return;
+  const targets=[]; for(let i=0;i<pageMeta.length;i++){ if(pageMeta[i].isImage) targets.push(i); }
+  $("ocrbar").style.display="flex";
+  if(!targets.length){ $("ocrmsg").textContent="OCR対象（スキャン）ページはありません。"; return; }
+  ocrRunning=true; ocrCancel=false;
+  $("ocrBtn").textContent="OCR中止";
+  let worker;
+  try{ worker=await getOcrWorker(); }
+  catch(e){ $("ocrmsg").textContent=e.message; ocrRunning=false; $("ocrBtn").textContent="OCRで検出"; return; }
+  let done=0;
+  for(const i of targets){
+    if(ocrCancel) break;
+    $("ocrmsg").textContent=`OCR解析中 … ${++done}/${targets.length}（p.${i+1}）　※初回はエンジン取得に時間がかかります`;
+    try{ ocrByPage[i]=await ocrPage(i+1, worker); }catch(e){ ocrByPage[i]=ocrByPage[i]||[]; }
+  }
+  ocrRunning=false; $("ocrBtn").textContent="OCRで検出";
+  await extract(); recompute(); await showPage(false);
+  const found=records.filter(r=>r.detected && r.font==="OCR").length;
+  $("ocrmsg").textContent=ocrCancel
+    ? `OCR中止（${Math.max(0,done-1)}ページ処理済み）。再度押すと続行します。`
+    : `OCR完了：${done}ページを解析し、${found}ページでノンブルを検出しました。`;
+}
+
+function chooseSequence(){  // 算用数字・ローマ数字でそれぞれ最頻オフセットを求め、前付(ローマ)＋本文(算用)の番号リセットに対応
+  const offA=new Map(), offR=new Map();
+  pageMeta.forEach((m,i)=>m.cands.forEach(c=>{ const o=c.value-(i+1);
+    const mp=(c.system==="arabic")?offA:offR; mp.set(o,(mp.get(o)||0)+1); }));
+  const best=mp=>{ let bo=0,bh=-1; mp.forEach((h,o)=>{ if(h>bh||(h===bh&&o<bo)){bh=h;bo=o;} }); return {off:bo,hit:Math.max(0,bh)}; };
+  const A=best(offA), R=best(offR);
+  const chosen=pageMeta.map((m,i)=>{
+    return m.cands.find(c=>c.system==="roman"&&c.value===i+1+R.off)
+        || m.cands.find(c=>c.system==="arabic"&&c.value===i+1+A.off)
+        || null;
+  });
+  return {offsetA:A.off, offsetR:R.off, romanCount:R.hit, chosen};
+}
+
+function normalize(i1, cand, meta){
+  const cx=cand.xabs-meta.view[0], cyb=cand.yabs-meta.view[1], odd=(i1%2===1), bl=bleedMm();
+  let outerRight; const bnd=binding();
+  if(bnd==="left") outerRight=odd; else if(bnd==="right") outerRight=!odd; else outerRight=(meta.pw-cx)<=cx;
+  const outer=outerRight?(meta.pw-cx):cx;
+  return {outer_mm:round2(mm(outer)-bl), vertical_mm:round2(mm(cyb)-bl),
+    center_dist_mm:round2(mm(Math.abs(cx-meta.pw/2))), side:outerRight?"right":"left",
+    zone:zoneOf(cand.yabs,meta), page_w_mm:round2(mm(meta.pw)-2*bl), page_h_mm:round2(mm(meta.ph)-2*bl)};
+}
+
+function median(arr){ const a=[...arr].sort((x,y)=>x-y),n=a.length; if(!n) return 0;
+  return n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2; }
+function vDisp(r){ return r.pos.zone==="top"
+  ? {l:"天", v:round2(r.pos.page_h_mm - r.pos.vertical_mm)} : {l:"地", v:r.pos.vertical_mm}; }
+
+function recompute(){
+  const auto=chooseSequence();
+  records=pageMeta.map((meta,i)=>{
+    const ov=overrides[i]; let cand=null, manual=false, excluded=false;
+    if(ov&&ov.type==="none"){ excluded=true; manual=true; }
+    else if(ov&&ov.type==="item"){ cand=ov.cand; manual=true; }
+    else if(ov&&ov.type==="point"){ cand={value:null, system:"manual", raw:"（手動）", xabs:ov.x, yabs:ov.y}; manual=true; }
+    else cand=auto.chosen[i];
+    const rec={page:i+1, detected:!!cand&&!excluded, excluded, manual,
+      folio:cand?cand.value:null, folioRaw:cand?cand.raw:null, system:cand?cand.system:null,
+      cand:cand&&!excluded?cand:null, font:(cand&&cand.font)||null, size:(cand&&cand.size)||null};
+    if(rec.detected) rec.pos=normalize(i+1, cand, meta);
+    return rec;
+  });
+  analysis=analyze(records, tolMm());
+  renderPanel(); renderPageList(); renderOverlay(); renderOverview();
+}
+
+function analyze(recs, tol){
+  const det=recs.filter(r=>r.detected);
+  const centered=det.length?median(det.map(r=>r.pos.center_dist_mm))<=20:false;
+  const mlabel=centered?"中央":"小口";
+
+  // ---- 位置クラスタリング（章ごとの正規なデザイン違いを許容） ----
+  // 天/地が違えば別クラスタ。小口(または中央)距離と天地距離が gap 以内なら同一デザイン。
+  const gap=Math.max(3*tol, 5);
+  const clusters=[];
+  det.forEach(r=>{
+    let c=clusters.find(c=> c.zone===r.pos.zone
+        && Math.abs(r.pos.outer_mm-c.cx)<=gap && Math.abs(r.pos.vertical_mm-c.cy)<=gap);
+    if(!c){ c={zone:r.pos.zone, pages:[], outers:[], verts:[], cx:r.pos.outer_mm, cy:r.pos.vertical_mm}; clusters.push(c); }
+    c.pages.push(r.page); c.outers.push(r.pos.outer_mm); c.verts.push(r.pos.vertical_mm);
+    c.cx=round2(median(c.outers)); c.cy=round2(median(c.verts));
+    r._c=c;
+  });
+  const majorMin=Math.max(3, Math.round(det.length*0.05));
+  clusters.forEach((c,i)=>{ c.id=i+1; c.count=c.pages.length; c.major=c.count>=majorMin; });
+
+  const jpz={top:"天",bottom:"地"};
+  recs.forEach(r=>{
+    r.flags=[]; r.notes=[]; r.warn=false;
+    if(r.excluded){ r.status="—"; return; }
+    if(!r.detected){ r.flags.push("ノンブル未検出（要目視確認）"); r.status="NG"; return; }
+    const c=r._c, dx=Math.abs(r.pos.outer_mm-c.cx), dv=Math.abs(r.pos.vertical_mm-c.cy);
+    if(c.major){
+      if(dx>tol) r.flags.push(`同一デザイン内で${mlabel}位置がズレ（グループ基準${c.cx}mm／当該${r.pos.outer_mm}mm／差${round2(dx)}mm）`);
+      if(dv>tol) r.flags.push(`同一デザイン内で天地位置がズレ（グループ基準${c.cy}mm／当該${r.pos.vertical_mm}mm／差${round2(dv)}mm）`);
+      r.status=r.flags.length?"NG":"OK";
+    }else{
+      r.warn=true; r.status="WARN";
+      r.flags.push(`他ページと異なる配置（${jpz[r.pos.zone]}・${mlabel}${r.pos.outer_mm}mm／地${r.pos.vertical_mm}mm、同配置${c.count}p）。章替わりのデザイン変更か、要確認`);
+    }
+  });
+
+  // 書体・Q数：前後の検出ページと比較。1ページだけ浮いていればNG、連続的変化は参考。
+  const sameFS=(a,b)=> a&&b && a.font===b.font && Math.abs((a.size||0)-(b.size||0))<=0.3;
+  const seq=recs.filter(r=>r.detected);
+  seq.forEach((r,i)=>{
+    if(r.font==="OCR") return; // OCRは文字寸法が不安定なため書体/Q数の判定対象外
+    const p=seq[i-1], n=seq[i+1];
+    if(p && n && sameFS(p,n) && !sameFS(r,p)){
+      const diffs=[];
+      if(r.font!==p.font) diffs.push("書体");
+      if(Math.abs((r.size||0)-(p.size||0))>0.3) diffs.push(`Q数（前後${p.size!=null?p.size+"pt":"?"}／当該${r.size!=null?r.size+"pt":"?"}）`);
+      r.flags.push(`このページだけ${diffs.join("・")}が前後と異なります`);
+      r.status="NG"; r.fontOutlier=true;
+    }else if(p && !sameFS(r,p)){
+      r.notes.push(`書体/サイズが前の検出ページと変化（参考：${r.size!=null?r.size+"pt":""}）`);
+    }
+  });
+
+  // 代表位置（最大の設計グループ。無ければ最大グループ）
+  const sorted=clusters.slice().sort((a,b)=>(b.major-a.major)||(b.count-a.count));
+  const base=sorted[0]||null;
+  const sgn=v=>(v>=0?"+":"")+round2(v);
+
+  // 表裏ペア（物理面の見当。表・裏それぞれの代表位置からのずれを表示）
+  const pairs=[]; const pairNGpages=new Set();
+  for(let i=0;i<recs.length;i+=2){
+    const f=recs[i], b=recs[i+1]||null;
+    const rec={front:f.page, back:b?b.page:null, flags:[], status:"OK", metric:mlabel};
+    if(!b){ rec.status="—"; rec.flags.push("対となる裏ページがありません"); pairs.push(rec); continue; }
+    if(f.excluded||b.excluded){ rec.status="—"; rec.flags.push("白ページ等のため対象外"); pairs.push(rec); continue; }
+    if(!(f.detected&&b.detected)){ rec.status="—"; rec.flags.push("表または裏が未検出のため照合不可"); pairs.push(rec); continue; }
+    const dO=Math.abs(f.pos.outer_mm-b.pos.outer_mm), dV=Math.abs(f.pos.vertical_mm-b.pos.vertical_mm);
+    Object.assign(rec,{of:f.pos.outer_mm, ob:b.pos.outer_mm, vf:f.pos.vertical_mm, vb:b.pos.vertical_mm, odiff:round2(dO), vdiff:round2(dV)});
+    if((dO>tol||dV>tol) && base){
+      const fo=f.pos.outer_mm-base.cx, bo=b.pos.outer_mm-base.cx, fv=f.pos.vertical_mm-base.cy, bv=b.pos.vertical_mm-base.cy;
+      rec.devFO=round2(fo); rec.devBO=round2(bo); rec.devFV=round2(fv); rec.devBV=round2(bv); rec.baseId=base.id;
+      if(dO>tol) rec.flags.push(`表裏で${mlabel}位置が不一致：表${sgn(fo)}mm／裏${sgn(bo)}mm（基準G${base.id}=${base.cx}mm、表裏差${round2(dO)}mm）`);
+      if(dV>tol) rec.flags.push(`表裏で天地位置が不一致：表${sgn(fv)}mm／裏${sgn(bv)}mm（基準G${base.id}、表裏差${round2(dV)}mm）`);
+    }
+    rec.status=rec.flags.length?"NG":"OK";
+    if(rec.status==="NG"){ pairNGpages.add(f.page); pairNGpages.add(b.page); }
+    // 相方情報（視覚化用）
+    if(f.cand&&b.cand){ f.partnerPage=b.page; f.partnerXabs=b.cand.xabs; f.partnerYabs=b.cand.yabs;
+      b.partnerPage=f.page; b.partnerXabs=f.cand.xabs; b.partnerYabs=f.cand.yabs; }
+    f.pairNG=b.pairNG=(rec.status==="NG");
+    pairs.push(rec);
+  }
+  const mainZone = clusters.length ? clusters.slice().sort((a,b)=>b.count-a.count)[0].zone : null;
+  const phMed = det.length ? round2(median(det.map(r=>r.pos.page_h_mm))) : 0;
+  clusters.forEach(c=>{ c.vEdge = c.zone==="top" ? round2(phMed - c.cy) : c.cy; c.vLabel = c.zone==="top"?"天":"地"; });
+  return {centered, mlabel, clusters, majorMin, mainZone, phMed, base, pairs, pairNGpages};
+}
+
+// ---- page list (複数選択対応) ----
+let selection=new Set(), anchor=null, activeRow=null;
+function applyOverrideToSelection(type){
+  selection.forEach(i=>{ overrides[i]= (type==="none") ? {type:"none"} : null; });
+  recompute(); showPage();
+}
+function renderPageList(){
+  const el=$("pagelist"); el.innerHTML="";
+  if(selection.size){
+    const bar=document.createElement("div"); bar.className="selbar";
+    bar.innerHTML=`<div class="selnum">${selection.size}件選択中</div>
+      <div class="selbtns">
+        <button class="btn selb" data-a="none">ノンブル無しにする</button>
+        <button class="btn ghost selb" data-a="clear">解除</button>
+        <button class="btn ghost selb" data-a="desel">選択クリア</button>
+      </div>`;
+    bar.querySelector('[data-a="none"]').onclick=()=>applyOverrideToSelection("none");
+    bar.querySelector('[data-a="clear"]').onclick=()=>applyOverrideToSelection(null);
+    bar.querySelector('[data-a="desel"]').onclick=()=>{ selection.clear(); anchor=null; renderPageList(); };
+    el.appendChild(bar);
+  }
+  records.forEach((r,i)=>{
+    const d=document.createElement("div");
+    d.className="plitem"+(i===cur?" active":"")+(selection.has(i)?" sel":"");
+    let cls="idle", rd="—";
+    if(r.excluded){ cls="idle"; rd="無"; }
+    else if(!r.detected){ cls="ng"; rd="?"; }
+    else { cls=r.status==="NG"?"ng":(analysis.pairNGpages&&analysis.pairNGpages.has(r.page)?"pair":(r.status==="WARN"?"warn":"ok")); rd=r.pos.outer_mm.toFixed(1); }
+    const label=r.excluded?"ノンブル無し":(r.detected?("ノ "+(r.folioRaw??r.folio)+(r.manual?" 手":"")):"未検出");
+    d.innerHTML=`<span class="dot ${cls}"></span><span class="pno">p.${r.page}</span>
+      <span>${label}</span><span class="rd">${rd}</span>`;
+    d.onclick=(e)=>{
+      if(e.shiftKey && anchor!==null){
+        const a=Math.min(anchor,i), b=Math.max(anchor,i); selection=new Set();
+        for(let k=a;k<=b;k++) selection.add(k); renderPageList();
+      }else if(e.metaKey||e.ctrlKey){
+        if(selection.has(i)) selection.delete(i); else selection.add(i);
+        anchor=i; renderPageList();
+      }else{
+        selection=new Set([i]); anchor=i; cur=i; showPage();
+      }
+    };
+    el.appendChild(d);
+    if(i===cur) activeRow=d;
+  });
+}
+function scrollListToCurrent(){
+  if(activeRow && activeRow.scrollIntoView) activeRow.scrollIntoView({block:"center", inline:"center"});
+}
+
+// ---- panel ----
+function renderPanel(){
+  const ng=records.filter(r=>r.status==="NG").length;
+  const warn=records.filter(r=>r.status==="WARN").length;
+  const pairng=analysis.pairs.filter(p=>p.status==="NG").length;
+  const tp=$("tilePos"); tp.querySelector(".n").textContent=ng; tp.className="tile"+(ng?" ng":" ok");
+  const tw=$("tileWarn"); tw.querySelector(".n").textContent=warn; tw.className="tile"+(warn?" warn":"");
+  const tpr=$("tilePair"); tpr.querySelector(".n").textContent=pairng; tpr.className="tile"+(pairng?" ng":" ok");
+
+  // デザイングループ一覧
+  const cl=$("clusters");
+  if(analysis.clusters.length<=1){ cl.innerHTML=""; }
+  else{
+    const jpz={top:"天",bottom:"地"};
+    cl.innerHTML=`<p class="eyebrow">デザイングループ（${analysis.clusters.length}）</p>`+
+      analysis.clusters.map(c=>`<div class="grp${c.major?"":" minor"}">
+        <b>G${c.id}</b> ${jpz[c.zone]}・${analysis.mlabel}${c.cx}mm／${c.vLabel}${c.vEdge}mm
+        <span class="cnt">${c.count}p${c.major?"":"・要確認"}</span></div>`).join("");
+  }
+
+  const m=analysis.mlabel;
+  const tb=$("pairtable").querySelector("tbody");
+  tb.innerHTML=`<tr><th>表/裏</th><th>表${m}</th><th>裏${m}</th><th>差</th><th>判定</th></tr>`;
+  analysis.pairs.forEach(p=>{
+    const stc=p.status==="NG"?"ng":(p.status==="OK"?"ok":"na");
+    const cells=("of" in p)
+      ? `<td class="mono">${p.of}</td><td class="mono">${p.ob}</td><td class="mono">${p.odiff}</td>`
+      : `<td class="mono">—</td><td class="mono">—</td><td class="mono">—</td>`;
+    tb.insertAdjacentHTML("beforeend",
+      `<tr><td>p.${p.front}${p.back?(" / p."+p.back):""}</td>${cells}<td class="st ${stc}">${p.status}</td></tr>`);
+  });
+
+  const fd=$("findings"); fd.innerHTML=""; const items=[];
+  records.forEach(r=>{
+    const lines=(r.flags||[]).concat(r.notes||[]);
+    if(lines.length) items.push({p:`p.${r.page}`, kind:(r.status==="WARN"||!r.detected)?"warn":"ng", lines});
+  });
+  analysis.pairs.filter(p=>p.status==="NG").forEach(p=>items.push({p:`p.${p.front}（表）× p.${p.back}（裏）`, kind:"ng", lines:p.flags}));
+  if(!items.length){ fd.innerHTML=`<div class="none">指摘はありません。</div>`; }
+  items.forEach(it=>fd.insertAdjacentHTML("beforeend",
+    `<div class="f${it.kind==="warn"?" warn":""}"><span class="p">${esc(it.p)}</span><br>${it.lines.map(l=>"・"+esc(l)).join("<br>")}</div>`));
+}
+
+// ---- viewer ----
+let panX=0, panY=0, renderedZoom=1;
+function stageW(){ return $("pdfcanvas").width || (curViewport?curViewport.width:0); }
+function stageH(){ return $("pdfcanvas").height || (curViewport?curViewport.height:0); }
+function dispScale(){ return zoom/renderedZoom; }            // 再描画前の暫定CSS拡大率
+function dispW(){ return stageW()*dispScale(); }             // 画面上の実表示幅
+function dispH(){ return stageH()*dispScale(); }
+function applyView(){ $("stage").style.transform=`translate(${panX}px,${panY}px) scale(${dispScale()})`; }
+function clampPan(){
+  const vp=$("viewport"), W=dispW(), H=dispH();
+  const vw=vp.clientWidth, vh=vp.clientHeight;
+  const minX=Math.min(0,vw-W), maxX=Math.max(0,vw-W), minY=Math.min(0,vh-H), maxY=Math.max(0,vh-H);
+  panX=Math.max(minX,Math.min(maxX,panX)); panY=Math.max(minY,Math.min(maxY,panY));
+}
+function centerView(){ const vp=$("viewport");
+  panX=(vp.clientWidth-dispW())/2; panY=(vp.clientHeight-dispH())/2; clampPan(); }
+
+async function showPage(resetView=true){
+  if(!pdf) return;
+  $("drop").style.display="none"; $("stage").style.display="block"; $("vbar").style.display="flex"; $("exclBtn").style.display="flex";
+  const page=await pdf.getPage(cur+1);
+  const vp1=page.getViewport({scale:1});
+  const vp=$("viewport");
+  const avail=vp.clientWidth-32, maxH=vp.clientHeight-32;
+  const fit=Math.max(0.1, Math.min(avail/vp1.width, maxH/vp1.height));
+  curScale=fit*zoom;
+  curViewport=page.getViewport({scale:curScale});
+  const cv=$("pdfcanvas"), ov=$("overlay");
+  cv.width=Math.floor(curViewport.width); cv.height=Math.floor(curViewport.height);
+  ov.width=cv.width; ov.height=cv.height;
+  ov.style.width=cv.style.width=cv.width+"px"; ov.style.height=cv.style.height=cv.height+"px";
+  await page.render({canvasContext:cv.getContext("2d"), viewport:curViewport}).promise;
+  renderedZoom=zoom;                          // canvasは現zoomで描画済み→CSS拡大率を1に
+  if(resetView) centerView(); else if(!zooming){ clampPan(); }
+  applyView();
+  $("pageInput").value=cur+1; $("pageInput").max=pdf.numPages; $("navtotal").textContent=`/ ${pdf.numPages}`;
+  $("zoomLabel").textContent=Math.round(zoom*100)+"%";
+  $("viewport").classList.toggle("zoomed", zoom>1.001);
+  $("exclBtn").setAttribute("aria-pressed", String(!!(overrides[cur]&&overrides[cur].type==="none")));
+  renderOverlay(); renderPageList(); scrollListToCurrent();
+  if(!zooming) buildPartnerGhost(records[cur]);
+}
+
+function renderOverlay(){
+  const ov=$("overlay"); if(!ov.width||!curViewport) return;
+  const g=ov.getContext("2d"); g.clearRect(0,0,ov.width,ov.height);
+  const showMark=$("markChk")?$("markChk").checked:true;
+  const showNum=$("numChk")?$("numChk").checked:true;
+  const meta=pageMeta[cur];
+  if(showMark){
+    g.fillStyle=cssVar("--cand");
+    meta.cands.forEach(c=>{ const [vx,vy]=curViewport.convertToViewportPoint(c.xabs,c.yabs);
+      g.beginPath(); g.arc(vx,vy,3,0,7); g.fill(); });
+  }
+  const r=records[cur];
+  if(r&&r.detected&&r.cand){
+    const [vx,vy]=curViewport.convertToViewportPoint(r.cand.xabs,r.cand.yabs);
+    const col=r.status==="NG"?cssVar("--red"):(analysis.pairNGpages&&analysis.pairNGpages.has(r.page)?cssVar("--pair"):(r.status==="WARN"?cssVar("--warn"):cssVar("--ok")));
+
+    // ---- ずれの重ね表示（ゴースト） ----
+    if($("ghostChk") && $("ghostChk").checked){
+      const bl=bleedMm(), PT=1/PT_MM;
+      // 位置NG: 基準（多数派グループ）位置にゴースト
+      if(r.status==="NG" && analysis.base){
+        const outerPt=(analysis.base.cx+bl)*PT, vbot=(analysis.base.cy+bl)*PT;
+        const gx=(r.pos.side==="right")?(meta.pw-outerPt):outerPt;
+        const gy=meta.view[1]+vbot;
+        ghost(g, curViewport.convertToViewportPoint(gx+meta.view[0], gy), vx, vy, cssVar("--ok"), "基準位置");
+      }
+      // 表裏NG: 相方ノンブルを左右反転して重ねる
+      if(analysis.pairNGpages && analysis.pairNGpages.has(r.page) && r.partnerXabs!=null){
+        const mx=meta.pw-(r.partnerXabs-meta.view[0])+meta.view[0]; // 紙面中央で左右反転
+        const cp=curViewport.convertToViewportPoint(mx, r.partnerYabs);
+        // 実ノンブル画像（裏面）を反転・半透明で重ねる
+        if(ghostImg && ghostImg.page===r.partnerPage && Math.abs(ghostImg.scale-curScale)<1e-3){
+          g.save();
+          g.globalAlpha=0.5; g.translate(cp[0],cp[1]); g.scale(-1,1);
+          g.drawImage(ghostImg.canvas, -ghostImg.nx, -ghostImg.ny);
+          g.restore();
+        }
+        ghost(g, cp, vx, vy, cssVar("--pair"), `裏面p.${r.partnerPage}を反転`);
+      }
+    }
+
+    if(showMark){
+      g.strokeStyle=col; g.lineWidth=1.8;
+      g.beginPath(); g.arc(vx,vy,9,0,7); g.stroke();
+      g.beginPath(); g.moveTo(vx-14,vy); g.lineTo(vx+14,vy); g.moveTo(vx,vy-14); g.lineTo(vx,vy+14); g.stroke();
+    }
+    if(showNum){
+      g.font="11px "+cssVar("--ui");
+      const ft=r.size!=null?`  ·  ${r.size}pt`:"";
+      const vd=vDisp(r), hl=(analysis&&analysis.mlabel)||"小口";
+      const tx=`${hl} ${r.pos.outer_mm}mm / ${vd.l} ${vd.v}mm${ft}`, tw=g.measureText(tx).width;
+      let lx=(r.pos.side==="right")?vx-tw-18:vx+16; lx=Math.max(4,Math.min(lx, ov.width-tw-8));
+      let ly=Math.max(16, vy-16);
+      g.fillStyle="rgba(255,255,255,.94)"; g.fillRect(lx-4,ly-12,tw+8,17);
+      g.strokeStyle=col; g.lineWidth=1; g.strokeRect(lx-4,ly-12,tw+8,17);
+      g.fillStyle=col; g.fillText(tx,lx,ly);
+    }
+  }
+}
+// 相方（裏/表）ページのノンブル周辺を現在の倍率で描画・切り出してキャッシュ
+async function buildPartnerGhost(r){
+  ghostImg=null;
+  if(!r || !r.detected || !analysis || !analysis.pairNGpages
+     || !analysis.pairNGpages.has(r.page) || r.partnerPage==null || r.partnerXabs==null) return;
+  if(!($("ghostChk")&&$("ghostChk").checked)) return;
+  const pno=r.partnerPage, sc=curScale;
+  try{
+    const page=await pdf.getPage(pno);
+    const vpt=page.getViewport({scale:sc});
+    const off=document.createElement("canvas");
+    off.width=Math.ceil(vpt.width); off.height=Math.ceil(vpt.height);
+    await page.render({canvasContext:off.getContext("2d"), viewport:vpt}).promise;
+    const [px,py]=vpt.convertToViewportPoint(r.partnerXabs, r.partnerYabs);
+    const halfW=70*sc, halfH=34*sc;
+    const cw=Math.min(off.width, Math.round(halfW*2)), ch=Math.min(off.height, Math.round(halfH*2));
+    const sx=Math.max(0,Math.min(off.width-cw, Math.round(px-halfW)));
+    const sy=Math.max(0,Math.min(off.height-ch, Math.round(py-halfH)));
+    const crop=document.createElement("canvas"); crop.width=cw; crop.height=ch;
+    crop.getContext("2d").drawImage(off, sx,sy,cw,ch, 0,0,cw,ch);
+    if(records[cur]===r && Math.abs(curScale-sc)<1e-3){
+      ghostImg={page:pno, scale:sc, canvas:crop, nx:px-sx, ny:py-sy};
+      renderOverlay();
+    }
+  }catch(e){ /* 失敗時は破線マーカーのみ */ }
+}
+// ゴースト印（破線円＋現在位置への矢印＋mmラベル）
+function ghost(g, gp, vx, vy, col, label){
+  const gx=gp[0], gy=gp[1];
+  const showMark=$("markChk")?$("markChk").checked:true;
+  g.save();
+  g.strokeStyle=col; g.lineWidth=1.4; g.setLineDash([4,3]);
+  if(showMark){
+    g.beginPath(); g.arc(gx,gy,9,0,7); g.stroke();
+    g.beginPath(); g.moveTo(gx-12,gy); g.lineTo(gx+12,gy); g.moveTo(gx,gy-12); g.lineTo(gx,gy+12); g.stroke();
+  }
+  // 現在位置への連結線
+  g.setLineDash([2,2]); g.lineWidth=1;
+  g.beginPath(); g.moveTo(gx,gy); g.lineTo(vx,vy); g.stroke();
+  g.setLineDash([]);
+  // ずれ量(px→mm)
+  const dpx=Math.hypot(vx-gx,vy-gy);
+  if(dpx>2 && $("numChk") && $("numChk").checked){
+    const dmm=round2(dpx/curScale*PT_MM);
+    g.font="10px "+cssVar("--ui"); const t=`${label}とのずれ ${dmm}mm`;
+    const mx2=(gx+vx)/2, my2=(gy+vy)/2-6, tw=g.measureText(t).width;
+    g.fillStyle="rgba(255,255,255,.92)"; g.fillRect(mx2-tw/2-3,my2-11,tw+6,15);
+    g.fillStyle=col; g.fillText(t, mx2-tw/2, my2);
+  }
+  g.restore();
+}
+
+// ---- overview ----
+function renderOverview(){
+  const cv=$("ovcanvas"), dpr=window.devicePixelRatio||1, cssW=300, cssH=396;
+  cv.style.width=cssW+"px"; cv.style.height=cssH+"px"; cv.width=cssW*dpr; cv.height=cssH*dpr;
+  const g=cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,cssW,cssH);
+  const det=records.filter(r=>r.detected);
+  const pw=det.length?median(det.map(r=>r.pos.page_w_mm)):210;
+  const ph=det.length?median(det.map(r=>r.pos.page_h_mm)):297;
+  const pad=22, s=Math.min((cssW-2*pad)/pw,(cssH-2*pad)/ph);
+  const dw=pw*s, dh=ph*s, ox=(cssW-dw)/2, oy=(cssH-dh)/2;
+  const reticle=cssVar("--reticle");
+  g.strokeStyle=reticle; g.lineWidth=1; g.strokeRect(ox,oy,dw,dh);
+  [[ox,oy],[ox+dw,oy],[ox,oy+dh],[ox+dw,oy+dh]].forEach(([x,y])=>{
+    g.beginPath(); g.moveTo(x-5,y); g.lineTo(x+5,y); g.moveTo(x,y-5); g.lineTo(x,y+5); g.stroke(); });
+  g.fillStyle=reticle; g.font="9px "+cssVar("--mono");
+  g.fillText("ノド",ox+2,oy-7); g.fillText("小口→",ox+dw-30,oy-7);
+  const toXY=(outer,vert)=>[ox+dw-outer*s, oy+dh-vert*s];
+  const tol=tolMm();
+  // 各デザイングループの許容差リング（メジャー=実線, マイナー=破線）
+  (analysis&&analysis.clusters||[]).forEach(c=>{
+    const [X,Y]=toXY(c.cx, c.cy);
+    g.setLineDash(c.major?[]:[3,3]); g.strokeStyle=reticle; g.lineWidth=1;
+    g.beginPath(); g.arc(X,Y,Math.max(4,tol*s),0,7); g.stroke();
+  });
+  g.setLineDash([]);
+  det.forEach(r=>{
+    const [X,Y]=toXY(r.pos.outer_mm, r.pos.vertical_mm);
+    const col=r.status==="NG"?cssVar("--red"):(analysis.pairNGpages&&analysis.pairNGpages.has(r.page)?cssVar("--pair"):(r.status==="WARN"?cssVar("--warn"):cssVar("--ok")));
+    g.fillStyle=col;
+    if(r.page%2===1){ g.beginPath(); g.arc(X,Y,4,0,7); g.fill(); }
+    else { g.beginPath(); g.moveTo(X,Y-5); g.lineTo(X-4.5,Y+3.5); g.lineTo(X+4.5,Y+3.5); g.closePath(); g.fill(); }
+    g.fillStyle=cssVar("--ink-faint"); g.font="8px "+cssVar("--mono"); g.fillText(r.page, X+5, Y-4);
+  });
+}
+
+// ---- click to correct ----
+function onOverlayClick(e){
+  if(!curViewport || panMoved) return;
+  const ov=$("overlay"), rect=ov.getBoundingClientRect();
+  const px=(e.clientX-rect.left)*(ov.width/rect.width), py=(e.clientY-rect.top)*(ov.height/rect.height);
+  const [X,Y]=curViewport.convertToPdfPoint(px,py);
+  const meta=pageMeta[cur]; let best=null, bd=1e9;
+  meta.cands.forEach(c=>{ const d=Math.hypot(c.xabs-X, c.yabs-Y); if(d<bd){ bd=d; best=c; } });
+  overrides[cur]=(best&&bd<=18)?{type:"item",cand:best}:{type:"point",x:X,y:Y};
+  $("exclBtn").setAttribute("aria-pressed","false"); recompute(); showPage(false);
+}
+
+// ---- exports ----
+function summaryObj(){
+  return {
+    total:records.length,
+    detected:records.filter(r=>r.detected).length,
+    undetected:records.filter(r=>!r.detected&&!r.excluded).length,
+    excluded:records.filter(r=>r.excluded).length,
+    posNG:records.filter(r=>r.status==="NG").length,
+    warn:records.filter(r=>r.status==="WARN").length,
+    pairNG:analysis.pairs.filter(p=>p.status==="NG").length,
+    centered:analysis.centered,
+    groups:analysis.clusters.length,
+    zone:{top:"天",bottom:"地",null:"—"}[analysis.mainZone]
+  };
+}
+function buildJSON(){
+  return {file:fileName, generated:new Date().toISOString(),
+    binding:binding(), tol_mm:tolMm(), band_mm:parseFloat($("band").value)||45, bleed_mm:bleedMm(),
+    centered:analysis.centered, main_zone:analysis.mainZone,
+    design_groups:analysis.clusters.map(c=>({id:c.id, zone:c.zone, x_mm:c.cx, vertical_mm:c.cy, count:c.count, major:c.major})),
+    summary:summaryObj(),
+    pages:records.map(r=>({page:r.page, detected:r.detected, excluded:r.excluded, manual:r.manual,
+      folio:r.folio, folio_raw:r.folioRaw, system:r.system, pos:r.pos||null, font:r.font, size:r.size,
+      flags:r.flags||[], notes:r.notes||[], status:r.status})),
+    pairs:analysis.pairs};
+}
+function dl(name, blob){ const u=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000); }
+function exportCsv(){
+  const rows=[["page","nombre","system","outer_mm","vertical_mm","side","zone","font","size_pt","manual","status","flags"]];
+  records.forEach(r=>rows.push([r.page, r.folioRaw??(r.folio??""), r.system||"", r.pos?r.pos.outer_mm:"", r.pos?r.pos.vertical_mm:"",
+    r.pos?r.pos.side:"", r.pos?r.pos.zone:"", r.font||"", r.size??"", r.manual?"1":"", r.status,
+    (r.flags||[]).concat(r.notes||[]).join(" / ")]));
+  const csv="\uFEFF"+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\r\n");
+  dl((fileName||"nombre")+"_report.csv", new Blob([csv],{type:"text/csv"}));
+}
+function exportJson(){ dl((fileName||"nombre")+"_report.json", new Blob([JSON.stringify(buildJSON(),null,2)],{type:"application/json"})); }
+function exportPng(){ $("ovcanvas").toBlob(b=>dl((fileName||"nombre")+"_overview.png", b)); }
+
+// ---- error report (self-contained HTML, 印刷でPDF化可) ----
+function buildReportHTML(){
+  const S=summaryObj(), m=analysis.mlabel;
+  const bj={left:"左綴じ（横書き）",right:"右綴じ（縦書き）",none:"単票"}[binding()];
+  const jpz={top:"天",bottom:"地"};
+  const ov=$("ovcanvas").toDataURL("image/png");
+  const ngRows=[];
+  records.forEach(r=>{ const lines=(r.flags||[]).concat(r.notes||[]);
+    if(lines.length) ngRows.push(
+    `<div class="f ${(r.status==="WARN"||!r.detected)?"warn":""}"><b>p.${r.page}</b><ul>${lines.map(l=>`<li>${esc(l)}</li>`).join("")}</ul></div>`); });
+  analysis.pairs.filter(p=>p.status==="NG").forEach(p=>ngRows.push(
+    `<div class="f"><b>p.${p.front}（表）× p.${p.back}（裏）</b><ul>${p.flags.map(l=>`<li>${esc(l)}</li>`).join("")}</ul></div>`));
+  const grpRows=analysis.clusters.map(c=>`<tr class="${c.major?"":"warn"}"><td>G${c.id}</td><td>${jpz[c.zone]}</td>
+    <td>${c.cx}</td><td>${c.vEdge}</td><td>${c.count}</td><td>${c.major?"設計":"要確認"}</td></tr>`).join("");
+  const allRows=records.map(r=>`<tr class="${r.status==="NG"?"ng":(r.status==="WARN"?"warnrow":"")}">
+    <td>${r.page}</td><td>${r.folioRaw??(r.folio??"—")}</td>
+    <td>${r.pos?r.pos.outer_mm:"—"}</td><td>${r.pos?(r.pos.zone==="top"?round2(r.pos.page_h_mm-r.pos.vertical_mm):r.pos.vertical_mm):"—"}</td>
+    <td>${r.pos?(r.pos.side==="right"?"右":"左"):"—"}</td>
+    <td>${r.pos?jpz[r.pos.zone]:"—"}</td>
+    <td>${r.size!=null?r.size:"—"}</td>
+    <td>${r.manual?"手動":""}</td><td class="st-${r.status==="—"?"na":r.status}">${r.status}</td></tr>`).join("");
+  const pairRows=analysis.pairs.map(p=>`<tr class="${p.status==="NG"?"ng":""}">
+    <td>p.${p.front}${p.back?(" / p."+p.back):""}</td>
+    <td>${("of"in p)?p.of:"—"}</td><td>${("of"in p)?p.ob:"—"}</td><td>${("of"in p)?p.odiff:"—"}</td>
+    <td>${("vf"in p)?p.vf:"—"}</td><td>${("vf"in p)?p.vb:"—"}</td><td>${("vf"in p)?p.vdiff:"—"}</td>
+    <td class="st-${p.status==="—"?"na":p.status}">${p.status}</td></tr>`).join("");
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+<title>ノンブル検版レポート — ${esc(fileName)}</title>
+<style>
+  body{font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;color:#222;
+    max-width:900px;margin:24px auto;padding:0 20px;line-height:1.6;font-size:13px}
+  h1{font-size:19px;border-bottom:3px solid #b9791a;padding-bottom:6px}
+  h2{font-size:14px;margin-top:26px;border-left:4px solid #b9791a;padding-left:8px}
+  .meta{color:#555;font-size:12px}
+  .sum{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+  .sum div{border:1px solid #ddd;border-radius:6px;padding:8px 12px;min-width:84px}
+  .sum .n{font-size:22px;font-weight:700;font-family:ui-monospace,monospace}
+  .sum .ng .n{color:#c8362a}.sum .warn .n{color:#b07d14}
+  .f{border-left:3px solid #c8362a;background:#fbf1ef;padding:6px 10px;margin:6px 0;border-radius:0 4px 4px 0}
+  .f.warn{border-color:#b07d14;background:#fbf6ea}
+  .f ul{margin:4px 0 0;padding-left:18px}
+  table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+  th,td{border:1px solid #e2ddd2;padding:4px 6px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{background:#f4f0e7}
+  tr.ng td{background:#fdeeec} tr.warnrow td,tr.warn td{background:#fbf6ea}
+  .st-NG{color:#c8362a;font-weight:700}.st-OK{color:#2e7d46;font-weight:700}
+  .st-WARN{color:#b07d14;font-weight:700}.st-na{color:#999}
+  img{max-width:320px;border:1px solid #ddd;border-radius:6px}
+  @media print{body{margin:0}}
+</style></head><body>
+<h1>ノンブル検版レポート</h1>
+<p class="meta">対象：${esc(fileName||"(無題)")}.pdf ／ 綴じ：${bj} ／ 許容差：±${tolMm()}mm ／ 塗り足し補正：${bleedMm()}mm
+ ／ レイアウト：${analysis.centered?"中央ノンブル":"小口寄せノンブル"} ／ 主配置：${S.zone} ／ デザイングループ：${S.groups} ／ 生成：${esc(new Date().toLocaleString("ja-JP"))}</p>
+<div class="sum">
+  <div class="${S.posNG?"ng":""}"><div class="n">${S.posNG}</div>位置NG</div>
+  <div class="${S.warn?"warn":""}"><div class="n">${S.warn}</div>要確認</div>
+  <div class="${S.pairNG?"ng":""}"><div class="n">${S.pairNG}</div>表裏NG</div>
+  <div><div class="n">${S.detected}</div>検出</div>
+  <div><div class="n">${S.undetected}</div>未検出</div>
+  <div><div class="n">${S.excluded}</div>対象外</div>
+  <div><div class="n">${S.total}</div>総ページ</div>
+</div>
+<h2>位置オーバービュー</h2>
+<img src="${ov}" alt="overview">
+${analysis.clusters.length>1?`<h2>デザイングループ</h2>
+<table><tr><th>G</th><th>配置</th><th>${m}(mm)</th><th>天地(mm)</th><th>ページ数</th><th>区分</th></tr>${grpRows}</table>`:""}
+<h2>指摘（エラー結果）</h2>
+${ngRows.length?ngRows.join(""):'<p>指摘はありません。</p>'}
+<h2>表裏チェック</h2>
+<table><tr><th>表/裏</th><th>表${m}</th><th>裏${m}</th><th>差</th><th>表地</th><th>裏地</th><th>差</th><th>判定</th></tr>${pairRows}</table>
+<h2>ページ別 一覧</h2>
+<table><tr><th>ページ</th><th>ノンブル</th><th>${m}(mm)</th><th>天地(mm)</th><th>側</th><th>配置</th><th>サイズpt</th><th></th><th>判定</th></tr>${allRows}</table>
+</body></html>`;
+}
+function exportReport(){ dl((fileName||"nombre")+"_report.html", new Blob([buildReportHTML()],{type:"text/html"})); }
+
+// ---- load / reset ----
+async function loadFile(file){
+  fileName=file.name.replace(/\.pdf$/i,"");
+  $("progress").style.display="flex"; let imgPages=0;
+  try{
+    const buf=await file.arrayBuffer();
+    pdf=await pdfjsLib.getDocument({data:buf, cMapUrl:CMAP_URL, cMapPacked:true}).promise;
+    overrides=new Array(pdf.numPages).fill(null); cur=0; zoom=1; ocrByPage=new Array(pdf.numPages).fill(null);
+    await extract(); recompute(); await showPage();
+    $("navgrp").style.display="flex";
+    imgPages=pageMeta.filter(m=>m.isImage).length;
+    ["expReport","expCsv","expJson","expPng","expPrint","resetBtn"].forEach(id=>$(id).disabled=false);
+  }catch(err){ alert("PDFを読み込めませんでした: "+err.message); console.error(err); }
+  finally{
+    $("progress").style.display="none";
+    if(imgPages){ $("ocrbar").style.display="flex"; $("ocrBtn").textContent="OCRで検出";
+      $("ocrmsg").textContent=`スキャン（文字が画像）のページが${imgPages}件あります。右の「OCRで検出」を押すとノンブルを読み取ります。`; }
+    else $("ocrbar").style.display="none";
+  }
+}
+function reset(){
+  pdf=null; pageMeta=[]; overrides=[]; records=[]; analysis=null; cur=0; curViewport=null; fileName=""; zoom=1; ghostImg=null;
+  ocrByPage=[]; ocrCancel=true;
+  if(ocrWorker){ try{ ocrWorker.terminate(); }catch(e){} ocrWorker=null; }
+  $("ocrBtn").textContent="OCRで検出"; $("ocrbar").style.display="none"; $("ocrmsg").textContent="";
+  $("fileInput").value="";
+  $("stage").style.display="none"; $("vbar").style.display="none"; $("drop").style.display="flex"; $("exclBtn").style.display="none";
+  $("viewport").classList.remove("zoomed","panning"); panX=0; panY=0;
+  $("navgrp").style.display="none";
+  $("pagelist").innerHTML=""; selection=new Set(); anchor=null;
+  $("tilePos").className="tile"; $("tilePos").querySelector(".n").textContent="—";
+  $("tileWarn").className="tile"; $("tileWarn").querySelector(".n").textContent="—";
+  $("tilePair").className="tile"; $("tilePair").querySelector(".n").textContent="—";
+  $("clusters").innerHTML="";
+  $("pairtable").querySelector("tbody").innerHTML=""; $("findings").innerHTML="";
+  const cv=$("ovcanvas"); cv.getContext("2d").clearRect(0,0,cv.width,cv.height);
+  ["expReport","expCsv","expJson","expPng","expPrint","resetBtn"].forEach(id=>$(id).disabled=true);
+}
+
+// ---- theme ----
+function applyTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  $("themeTxt").textContent=(t==="dark")?"ライト":"ダーク";
+  $("themeIco").textContent=(t==="dark")?"☀":"◐";
+  if(records.length){ renderOverlay(); renderOverview(); }
+}
+
+// ---- summary tiles → jump ----
+let jumpIdx={pos:-1, warn:-1, pair:-1};
+function jumpList(kind){
+  if(kind==="pos") return records.filter(r=>r.status==="NG").map(r=>r.page-1);
+  if(kind==="warn") return records.filter(r=>r.status==="WARN").map(r=>r.page-1);
+  if(kind==="pair") return analysis.pairs.filter(p=>p.status==="NG").map(p=>p.front-1);
+  return [];
+}
+function cycleJump(kind){
+  if(!pdf||!analysis) return;
+  const list=jumpList(kind); if(!list.length) return;
+  jumpIdx[kind]=(jumpIdx[kind]+1)%list.length;
+  const i=list[jumpIdx[kind]];
+  cur=i; selection=new Set([i]); anchor=i; showPage();
+}
+
+// ---- wire up ----
+$("loadBtn").onclick=()=>$("fileInput").click();
+$("pickBtn").onclick=e=>{ e.stopPropagation(); $("fileInput").click(); };
+$("drop").onclick=()=>$("fileInput").click();
+$("fileInput").onchange=e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); };
+$("resetBtn").onclick=reset;
+$("ocrBtn").onclick=()=>{ if(ocrRunning){ ocrCancel=true; } else { ocrPass(); } };
+$("themeBtn").onclick=()=>applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");
+$("prev").onclick=()=>{ if(cur>0){cur--; showPage();} };
+$("next").onclick=()=>{ if(pdf&&cur<pdf.numPages-1){cur++; showPage();} };
+$("first").onclick=()=>{ if(pdf){cur=0; showPage();} };
+$("last").onclick=()=>{ if(pdf){cur=pdf.numPages-1; showPage();} };
+$("pageInput").onchange=()=>{ if(!pdf) return; let v=(parseInt($("pageInput").value,10)||1)-1;
+  v=Math.max(0,Math.min(pdf.numPages-1,v)); cur=v; showPage(); };
+$("tilePos").onclick=()=>cycleJump("pos");
+$("tileWarn").onclick=()=>cycleJump("warn");
+$("tilePair").onclick=()=>cycleJump("pair");
+function zoomBtn(factor){ const r=$("viewport").getBoundingClientRect(); zoomAt(factor, r.left+r.width/2, r.top+r.height/2); }
+$("zoomIn").onclick=()=>zoomBtn(1.25);
+$("zoomOut").onclick=()=>zoomBtn(1/1.25);
+$("zoomReset").onclick=()=>{ zoom=1; if(pdf) showPage(true); };
+$("ghostChk").onchange=()=>{ if(records[cur]) buildPartnerGhost(records[cur]); renderOverlay(); };
+$("numChk").onchange=()=>renderOverlay();
+$("markChk").onchange=()=>renderOverlay();
+
+// ホイールでズーム（カーソル位置を基準に・誤差非累積）
+let zooming=false, zoomQueued=false;
+async function zoomAt(factor, clientX, clientY){
+  if(!pdf) return;
+  const vr=$("viewport").getBoundingClientRect();
+  const ox=clientX-vr.left, oy=clientY-vr.top;            // ビューア内のカーソル位置
+  const nz=Math.max(0.3, Math.min(6, Math.round(zoom*factor*1000)/1000));
+  if(nz===zoom && !zooming) return;
+  // 現在の確定値(pan,zoom)からカーソル直下の点を求め、新zoomでも同じ点が同じ画面位置に来るようpanを確定
+  const u=(ox-panX)/zoom, v=(oy-panY)/zoom;               // 表示倍率1相当のアンカー（DOM非依存）
+  zoom=nz; panX=ox-u*nz; panY=oy-v*nz;
+  clampPan(); applyView();                                 // まずCSS拡大で即時追従（軽い）
+  if(zooming){ zoomQueued=true; return; }
+  zooming=true;
+  do{ zoomQueued=false; await showPage(false); }          // 高精細に再描画（panは確定済み）
+  while(zoomQueued);
+  zooming=false;
+  buildPartnerGhost(records[cur]);
+}
+$("viewport").addEventListener("wheel", e=>{
+  if(!pdf) return;
+  e.preventDefault();
+  zoomAt(e.deltaY<0?1.12:1/1.12, e.clientX, e.clientY);
+}, {passive:false});
+
+// ドラッグでパン（移動したらクリック＝ノンブル指定は抑制）
+let panActive=false, panMoved=false, panSX=0, panSY=0, panOX=0, panOY=0;
+$("viewport").addEventListener("pointerdown", e=>{
+  if(!pdf || e.button!==0) return;
+  panActive=true; panMoved=false; panSX=e.clientX; panSY=e.clientY; panOX=panX; panOY=panY;
+});
+window.addEventListener("pointermove", e=>{
+  if(!panActive) return;
+  const dx=e.clientX-panSX, dy=e.clientY-panSY;
+  if(Math.abs(dx)>4||Math.abs(dy)>4){ panMoved=true; $("viewport").classList.add("panning"); }
+  if(panMoved){ panX=panOX+dx; panY=panOY+dy; clampPan(); applyView(); }
+});
+window.addEventListener("pointerup", ()=>{ panActive=false; $("viewport").classList.remove("panning"); });
+$("overlay").addEventListener("click", onOverlayClick);
+$("exclBtn").onclick=()=>{ const on=$("exclBtn").getAttribute("aria-pressed")==="true";
+  overrides[cur]=on?null:{type:"none"}; recompute(); showPage(false); };
+["binding","tol","band","bleed"].forEach(id=>$(id).onchange=()=>{ if(pdf){ recompute(); showPage(); } });
+$("expReport").onclick=exportReport; $("expCsv").onclick=exportCsv; $("expJson").onclick=exportJson;
+$("expPng").onclick=exportPng; $("expPrint").onclick=()=>window.print();
+document.addEventListener("keydown",e=>{ if(!pdf) return;
+  const tag=(e.target&&e.target.tagName)||""; if(tag==="INPUT"||tag==="SELECT") return;
+  if(e.key==="ArrowLeft") $("prev").click(); if(e.key==="ArrowRight") $("next").click(); });
+
+// ---- drag & drop ----
+const drop=$("drop");
+["dragenter","dragover"].forEach(ev=>window.addEventListener(ev,e=>{ e.preventDefault(); if(!pdf) drop.classList.add("drag"); }));
+["dragleave","drop"].forEach(ev=>window.addEventListener(ev,e=>{ e.preventDefault();
+  if(e.type==="drop" || e.relatedTarget===null) drop.classList.remove("drag"); }));
+window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.type==="application/pdf") loadFile(f); });
+</script>
+</body>
+</html>

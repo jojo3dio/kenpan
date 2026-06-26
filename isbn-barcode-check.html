@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ISBN検版 — バーコード照合チェッカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<style>
+/* ---------- light (default / 紙色) ---------- */
+:root{
+  --bg:#f7f4ee; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
+  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
+  --amber:#b9791a; --amber-bg:#f6ead2;
+  --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#fcfaf5; --shadow:0 1px 4px rgba(60,45,20,.10);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+/* ---------- dark (下版チェッカー系) ---------- */
+[data-theme="dark"]{
+  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#e8a33d; --amber-bg:#33270f;
+  --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+     font-size:14px;transition:background .2s,color .2s}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+.mk{width:26px;height:26px;border-radius:5px;display:block;
+  background:
+    repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 4px,var(--ink) 4px 5px,transparent 5px 9px,var(--ink) 9px 11px,transparent 11px 13px);
+  background-color:var(--amber-bg);border:1px solid var(--line)}
+.brand b{font-weight:700;font-size:16px;letter-spacing:.02em}
+.brand span{color:var(--ink-faint);font-size:12px}
+.sp{flex:1}
+.tools{display:flex;align-items:center;gap:8px}
+button,.btn{font-family:var(--ui);font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:7px;padding:7px 12px;transition:.15s}
+button:hover,.btn:hover{border-color:var(--amber);background:var(--amber-bg)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.icobtn{padding:7px 10px}
+.opt{display:flex;align-items:center;gap:6px;color:var(--ink-dim);font-size:12px}
+
+/* ---------- body ---------- */
+.main{flex:1;display:flex;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0}
+.left{flex:0 0 224px;border-right:1px solid var(--line);background:var(--panel)}
+.center{flex:1;background:var(--stage);position:relative;display:flex;flex-direction:column;overflow:hidden}
+.canvaswrap{flex:1;position:relative;overflow:auto;cursor:grab}
+.canvaswrap.grabbing{cursor:grabbing}
+/* ---------- プレビュー上部の固定ツールバー ---------- */
+.previewbar{flex:0 0 auto;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+  box-shadow:0 1px 0 rgba(0,0,0,.04)}
+.pb-group{display:flex;align-items:center;gap:8px;min-width:0}
+.pb-label{font-size:11px;color:var(--ink-faint);white-space:nowrap;letter-spacing:.04em}
+.pb-input{font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel2);color:var(--ink);font-family:var(--mono);min-width:0}
+.pb-input.isbn{width:170px}.pb-input.c{width:78px}.pb-input.p{width:72px}
+.pb-input:focus{outline:none;border-color:var(--amber);background:var(--panel)}
+.pb-btn{font-size:12px;padding:6px 15px;border:1px solid var(--amber);background:var(--amber);
+  color:#1a1205;font-weight:700;border-radius:7px;cursor:pointer;white-space:nowrap;transition:.15s}
+.pb-btn:hover{filter:brightness(1.05)}.pb-btn:disabled{opacity:.6;cursor:default}
+.pb-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 0}
+.pb-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pb-links a{font-size:11px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;
+  color:var(--ink-dim);text-decoration:none;background:var(--panel2);
+  display:inline-flex;gap:5px;align-items:center;white-space:nowrap;transition:.15s}
+.pb-links a:hover{border-color:var(--amber);color:var(--ink);background:var(--amber-bg)}
+.pb-spacer{flex:1 1 auto}
+.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);overflow:auto}
+.colhd{padding:9px 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--panel);z-index:2;letter-spacing:.04em}
+
+/* ---------- drop / empty ---------- */
+.drop{margin:auto;max-width:520px;text-align:center;padding:40px}
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);transition:.18s;cursor:pointer}
+.dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
+.dropzone h2{margin:.4em 0 .2em;font-size:18px}
+.dropzone p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dropmk{width:64px;height:46px;margin:0 auto 14px;border-radius:8px;
+  background:
+    repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px,var(--ink) 6px 8px,transparent 8px 13px,var(--ink) 13px 16px,transparent 16px 19px,var(--ink) 19px 22px,transparent 22px 27px);
+  background-color:var(--amber-bg);border:1px solid var(--line);opacity:.85}
+
+/* ---------- page list ---------- */
+.plist{overflow:auto;flex:1}
+.prow{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid var(--line);
+  cursor:pointer;font-size:13px}
+.prow:hover{background:var(--panel2)}
+.prow.sel{background:var(--amber-bg)}
+.prow.empty{opacity:.5}
+.pno{font-family:var(--mono);color:var(--ink-dim);min-width:34px}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--ink-faint)}
+.dot.NG{background:var(--err)} .dot.WARN{background:var(--warn)} .dot.OK{background:var(--ok)}
+.prow .lbl{flex:1;color:var(--ink-dim)}
+
+/* ---------- viewer ---------- */
+.viewer{position:relative;display:inline-block;margin:18px}
+#pageCanvas{display:block;box-shadow:var(--shadow);background:#fff}
+#overlay{position:absolute;left:0;top:0;pointer-events:none}
+.zoomctl{position:absolute;right:14px;bottom:12px;z-index:5;display:flex;align-items:center;gap:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:4px 6px;
+  box-shadow:var(--shadow)}
+.zoomctl button{font-size:14px;line-height:1;min-width:30px;height:28px;padding:0 6px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.zoomctl button#zFit{font-size:11px;min-width:auto;padding:0 9px}
+.zoomctl button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:42px;text-align:center}
+/* 単ページPDFのときは左のページ一覧を隠す */
+.main.single .left{display:none}
+/* ---------- 外部確認リンク ---------- */
+.links{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}
+.links a{font-size:11px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;
+  color:var(--ink-dim);text-decoration:none;background:var(--panel2);
+  display:inline-flex;gap:5px;align-items:center;transition:.15s}
+.links a:hover{border-color:var(--amber);color:var(--ink);background:var(--amber-bg)}
+.links-hd{font-size:11px;color:var(--ink-dim);margin:10px 0 4px}
+/* ---------- 上段ツールバー（手入力＋ウェブ確認）---------- */
+.toolbar{position:sticky;top:0;z-index:4;padding:11px;border-bottom:1px solid var(--line);
+  background:var(--panel2);border-radius:11px 11px 0 0}
+.manual-hd{font-size:11px;color:var(--ink-dim);line-height:1.5;margin-bottom:8px}
+.mrow-inline{display:flex;gap:6px;align-items:center}
+.mrow-inline input{flex:1;min-width:0;font-size:12px;padding:6px 7px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);font-family:var(--mono)}
+.mrow-inline input.mi-isbn{flex:1.6}
+.mrow-inline input:focus{outline:none;border-color:var(--amber)}
+.mbtn{flex:0 0 auto;font-size:12px;padding:6px 14px;border:1px solid var(--amber);
+  background:var(--amber-bg);color:var(--ink);border-radius:7px;cursor:pointer;transition:.15s}
+.mbtn:hover{background:var(--amber)}
+.mbtn:disabled{opacity:.6;cursor:default}
+
+/* ---------- progress ---------- */
+.banner{display:none;align-items:center;gap:12px;padding:8px 16px;background:var(--amber-bg);
+  border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-dim)}
+.banner.show{display:flex}
+.bar{flex:1;height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--amber);transition:width .15s}
+
+/* ---------- summary tiles ---------- */
+.tiles{display:flex;gap:8px;padding:12px 13px;border-bottom:1px solid var(--line)}
+.tile{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px;text-align:center;background:var(--panel2)}
+.tile b{display:block;font-family:var(--mono);font-size:20px;line-height:1.1}
+.tile span{font-size:11px;color:var(--ink-dim)}
+.tile.NG b{color:var(--err)} .tile.WARN b{color:var(--warn)} .tile.OK b{color:var(--ok)}
+
+/* ---------- result cards ---------- */
+.cards{padding:12px 13px;display:flex;flex-direction:column;gap:13px}
+.card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.card>.h{display:flex;align-items:center;gap:8px;padding:9px 11px;font-weight:700;font-size:13px;
+  border-bottom:1px solid var(--line)}
+.card.NG>.h{background:var(--err-bg)} .card.WARN>.h{background:var(--warn-bg)} .card.OK>.h{background:var(--ok-bg)}
+.pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:11px;border:1px solid var(--line)}
+.pill.NG{color:var(--err);border-color:var(--err)} .pill.WARN{color:var(--warn);border-color:var(--warn)} .pill.OK{color:var(--ok);border-color:var(--ok)}
+.kv{padding:8px 11px;border-bottom:1px solid var(--line);font-size:12px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--ink-faint);font-size:11px;margin-bottom:2px}
+.kv .v{font-family:var(--mono);word-break:break-all}
+.chk{display:flex;align-items:flex-start;gap:8px;padding:7px 11px;border-bottom:1px solid var(--line);font-size:12px}
+.chk:last-child{border-bottom:0}
+.chk .mark{flex:0 0 auto;font-family:var(--mono);font-weight:600}
+.chk.NG .mark{color:var(--err)} .chk.WARN .mark{color:var(--warn)} .chk.OK .mark{color:var(--ok)}
+.chk .body .t{font-weight:500}
+.chk .body .d{color:var(--ink-dim);font-family:var(--mono);font-size:11px;margin-top:1px;word-break:break-all}
+/* NG(不一致)を目立たせる */
+.chk.NG{background:var(--err-bg,rgba(220,60,60,.10));border-left:3px solid var(--err);padding-left:9px}
+.chk.NG .mark{font-size:16px;line-height:1.2}
+.chk.NG .body .t{color:var(--err);font-weight:700;font-size:13px}
+.chk.NG .body .d{color:var(--err);font-weight:600;font-size:12px}
+.note{padding:11px 13px;color:var(--ink-dim);font-size:12px;line-height:1.6}
+.empty-msg{padding:24px 16px;color:var(--ink-faint);text-align:center;font-size:13px}
+.foot{padding:9px 13px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;line-height:1.6}
+a.lnk{color:var(--amber)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mk" aria-hidden="true"></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-06-26c</small></span>
+    </div>
+    <div class="sp"></div>
+    <div class="tools">
+      <label class="opt"><input type="checkbox" id="optRot"> 縦向きも探索(90°)</label>
+      <label class="opt"><input type="checkbox" id="optOcr" checked> 文字はOCRで補完</label>
+      <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
+      <button id="btnDbg">OCR確認</button>
+      <button id="btnReset" disabled>リセット</button>
+      <button id="btnOpen" class="btn">PDFを選択</button>
+      <input type="file" id="file" accept="application/pdf" class="hidden">
+    </div>
+  </header>
+
+  <div class="banner" id="banner">
+    <span id="bannerText">解析中…</span>
+    <div class="bar"><i id="barFill"></i></div>
+    <button id="btnCancel" class="icobtn">中止</button>
+  </div>
+
+  <div class="main">
+    <!-- 左: ページ一覧 -->
+    <div class="col left">
+      <div class="colhd">ページ</div>
+      <div class="plist" id="plist">
+        <div class="empty-msg">PDF未読込</div>
+      </div>
+    </div>
+
+    <!-- 中央: プレビュー -->
+    <div class="col center" id="center">
+      <div class="previewbar hidden" id="previewbar"></div>
+      <div class="canvaswrap" id="canvaswrap">
+      <div class="drop" id="drop">
+        <div class="dropzone" id="dropzone">
+          <div class="dropmk" aria-hidden="true"></div>
+          <h2>PDFをドラッグ＆ドロップ</h2>
+          <p>またはクリックして選択（このPDFは外部に送信されません）</p>
+          <p style="margin-top:14px;color:var(--ink-faint)">表紙・カバーPDFを読み込むと、2段バーコードを自動検出し、<br>近傍のISBN・Cコード・価格の印字と照合します。</p>
+        </div>
+      </div>
+      <div class="viewer hidden" id="viewer">
+        <canvas id="pageCanvas"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      </div>
+      <div class="zoomctl hidden" id="zoomctl">
+        <button id="zOut" title="縮小">−</button>
+        <span id="zoomhint">100%</span>
+        <button id="zIn" title="拡大">＋</button>
+        <button id="zFit" title="全体表示">全体</button>
+      </div>
+    </div>
+
+    <!-- 右: 結果 -->
+    <div class="col right">
+      <div class="colhd">照合結果</div>
+      <div id="result"><div class="empty-msg">—</div></div>
+      <div class="foot">
+        判定: <b style="color:var(--err)">NG</b> 値の不一致／壊れたチェックデジット ・
+        <b style="color:var(--warn)">要確認</b> 読取不可・旧フラッグ等 ・
+        <b style="color:var(--ok)">OK</b><br>
+        2段目 = <span style="font-family:var(--mono)">192＋Cコード4桁＋税抜本体価格5桁＋CD</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   ISBN検版 — バーコード照合チェッカー
+   pdf.js: レンダリング & 実テキスト抽出
+   ZXing : EAN-13 検出（帯スキャンで上下2段）
+   Tesseract: アウトライン化された目視文字のOCRフォールバック
+   Pyodide: 検証済みPythonコアで整合照合
+   ============================================================ */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const DETECT_SCALE = 3.2;     // 検出時のレンダリング倍率(72base → ≈230dpi)
+const RENDER_BOOST = 2;       // 表示用の余分なレンダリング解像度(拡大してもシャープに)
+const ZMIN = 0.5, ZMAX = 8;   // ズーム下限・上限
+const $ = s => document.querySelector(s);
+
+const PY_CORE = String.raw`
+# === barcode_core (検証済み) ===
+import re, unicodedata, json
+def ean13_check_digit(d12):
+    ds=[int(c) for c in str(d12)]
+    s=sum(d*(1 if i%2==0 else 3) for i,d in enumerate(ds))
+    return (10-s%10)%10
+def ean13_valid(code):
+    code=re.sub(r"\D","",str(code))
+    return len(code)==13 and ean13_check_digit(code[:12])==int(code[12])
+def isbn10_check_char(d9):
+    ds=[int(c) for c in str(d9)]; s=sum(d*(10-i) for i,d in enumerate(ds))
+    r=(11-s%11)%11; return "X" if r==10 else str(r)
+def isbn10_valid(s):
+    s=re.sub(r"[^0-9Xx]","",s)
+    return len(s)==10 and isbn10_check_char(s[:9]).upper()==s[9].upper()
+def isbn10_to_13(s):
+    s=re.sub(r"[^0-9Xx]","",s)
+    if len(s)!=10: return None
+    core="978"+s[:9]; return core+str(ean13_check_digit(core))
+_C_TARGET={0:"一般",1:"教養",2:"実用",3:"専門",4:"検定教科書等",5:"婦人",6:"学参I(小中)",7:"学参II(高校)",8:"児童",9:"雑誌扱い"}
+_C_FORM={0:"単行本",1:"文庫",2:"新書",3:"全集・双書",4:"ムック等",5:"事・辞典",6:"図鑑",7:"絵本",8:"磁性媒体等",9:"コミック"}
+def decode_ccode(cccc):
+    cccc=re.sub(r"\D","",str(cccc))
+    if len(cccc)!=4: return None
+    return {"target":_C_TARGET.get(int(cccc[0]),"?"),"form":_C_FORM.get(int(cccc[1]),"?"),"content":cccc[2:4]}
+def parse_isbn_barcode(code13):
+    code=re.sub(r"\D","",str(code13)); r={"raw":code,"errors":[],"warns":[]}
+    if len(code)!=13: r["errors"].append("桁数が13ではありません(%d桁)"%len(code)); return r
+    r["prefix"]=code[:3]
+    if code[:3] not in ("978","979"): r["errors"].append("ISBNフラッグが978/979ではありません(%s)"%code[:3])
+    r["country"]="日本(4)" if code[:4]=="9784" else ("言語圏 "+code[3] if code[:3] in("978","979") else "?")
+    r["cd_expected"]=ean13_check_digit(code[:12]); r["cd_ok"]=(r["cd_expected"]==int(code[12]))
+    if not r["cd_ok"]: r["errors"].append("チェックデジット不一致(正:%d/印字:%s)"%(r["cd_expected"],code[12]))
+    r["isbn13"]=code; return r
+def parse_dnc_barcode(code13):
+    code=re.sub(r"\D","",str(code13)); r={"raw":code,"errors":[],"warns":[]}
+    if len(code)!=13: r["errors"].append("桁数が13ではありません(%d桁)"%len(code)); return r
+    r["prefix"]=code[:3]
+    if code[:3]=="191": r["warns"].append("旧フラッグ191(内税表示)。現行は192(税抜本体価格)")
+    elif code[:3]!="192": r["errors"].append("2段目フラッグが192ではありません(%s)"%code[:3])
+    r["ccode"]=code[3:7]; r["price"]=int(code[7:12])
+    r["cd_expected"]=ean13_check_digit(code[:12]); r["cd_ok"]=(r["cd_expected"]==int(code[12]))
+    if not r["cd_ok"]: r["errors"].append("チェックデジット不一致(正:%d/印字:%s)"%(r["cd_expected"],code[12]))
+    r["ccode_decoded"]=decode_ccode(r["ccode"]); return r
+def norm(s): return unicodedata.normalize("NFKC",s or "")
+def extract_isbn_text(text):
+    t=norm(text)
+    m=re.search(r"ISBN[\s:]*([0-9Xx\-‐ー－—–\s]{10,20})",t,re.I); cand=m.group(1) if m else None
+    if not cand:
+        m2=re.search(r"(97[89][0-9Xx\-‐ー－—–\s]{10,18})",t); cand=m2.group(1) if m2 else None
+    if not cand: return None
+    digits=re.sub(r"[^0-9Xx]","",cand).upper()
+    if len(digits)>13 and digits[:3] in ("978","979"): digits=digits[:13]
+    res={"text":cand.strip(),"digits":digits}
+    if len(digits)==13:
+        if not digits.startswith(("978","979")):
+            for pre in ("978","979"):
+                c13=pre+digits[3:]
+                if ean13_valid(c13):
+                    res["note"]="先頭桁をOCR誤読補正(%s→%s)"%(digits[:3],pre); digits=c13; res["digits"]=digits; break
+        res["isbn13"]=digits; res["cd_ok"]=ean13_valid(digits)
+    elif len(digits)==10: res["isbn10"]=digits; res["isbn13"]=isbn10_to_13(digits); res["cd_ok"]=isbn10_valid(digits); res["note"]="ISBN-10表記(13桁へ換算して照合)"
+    else: res["error"]="桁数異常(%d桁)"%len(digits)
+    return res
+def extract_ccode_text(text):
+    m=re.search(r"C\s*([0-9]{4})",norm(text)); return m.group(1) if m else None
+def extract_price_text(text):
+    t=norm(text)
+    for pat in [r"[¥\\]\s*([0-9][0-9,]{1,7})\s*E", r"本体(?:価格)?\s*([0-9][0-9,]{1,7})\s*円?",
+                r"定価[：:]*\s*(?:本体)?\s*([0-9][0-9,]{1,7})\s*円", r"[¥\\]\s*([0-9][0-9,]{1,7})"]:
+        m=re.search(pat,t)
+        if m: return int(m.group(1).replace(",",""))
+    return None
+def cross_check(isbn_bc,dnc_bc,ocr_text):
+    rep={"items":[],"status":"OK"}
+    def add(label,ok,detail,level="NG"): rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level})
+    isbn=parse_isbn_barcode(isbn_bc) if isbn_bc else None
+    dnc=parse_dnc_barcode(dnc_bc) if dnc_bc else None
+    ti=extract_isbn_text(ocr_text); tc=extract_ccode_text(ocr_text); tp=extract_price_text(ocr_text)
+    if isbn:
+        add("ISBNバーコード チェックデジット",isbn["cd_ok"],"OK" if isbn["cd_ok"] else "／".join(isbn["errors"]))
+        if ti and ti.get("isbn13"):
+            same=(isbn["isbn13"]==ti["isbn13"])
+            d=("　"+diff_pos(isbn["isbn13"],ti["isbn13"])) if not same else ""
+            add(lbl("ISBN バーコード↔印字",same),same,"BC:%s ／ 印字:%s%s%s"%(isbn["isbn13"],ti["isbn13"],"("+ti["note"]+")" if ti.get("note") else "",d))
+        else:
+            add("ISBN 印字の読取",False,"印字ISBNを読み取れませんでした",level="WARN")
+    else:
+        add("ISBN(1段目)の欠落",False,"1段目(ISBN)が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN")
+    if dnc:
+        add("日本図書コード チェックデジット",dnc["cd_ok"],"OK" if dnc["cd_ok"] else "／".join(dnc["errors"]))
+        for w in dnc.get("warns",[]): add("日本図書コード フラッグ",True,w,level="WARN")
+        if tc is not None:
+            cs=(dnc["ccode"]==tc); cd=("　"+diff_pos(dnc["ccode"],tc)) if not cs else ""
+            add(lbl("Cコード バーコード↔印字",cs),cs,"BC:C%s ／ 印字:C%s%s"%(dnc["ccode"],tc,cd))
+        else:
+            add("Cコード 印字の読取",False,"印字Cコードを読み取れませんでした",level="WARN")
+        if tp is not None:
+            ps=(dnc["price"]==tp)
+            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s"%(dnc["price"],tp,"" if ps else "　金額が異なります"))
+        else:
+            add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN")
+    else:
+        add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN")
+    ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
+    wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
+    rep["status"]="NG" if ng else ("WARN" if wn else "OK")
+    rep["isbn"]=isbn; rep["dnc"]=dnc; rep["text"]={"isbn":ti,"ccode":tc,"price":tp}
+    return rep
+def diff_pos(a,b):
+    a=str(a); b=str(b)
+    if len(a)!=len(b): return "桁数が異なります(BC %d桁/印字 %d桁)"%(len(a),len(b))
+    ds=[str(i+1) for i in range(len(a)) if a[i]!=b[i]]
+    return ("%s桁目が異なります"%("・".join(ds))) if ds else ""
+def lbl(name,ok): return name+(" 一致" if ok else " 不一致")
+def run_check(isbn_bc,dnc_bc,ocr_text):
+    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or ""),ensure_ascii=False)
+`;
+
+/* ---------- 状態 ---------- */
+let pdfDoc=null, pyReady=null, pages=[], selected=-1, cancelFlag=false, ocrWorker=null;
+let zoom=1, baseCssW=0, baseCssH=0;   // プレビューのズーム状態(1=フィット表示)
+
+/* ---------- Pyodide 起動 ---------- */
+async function ensurePy(){
+  if(pyReady) return pyReady;
+  pyReady=(async()=>{
+    const py=await loadPyodide();
+    py.runPython(PY_CORE);
+    return py;
+  })();
+  return pyReady;
+}
+
+/* ---------- ZXing 設定 ---------- */
+const Z=window.ZXing;
+const zHints=new Map();
+zHints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13]);
+zHints.set(Z.DecodeHintType.TRY_HARDER,true);
+const zReader=new Z.MultiFormatReader();
+zReader.setHints(zHints);
+
+/* HTMLCanvasElementLuminanceSource は crop非対応(例外)のため、
+   帯はキャンバス側で切り出し、都度ソースを作って復号する */
+function decodeCanvas(canvas){
+  try{
+    const source=new Z.HTMLCanvasElementLuminanceSource(canvas);
+    const bmp=new Z.BinaryBitmap(new Z.HybridBinarizer(source));
+    const res=zReader.decode(bmp,zHints);
+    zReader.reset();
+    const pts=res.getResultPoints?res.getResultPoints():[];
+    const xs=pts.map(p=>p.getX()), ys=pts.map(p=>p.getY());
+    return {text:res.getText(),
+            x0:xs.length?Math.min(...xs):0, x1:xs.length?Math.max(...xs):canvas.width,
+            y:ys.length?(ys.reduce((a,b)=>a+b,0)/ys.length):canvas.height/2};
+  }catch(e){ zReader.reset(); return null; }
+}
+
+/* バーコードの黒縞領域を画素から検出してboxを精密化する。
+   ZXingのResultPointsは不安定なので、読めた値の概略y付近で黒が密集する矩形を実測する */
+function refineBox(canvas, approxYmin, approxYmax, approxX0, approxX1){
+  const W=canvas.width, H=canvas.height;
+  const ctx=canvas.getContext('2d');
+  // 概略帯を少し広げてサンプリング
+  const y0s=Math.max(0,Math.floor(approxYmin-(approxYmax-approxYmin)*0.5));
+  const y1s=Math.min(H,Math.ceil(approxYmax+(approxYmax-approxYmin)*0.5));
+  const hh=Math.max(1,y1s-y0s);
+  let img; try{ img=ctx.getImageData(0,y0s,W,hh).data; }catch(e){ return null; }
+  const lum=(i)=>0.299*img[i]+0.587*img[i+1]+0.114*img[i+2];
+  // 各列の暗画素数
+  const colDark=new Float32Array(W);
+  for(let x=0;x<W;x++){
+    let d=0;
+    for(let y=0;y<hh;y+=2){ const i=(y*W+x)*4; if(lum(i)<110) d++; }
+    colDark[x]=d;
+  }
+  const thr=Math.max(3, hh*0.12);   // 縞とみなす最低暗画素
+  // 探索xを概略バーコード位置の周辺に限定(本文・タイトルの黒を拾わないため)
+  let sx0=0, sx1=W;
+  if(isFinite(approxX0)&&isFinite(approxX1)&&approxX1>approxX0){
+    const m=(approxX1-approxX0)*0.6;
+    sx0=Math.max(0,Math.floor(approxX0-m)); sx1=Math.min(W,Math.ceil(approxX1+m));
+  }
+  let best=null, cur=null, gap=0;
+  const maxGap=Math.round(W*0.02);
+  for(let x=sx0;x<sx1;x++){
+    if(colDark[x]>=thr){
+      if(!cur) cur={x0:x,x1:x}; else { cur.x1=x; }
+      gap=0;
+    }else if(cur){
+      gap++; if(gap>maxGap){ if(!best||(cur.x1-cur.x0)>(best.x1-best.x0)) best=cur; cur=null; gap=0; }
+      else cur.x1=x;
+    }
+  }
+  if(cur&&(!best||(cur.x1-cur.x0)>(best.x1-best.x0))) best=cur;
+  if(!best||best.x1-best.x0< W*0.03) return null;
+  // 縦範囲: その列区間内で暗画素が出る行の範囲
+  let ymin=hh, ymax=0;
+  for(let y=0;y<hh;y++){
+    let d=0;
+    for(let x=best.x0;x<=best.x1;x+=2){ const i=(y*W+x)*4; if(lum(i)<110) d++; }
+    if(d> (best.x1-best.x0)*0.10){ if(y<ymin)ymin=y; if(y>ymax)ymax=y; }
+  }
+  if(ymax<=ymin) return null;
+  return {x0:best.x0, x1:best.x1, y0:y0s+ymin, y1:y0s+ymax};
+}
+
+/* バーコードの簡易品質判定: 複数の走査線で縞のrun-lengthを解析し、
+   EAN-13として妥当か(遷移数・バー幅の規格適合・走査線間の安定性)を見る。
+   線の欠け/かすれ/異常な隙間があると検出する。boxは0..1正規化座標。 */
+/* 縞検出box(t)と元box(o)から、左端は縞、幅は控えめ側を採って横広がりを抑える */
+function tightenWidth(o, t){
+  if(!t||!t.w) return o;
+  // 縞検出の範囲が妥当(元boxと大きく矛盾しない)なら、それを採用
+  if(t.w>0.01 && t.w<=o.w*1.2) return {x:t.x, y:t.y||o.y, w:t.w, h:t.h||o.h};
+  return o;
+}
+function checkBarcodeQuality(canvas, box){
+  const W=canvas.width, H=canvas.height, ctx=canvas.getContext('2d');
+  const px0=Math.max(0,Math.round(box.x*W)), py0=Math.max(0,Math.round(box.y*H));
+  const pw=Math.min(W-px0,Math.round(box.w*W)), ph=Math.min(H-py0,Math.round(box.h*H));
+  if(pw<20||ph<10) return {ok:true, note:"領域が小さく品質判定をスキップ"};
+  let data; try{ data=ctx.getImageData(px0,py0,pw,ph).data; }catch(e){ return {ok:true,note:"判定不可"}; }
+  const lum=(x,y)=>{ const i=(y*pw+x)*4; return 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; };
+  // 1) バー本体の縦帯を特定(数字や余白を除く)。各行の暗画素数が多い行=バー
+  const rowDark=[];
+  for(let y=0;y<ph;y++){ let d=0; for(let x=0;x<pw;x+=2) if(lum(x,y)<128) d++; rowDark.push(d); }
+  const maxRD=Math.max(...rowDark,1);
+  // バー帯候補(連続する暗行のかたまり)を全部洗い出す
+  const yGapMax=Math.max(3,Math.round(ph*0.04));
+  const bands=[]; let b0=-1,gap=0;
+  for(let y=0;y<ph;y++){
+    if(rowDark[y]>maxRD*0.5){ if(b0<0)b0=y; gap=0; }
+    else if(b0>=0){ gap++; if(gap>yGapMax){ bands.push([b0,y-gap]); b0=-1; } }
+  }
+  if(b0>=0) bands.push([b0,ph-1]);
+  if(!bands.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）"};
+  // box中心に最も近い帯を採用(boxが隣の段を含んでも、目的の段を選ぶ)
+  const cyc=ph/2;
+  let ry0,ry1,bestd=1e9;
+  for(const [a,b2] of bands){ const c=(a+b2)/2, d=Math.abs(c-cyc); if(d<bestd){bestd=d; ry0=a; ry1=b2;} }
+  // 2) 縞の実x範囲を特定。バー帯の縦平均プロファイルでrun-lengthを取り、
+  //    モジュール幅の数倍を超える白ギャップ(=本文との余白)で縞の連続を打ち切る
+  const prof=new Float32Array(pw);
+  for(let x=0;x<pw;x++){ let sm=0; for(let y=ry0;y<=ry1;y++) sm+=lum(x,y); prof[x]=sm/(ry1-ry0+1); }
+  let psum=0; for(let x=0;x<pw;x++) psum+=prof[x];
+  const pthr=psum/pw*0.85;
+  const pb=new Uint8Array(pw); for(let x=0;x<pw;x++) pb[x]=prof[x]<pthr?1:0;
+  // run-length(開始位置付き)
+  const pruns=[]; let pc=pb[0],pl=1,ps=0;
+  for(let x=1;x<pw;x++){ if(pb[x]===pc) pl++; else{ pruns.push([pc,pl,ps]); pc=pb[x]; ps=x; pl=1; } }
+  pruns.push([pc,pl,ps]);
+  const ws=pruns.map(r=>r[1]).sort((a,b)=>a-b);
+  const mod=Math.max(1, ws[Math.floor(ws.length*0.2)]||2);
+  const maxbar=mod*5;
+  // 最初の黒から、大きな白ギャップが出るまでを縞範囲とする
+  let cx0=-1,cx1=-1;
+  for(const [c,ln,st] of pruns){
+    if(c===1 && cx0<0) cx0=st;          // 最初の黒
+    if(cx0>=0){
+      if(c===0 && ln>maxbar) break;      // 大きな白=終端
+      cx1=st+ln-1;
+    }
+  }
+  if(cx0<0) return {ok:false, note:"読み込みができません（バーコードを認識できません）"};
+  // 縞の実x範囲(元canvas正規化座標)を返す→枠補正に使う
+  const tightBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
+  // 3) バー帯内の複数走査線でrun-length
+  const lines=[]; const nScan=7;
+  for(let k=0;k<nScan;k++){
+    // 端は人間可読数字やガードバーのはみ出しを踏みやすいので、バー帯の中央60%だけを走査する
+    const y=Math.round(ry0+(ry1-ry0)*(0.2+0.6*k/(nScan-1)));
+    let sum=0,cnt=0; for(let x=cx0;x<=cx1;x++){ sum+=lum(x,y); cnt++; }
+    const thr=sum/cnt*0.82;
+    const b=[]; for(let x=cx0;x<=cx1;x++) b.push(lum(x,y)<thr?1:0);
+    const runs=[]; let cur=b[0],ln=1;
+    for(let i=1;i<b.length;i++){ if(b[i]===cur) ln++; else{ runs.push([cur,ln]); cur=b[i]; ln=1; } }
+    runs.push([cur,ln]);
+    while(runs.length&&runs[0][0]===0) runs.shift();
+    while(runs.length&&runs[runs.length-1][0]===0) runs.pop();
+    const bars=runs.filter(r=>r[0]===1).length;
+    if(bars){
+      const mods=runs.map(r=>r[1]).filter(n=>n>=1).sort((p,q)=>p-q);
+      const mod=Math.max(1, mods[Math.floor(mods.length*0.2)]||1); // 細い側20%点をモジュール幅とする
+      const maxRatio=Math.max(...runs.map(r=>r[1]))/mod;
+      lines.push({bars, trans:runs.length, maxRatio});
+    }
+  }
+  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox};
+  const med=arr=>{const a=[...arr].sort((p,q)=>p-q);return a[Math.floor(a.length/2)];};
+  const barsMed=med(lines.map(l=>l.bars));
+  const transMed=med(lines.map(l=>l.trans));
+  const maxRatioMed=med(lines.map(l=>l.maxRatio));
+  const transVar=Math.max(...lines.map(l=>l.trans))-Math.min(...lines.map(l=>l.trans));
+  // 中央値から大きく外れる走査線の本数。端の数字行を1本踏んだ程度の単発外れでは騒がない
+  const transOutliers=lines.filter(l=>Math.abs(l.trans-transMed)>=6).length;
+  const issues=[];
+  // EAN-13: 黒バー30本/遷移59前後。端処理で前後するので幅を持たせる
+  // EAN-13は規格上、要素(白黒run)59・黒バー30が固定。1本でも欠けると遷移が2減る。
+  // 端処理のぶれを±1だけ許容し、それ以外は欠け/混入として検出する。
+  if(barsMed<29||barsMed>31) issues.push("読み込みができません（バーの欠け・余分の可能性）");
+  if(transMed<58||transMed>60) issues.push("読み込みができません（バーの欠け・つぶれの可能性）");
+  if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
+  if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
+  const uniq=[...new Set(issues)];
+  return {ok:issues.length===0, note:uniq.join(" / "), tightBox,
+          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transVar,transOutliers}};
+}
+
+/* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
+function scanBarcodes(canvas){
+  const W=canvas.width, H=canvas.height;
+  const found={}; // value -> {ys:[], x0,x1}
+  function record(r,offY,useX){
+    if(!r) return;
+    const v=r.text;
+    if(!found[v]) found[v]={ys:[],x0s:[],x1s:[]};
+    found[v].ys.push(r.y+offY);
+    if(useX){ found[v].x0s.push(r.x0); found[v].x1s.push(r.x1); }
+  }
+  // 全面スキャンは検出専用。座標は信頼度が低いので box 集計には使わない(useX=false)
+  record(decodeCanvas(canvas),0,false);
+  const bandH=Math.max(24,Math.round(H*0.16)), step=Math.max(12,Math.round(H*0.07));
+  const band=document.createElement('canvas'); band.width=W; band.height=bandH;
+  const bx=band.getContext('2d');
+  for(let top=0; top+bandH<=H; top+=step){
+    bx.clearRect(0,0,W,bandH);
+    bx.drawImage(canvas,0,top,W,bandH,0,0,W,bandH);  // 帯はフル幅なのでx座標はそのまま
+    record(decodeCanvas(band),top,true);
+  }
+  const median=arr=>{ const a=[...arr].sort((p,q)=>p-q); const n=a.length; return n?(n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2):0; };
+  // 値→box(0..1正規化)。x0/x1は帯ごとの検出の中央値を使い、外れ値で枠が広がるのを防ぐ
+  return Object.keys(found).map(v=>{
+    const f=found[v]; const ymin=Math.min(...f.ys), ymax=Math.max(...f.ys);
+    // 黒縞を画素検出して精密な矩形に。失敗時はZXing座標の中央値にフォールバック
+    const pad=H*0.045, padX=W*0.012;
+    const x0=f.x0s.length?median(f.x0s):0;
+    const x1=f.x1s.length?median(f.x1s):W;
+    return {value:v,
+      box:{x:(x0-padX)/W, y:(ymin-pad)/H, w:(x1-x0+padX*2)/W, h:(ymax-ymin+pad*2)/H}};
+  });
+}
+
+/* ---------- pdf.js 実テキスト抽出 ---------- */
+async function pageTextItems(page,scale){
+  const vp=page.getViewport({scale});
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const out=[];
+  for(const it of tc.items){
+    if(!it.str || !it.str.trim()) continue;
+    const m=pdfjsLib.Util.transform(vp.transform,it.transform);
+    const x=m[4], y=m[5], w=(it.width||0)*scale;
+    out.push({str:it.str, x, y, w}); // x,y はデバイス座標(左上原点), yはベースライン
+  }
+  return out;
+}
+/* バーコード群の近傍テキストを連結 */
+function textNearBarcodes(items,boxesPx,W,H){
+  if(!boxesPx.length) return "";
+  let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
+  let y0=Math.min(...boxesPx.map(b=>b.y)), y1=Math.max(...boxesPx.map(b=>b.y+b.h));
+  const bw=x1-x0, bh=y1-y0;
+  // 綴じ向き・デザインで印字位置(左/右/上/下)が変わるため、四方を広めに探索する
+  const rx0=x0-bw*1.4, rx1=x1+bw*1.4, ry0=y0-bh*1.8, ry1=y1+bh*2.2;
+  return items.filter(t=>t.x+ t.w>rx0 && t.x<rx1 && t.y>ry0 && t.y<ry1)
+              .sort((a,b)=>a.y-b.y||a.x-b.x).map(t=>t.str).join(" ");
+}
+
+/* ---------- OCR フォールバック ---------- */
+async function ensureOcr(){
+  if(ocrWorker) return ocrWorker;
+  if(typeof Tesseract==='undefined') throw new Error('Tesseract.js未読込');
+  ocrWorker=await Tesseract.createWorker('eng');
+  const psm=(window.Tesseract&&Tesseract.PSM&&Tesseract.PSM.SINGLE_BLOCK)||'6';
+  try{ await ocrWorker.setParameters({tessedit_pageseg_mode:psm}); }catch(e){}
+  // whitelistは付けない方が誤読しにくいことがあるため、既定は外す。必要十分な文字のみ後段の正規表現で抽出する
+  return ocrWorker;
+}
+async function ocrNearBarcodes(canvas,boxesPx){
+  if(!boxesPx.length) return "";
+  const W=canvas.width,H=canvas.height;
+  let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
+  let y0=Math.min(...boxesPx.map(b=>b.y)), y1=Math.max(...boxesPx.map(b=>b.y+b.h));
+  const bw=x1-x0,bh=y1-y0;
+  // 印字位置はデザイン依存なので四方を広めに切り出してOCRする
+  // 印字は通常バーコードの左(または上下)。右の広げすぎは本文を巻き込むので控えめにする
+  let cx0=Math.max(0,x0-bw*2.0), cx1=Math.min(W,x1+bw*2.0);
+  let cy0=Math.max(0,y0-bh*0.8), cy1=Math.min(H,y1+bh*0.8);
+  const cw=cx1-cx0, ch=cy1-cy0; if(cw<10||ch<10) return "";
+  const up=3, tmp=document.createElement('canvas');
+  tmp.width=cw*up; tmp.height=ch*up;
+  const tg=tmp.getContext('2d');
+  tg.drawImage(canvas,cx0,cy0,cw,ch,0,0,cw*up,ch*up);
+  // バーコードの黒縞があるとOCRの行認識が乱れるので、各バーコード矩形を白で塗って印字だけ残す
+  tg.fillStyle='#fff';
+  boxesPx.forEach(b=>{
+    const padX=8*up, padY=10*up;
+    tg.fillRect((b.x-cx0)*up-padX, (b.y-cy0)*up-padY, b.w*up+padX*2, b.h*up+padY*2);
+  });
+  try{
+    const w=await ensureOcr();
+    const {data}=await w.recognize(tmp);
+    const text=data.text||"";
+    // 単語座標を元画像0..1で保持(マーカー用)。マッチ判定は呼び出し側で行う
+    const words=collectWords(data).map(wd=>{
+      const b=wd.bbox||{}; 
+      return {text:(wd.text||"").trim(),
+              x:(cx0+((b.x0||0)/up))/W, y:(cy0+((b.y0||0)/up))/H,
+              w:(((b.x1||0)-(b.x0||0))/up)/W, h:(((b.y1||0)-(b.y0||0))/up)/H};
+    });
+    window.__lastOcr={img:tmp.toDataURL('image/png'), text};
+    return {text, words};
+  }catch(e){ window.__lastOcr={img:tmp.toDataURL('image/png'), text:'[OCR error] '+e}; return {text:"",words:[]}; }
+}
+/* Tesseractのデータ構造から単語配列を取り出す(v5は blocks→paragraphs→lines→words) */
+function pickMarks(words, rep){
+  if(!words||!words.length) return [];
+  const targets=[];
+  const isbn=rep.isbn&&(rep.isbn.isbn13||rep.isbn.raw);
+  if(isbn){ targets.push(isbn); targets.push(isbn.slice(-7)); } // 末尾も手掛かりに
+  if(rep.dnc){ targets.push("C"+rep.dnc.ccode); targets.push(String(rep.dnc.ccode)); 
+               targets.push(String(rep.dnc.price)); targets.push(rep.dnc.price.toLocaleString()); }
+  const out=[];
+  for(const wd of words){
+    const raw=(wd.text||"").replace(/\s/g,"");
+    if(!raw) continue;
+    const dg=ocrFixDigits(raw).replace(/[^0-9A-Za-z]/g,"");
+    const hit=targets.some(t=>{ const tt=t.replace(/[^0-9A-Za-z]/g,""); return tt.length>=3 && (dg.includes(tt)||raw.includes(t)); });
+    if(hit && wd.w>0 && wd.h>0) out.push({x:wd.x,y:wd.y,w:wd.w,h:wd.h});
+  }
+  return out;
+}
+function collectWords(data){
+  if(Array.isArray(data.words)) return data.words;
+  const out=[];
+  (data.blocks||[]).forEach(bl=>(bl.paragraphs||[]).forEach(pa=>(pa.lines||[]).forEach(ln=>(ln.words||[]).forEach(w=>out.push(w)))));
+  return out;
+}
+
+/* ---------- バーコードのペアリング(1段目↔2段目) ---------- */
+function buildSets(bars){
+  const isbns=bars.filter(b=>/^(978|979)/.test(b.value));
+  const dncs =bars.filter(b=>/^(192|191)/.test(b.value));
+  const others=bars.filter(b=>!/^(978|979|192|191)/.test(b.value));
+  const sets=[]; const usedD=new Set();
+  for(const i of isbns){
+    let best=-1,bestDy=1e9;
+    dncs.forEach((d,idx)=>{ if(usedD.has(idx))return;
+      const dy=Math.abs((d.box.y+d.box.h/2)-(i.box.y+i.box.h/2));
+      if(dy<bestDy){bestDy=dy;best=idx;}});
+    let d=null; if(best>=0){d=dncs[best];usedD.add(best);}
+    sets.push({isbn:i,dnc:d});
+  }
+  dncs.forEach((d,idx)=>{ if(!usedD.has(idx)) sets.push({isbn:null,dnc:d}); });
+  others.forEach(o=>sets.push({isbn:null,dnc:null,other:o})); // EAN-13だが書籍以外
+  return sets;
+}
+
+/* ---------- ページ解析 ---------- */
+async function analyzePage(pageNum){
+  const page=await pdfDoc.getPage(pageNum);
+  const vp=page.getViewport({scale:DETECT_SCALE});
+  const cv=document.createElement('canvas');
+  cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+
+  let bars=scanBarcodes(cv);
+  if($("#optRot").checked && bars.length<2){
+    // 90°回転して再探索（縦置きバーコード対応）
+    const rc=document.createElement('canvas'); rc.width=cv.height; rc.height=cv.width;
+    const rx=rc.getContext('2d'); rx.translate(rc.width,0); rx.rotate(Math.PI/2); rx.drawImage(cv,0,0);
+    const rb=scanBarcodes(rc);
+    // 回転座標→元座標へ：x'=y, y'=W-x  (box近似のため中心のみ概算)
+    rb.forEach(b=>{ const nb={x:b.box.y, y:1-b.box.x-b.box.w, w:b.box.h, h:b.box.w};
+      if(!bars.some(z=>z.value===b.value)) bars.push({value:b.value,box:nb,rot:true}); });
+  }
+
+  const sets=buildSets(bars);
+  // 近傍テキスト：実テキスト→無ければOCR
+  const items=await pageTextItems(page,DETECT_SCALE);
+  const py=await ensurePy(); const runCheck=py.globals.get('run_check');
+
+  const results=[];
+  for(const s of sets){
+    if(s.other){ results.push({other:s.other}); continue; }
+    const boxesPx=[]; 
+    if(s.isbn) boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height});
+    if(s.dnc)  boxesPx.push({x:s.dnc.box.x*cv.width,y:s.dnc.box.y*cv.height,w:s.dnc.box.w*cv.width,h:s.dnc.box.h*cv.height});
+    let txt=textNearBarcodes(items,boxesPx,cv.width,cv.height);
+    const hasISBN=/ISBN|97[89]/.test(txt), hasC=/C\s*[0-9]{4}/.test(txt), hasP=/[¥\\]|本体|定価/.test(txt);
+    let ocrWords=[];
+    if($("#optOcr").checked && (!hasISBN||!hasC||!hasP)){
+      const o=await ocrNearBarcodes(cv,boxesPx);
+      if(o&&o.text) txt=(txt+" "+o.text).trim();
+      if(o&&o.words) ocrWords=o.words;
+    }
+    const bcIsbnVal=s.isbn?s.isbn.value:"";
+    const repTxt=normalizeOcrIsbn(txt, bcIsbnVal);
+    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt);
+    window.__lastChk={bcIsbn:bcIsbnVal, txtIn:txt, txtNorm:repTxt, repJson:repJson};
+    const rep=JSON.parse(repJson);
+    // マーカー：OCR単語のうち、照合した実値(ISBN/Cコード/価格)に一致するものだけを採用
+    rep.marks=pickMarks(ocrWords, rep);
+    rep.ocrText=txt; rep.boxes={isbn:s.isbn?s.isbn.box:null,dnc:s.dnc?s.dnc.box:null};
+    // バーコード品質(欠け・かすれ・縞の異常)を画素で簡易判定
+    rep.quality={};
+    if(s.isbn&&s.isbn.box){ rep.quality.isbn=checkBarcodeQuality(cv,s.isbn.box);
+      if(rep.quality.isbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, rep.quality.isbn.tightBox); }
+    if(s.dnc&&s.dnc.box){ rep.quality.dnc=checkBarcodeQuality(cv,s.dnc.box);
+      if(rep.quality.dnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, rep.quality.dnc.tightBox); }
+    results.push(rep);
+  }
+  runCheck.destroy?.();
+  return {page:pageNum, sets:results,
+          hasBars:bars.length>0,
+          status:rollup(results)};
+}
+const OCR_A2D={O:'0',o:'0',Q:'0',D:'0',I:'1',l:'1',i:'1','|':'1',Z:'2',z:'2',E:'3',A:'4',S:'5',s:'5',G:'6',b:'6',T:'7',B:'8',g:'9',q:'9'};
+function ocrFixDigits(str){ return str.replace(/[A-Za-z|]/g,c=>OCR_A2D[c]||c); }
+function normalizeOcrIsbn(txt, bcIsbn){
+  if(!txt) return txt;
+  // OCRは数字を英字に誤読する(9→O, 1→I 等)。ISBN直後の英数混在列を数字へ補正し、
+  // バーコード値やチェックデジットで13桁に整える。
+  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,24})/i, (m, head, body)=>{
+    // bodyを先頭から1文字ずつ数字化し、ISBN13桁に達した時点で打ち切る。
+    // 残り(" C0093"等の後続トークン)はそのまま温存し、誤って飲み込まないようにする。
+    let digits='', consumed=0;
+    for(let i=0;i<body.length;i++){
+      digits+=ocrFixDigits(body[i]).replace(/[^0-9Xx]/gi,''); consumed=i+1;
+      if(digits.length>=13) break;
+    }
+    const rest=body.slice(consumed);  // ISBN13桁以降(Cコード等)はそのまま戻す
+    if(digits.length<13) return m;
+    digits=digits.slice(0,13);
+    let fixed=null;
+    if(/^\d{13}$/.test(bcIsbn||'') && bcIsbn.slice(4)===digits.slice(4)) fixed=bcIsbn; // 末9桁一致ならBC採用
+    else if(/^97[89]/.test(digits) && ean13ok(digits)) fixed=digits;
+    else if(ean13ok('978'+digits.slice(3))) fixed='978'+digits.slice(3);
+    else if(ean13ok('979'+digits.slice(3))) fixed='979'+digits.slice(3);
+    if(!fixed) fixed=digits.slice(0,13);
+    return head+fixed+' '+rest;
+  });
+}
+function ean13ok(code){
+  if(!/^\d{13}$/.test(code)) return false;
+  let s=0; for(let i=0;i<12;i++){ s+=(+code[i])*(i%2?3:1); }
+  return ((10-s%10)%10)===(+code[12]);
+}
+function rollup(results){
+  if(!results.length) return null;
+  let st="OK";
+  for(const r of results){
+    if(r.other) continue;
+    if(r.status==="NG") return "NG";
+    if(r.status==="WARN") st="WARN";
+  }
+  // 書籍以外のEAN-13しか無い場合
+  if(results.every(r=>r.other)) return "WARN";
+  return st;
+}
+
+/* ---------- 全ページ解析 ---------- */
+async function runAll(){
+  cancelFlag=false;
+  pages=[]; selected=-1;
+  showBanner(true,"Pyodide/検出エンジンを準備中…",0);
+  await ensurePy();
+  const n=pdfDoc.numPages;
+  for(let p=1;p<=n;p++){
+    if(cancelFlag) break;
+    showBanner(true,`解析中… ${p}/${n}ページ`, (p-1)/n*100);
+    const r=await analyzePage(p);
+    pages.push(r);
+    renderList();
+    if(selected<0 && r.hasBars){ selectPage(pages.length-1); }
+  }
+  showBanner(false);
+  renderList();
+  if(selected<0 && pages.length){ selectPage(0); }
+  // 単ページPDFなら左の一覧は不要なので畳む(複数ページ時のみ表示)
+  $(".main").classList.toggle('single', (pdfDoc?pdfDoc.numPages:0)<=1);
+}
+
+/* ---------- 一覧描画 ---------- */
+function renderList(){
+  const el=$("#plist");
+  if(!pages.length){ el.innerHTML='<div class="empty-msg">解析待ち…</div>'; return; }
+  el.innerHTML="";
+  pages.forEach((p,i)=>{
+    const row=document.createElement('div');
+    row.className="prow"+(i===selected?" sel":"")+(p.hasBars?"":" empty");
+    const st=p.status||"";
+    const cnt=p.sets.filter(s=>!s.other).length;
+    row.innerHTML=`<span class="pno">P${p.page}</span>
+      <span class="dot ${st}"></span>
+      <span class="lbl">${p.hasBars?(st==="NG"?"不一致あり":st==="WARN"?"要確認":"OK")+(cnt>1?`・${cnt}組`:""):"バーコードなし"}</span>`;
+    row.onclick=()=>selectPage(i);
+    el.appendChild(row);
+  });
+}
+
+/* ---------- ページ表示 ---------- */
+async function selectPage(i){
+  selected=i; renderList();
+  const rec=pages[i];
+  $("#drop").classList.add('hidden'); $("#viewer").classList.remove('hidden');
+  $("#zoomctl").classList.remove('hidden');
+  const page=await pdfDoc.getPage(rec.page);
+  const center=$("#canvaswrap");
+  const avail=Math.max(300, center.clientWidth-40), availH=Math.max(300, center.clientHeight-40);
+  const base=page.getViewport({scale:1});
+  const fit=Math.min(avail/base.width, availH/base.height, 3);   // フィット倍率(zoom=1の基準)
+  const renderScale=Math.min(fit*RENDER_BOOST, 6);               // 実レンダは高めに(拡大時シャープ)
+  const vp=page.getViewport({scale:renderScale});
+  const cv=$("#pageCanvas"); cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+  // overlay(内部解像度はcanvasと同じ。表示サイズはCSSで揃える)
+  const ov=$("#overlay"); ov.width=cv.width; ov.height=cv.height;
+  drawOverlay(rec);
+  // ズーム基準サイズ(フィット表示時のCSSピクセル)
+  baseCssW=base.width*fit; baseCssH=base.height*fit;
+  zoom=1; applyZoom();
+  renderResult(rec); renderPreviewBar(rec);
+}
+/* オーバーレイ(バーコード枠)を描く。手入力照合後の再描画でも使う */
+function pbExtLinks(isbn){
+  const i13=(isbn.isbn13||isbn.raw||"").replace(/[^0-9Xx]/g,"");
+  if(!/^\d{13}$/.test(i13)) return "";
+  const q=encodeURIComponent(i13);
+  const L=[["Amazon",`https://www.amazon.co.jp/s?k=${q}&i=stripbooks`],
+    ["Google 書影",`https://www.google.com/search?tbm=isch&q=${q}`],
+    ["国会図書館",`https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${q}`],
+    ["版元ドットコム",`https://www.hanmoto.com/bd/isbn/${i13}`]];
+  return L.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer">↗ ${esc(n)}</a>`).join("");
+}
+/* プレビュー上部の固定バー：現在ページの最初の書籍バーコード組に連動 */
+function renderPreviewBar(rec){
+  const bar=$("#previewbar");
+  const real=(rec&&rec.sets)?rec.sets.filter(s=>!s.other):[];
+  if(!real.length){ bar.classList.add('hidden'); bar.innerHTML=""; return; }
+  const s=real[0]; const m=s.manual||{};
+  const phI=s.isbn?(s.isbn.isbn13||s.isbn.raw):"978…";
+  const phC=s.dnc?("C"+s.dnc.ccode):"C0000";
+  const phP=s.dnc?String(s.dnc.price):"価格";
+  const links=s.isbn?pbExtLinks(s.isbn):"";
+  bar.innerHTML=`
+    <div class="pb-group">
+      <span class="pb-label">印字を手入力して照合</span>
+      <input class="pb-input isbn mi-isbn" placeholder="ISBN ${esc(phI)}" value="${esc(m.isbn||'')}">
+      <input class="pb-input c mi-c" placeholder="${esc(phC)}" value="${esc(m.ccode||'')}">
+      <input class="pb-input p mi-p" placeholder="${esc(phP)}" value="${esc(m.price||'')}">
+      <button class="pb-btn" onclick="recheckManual(0)">照合</button>
+    </div>
+    <div class="pb-spacer"></div>
+    ${links?`<div class="pb-sep"></div><div class="pb-group"><span class="pb-label">ウェブで確認</span><div class="pb-links">${links}</div></div>`:""}`;
+  bar.classList.remove('hidden');
+}
+function drawOverlay(rec){
+  const ov=$("#overlay"), cv=$("#pageCanvas"); if(!ov||!cv) return;
+  const g=ov.getContext('2d'); g.clearRect(0,0,ov.width,ov.height);
+  const css=getComputedStyle(document.body);
+  const col={NG:css.getPropertyValue('--err'),WARN:css.getPropertyValue('--warn'),OK:css.getPropertyValue('--ok')};
+  rec.sets.forEach(s=>{
+    if(s.other){ drawBox(g,s.other.box,cv,css.getPropertyValue('--warn'),"EAN-13(書籍以外)"); return; }
+    const c=col[s.status]||col.OK;
+    if(s.boxes&&s.boxes.isbn) drawBox(g,s.boxes.isbn,cv,c,"1段目 "+(s.isbn?(s.isbn.isbn13||s.isbn.raw):""));
+    if(s.boxes&&s.boxes.dnc)  drawBox(g,s.boxes.dnc,cv,c,"2段目 "+(s.dnc?s.dnc.raw:""));
+  });
+}
+/* ズーム適用: canvasの内部解像度は固定のまま、表示サイズ(style)だけ変える */
+function applyZoom(){
+  const w=Math.round(baseCssW*zoom), h=Math.round(baseCssH*zoom);
+  const cv=$("#pageCanvas"), ov=$("#overlay");
+  if(cv){ cv.style.width=w+'px'; cv.style.height=h+'px'; }
+  if(ov){ ov.style.width=w+'px'; ov.style.height=h+'px'; }
+  const hint=$("#zoomhint"); if(hint) hint.textContent=Math.round(zoom*100)+'%';
+}
+/* プレビュー中心を基準に倍率を変更(+/-ボタン用) */
+function zoomBy(factor){
+  const cen=$("#canvaswrap"), cv=$("#pageCanvas"); if(!cv) return;
+  const old=zoom;
+  zoom=Math.min(ZMAX,Math.max(ZMIN,zoom*factor));
+  if(zoom===old) return;
+  const r=cv.getBoundingClientRect(), cr=cen.getBoundingClientRect();
+  // ビュー中心を固定点にする
+  const fx=cr.left+cr.width/2-r.left, fy=cr.top+cr.height/2-r.top;
+  const ratio=zoom/old;
+  applyZoom();
+  cen.scrollLeft+=fx*(ratio-1);
+  cen.scrollTop +=fy*(ratio-1);
+}
+/* 全体表示(フィット倍率=1に戻す) */
+function zoomFit(){ zoom=1; applyZoom(); const cen=$("#canvaswrap"); if(cen){cen.scrollLeft=0;cen.scrollTop=0;} }
+function drawBox(g,box,cv,color,label){
+  const x=box.x*cv.width,y=box.y*cv.height,w=box.w*cv.width,h=box.h*cv.height;
+  g.strokeStyle=color; g.lineWidth=2; g.strokeRect(x,y,w,h);
+  g.fillStyle=color; g.font="11px monospace";
+  const tw=g.measureText(label).width+8;
+  g.globalAlpha=.92; g.fillRect(x,Math.max(0,y-15),tw,15); g.globalAlpha=1;
+  g.fillStyle="#fff"; g.fillText(label,x+4,Math.max(10,y-4));
+}
+
+/* ---------- 結果描画 ---------- */
+function renderResult(rec){
+  const el=$("#result");
+  const real=rec.sets.filter(s=>!s.other);
+  if(!real.length){
+    el.innerHTML=`<div class="tiles"><div class="tile NG"><b>!</b><span>バーコード読取不可</span></div></div>
+      <div class="card NG"><div class="h">バーコードを読み取れません<span class="sp" style="flex:1"></span><span class="pill NG">要確認</span></div>
+        <div class="chk NG"><span class="mark">✕</span><span class="body"><span class="t">バーコードが検出できませんでした</span><span class="d">線の欠け・潰れ・かすれ等で読み取り不能になっている可能性があります。バーの破損や、版ずれで一部が欠けていないか、現物を確認してください。</span></span></div>
+        ${rec.sets.some(s=>s.other)?'<div class="chk WARN"><span class="mark">△</span><span class="body"><span class="t">EAN-13は検出されましたが書籍用(978/192)ではありません</span></span></div>':''}
+        <div class="note" style="padding:10px 12px">小さい・縦向きの場合は「縦向きも探索(90°)」を有効に。なお正常なスリップ等で元々バーコードが無いページの場合は、この警告は無視してください。</div></div>`;
+    return;
+  }
+  const counts={NG:0,WARN:0,OK:0};
+  real.forEach(s=>counts[s.status]++);
+  let html=`<div class="tiles">
+    <div class="tile NG"><b>${counts.NG}</b><span>不一致</span></div>
+    <div class="tile WARN"><b>${counts.WARN}</b><span>要確認</span></div>
+    <div class="tile OK"><b>${counts.OK}</b><span>OK</span></div></div><div class="cards">`;
+  real.forEach((s,idx)=>{
+    const lbl={NG:"不一致あり",WARN:"要確認",OK:"OK"}[s.status];
+    html+=`<div class="card ${s.status}" data-ri="${idx}"><div class="h">バーコード組 ${real.length>1?'#'+(idx+1):''}
+      <span class="sp" style="flex:1"></span><span class="pill ${s.status}">${lbl}</span></div>`;
+    // 値
+    if(s.isbn){
+      const i=s.isbn; html+=kv("ISBN (1段目)",`${i.isbn13||i.raw}`+(i.country?`　${i.country}`:""));
+    }
+    if(s.dnc){
+      const d=s.dnc, dc=d.ccode_decoded;
+      html+=kv("日本図書コード (2段目)",`192-${d.ccode}-${String(d.price).padStart(5,'0')}　C${d.ccode}`);
+      html+=kv("Cコード内訳",dc?`${dc.target}／${dc.form}／内容${dc.content}`:"—");
+      html+=kv("本体価格(バーコード)",`${d.price.toLocaleString()} 円（税抜）`);
+    }
+    // チェック項目
+    s.items.forEach(it=>{
+      const mk=it.ok?"✓":(it.level==="WARN"?"△":"✕");
+      const cls=it.ok?"OK":it.level;
+      html+=`<div class="chk ${cls}"><span class="mark">${mk}</span>
+        <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span></div>`;
+    });
+    // バーコード品質判定の結果(欠け・かすれ等)
+    if(s.quality){
+      const qrows=[["ISBNバーコード品質",s.quality.isbn],["日本図書コード品質",s.quality.dnc]];
+      qrows.forEach(([nm,q])=>{
+        if(!q) return;
+        const ok=q.ok;
+        html+=`<div class="chk ${ok?'OK':'NG'}"><span class="mark">${ok?'✓':'✕'}</span>
+          <span class="body"><span class="t">${esc(nm)}</span><span class="d">${ok?'縞パターン正常':esc(q.note||'異常の疑い')}</span></span></div>`;
+      });
+    }
+    if(s.ocrText){ html+=`<div class="kv"><div class="k">読み取った近傍テキスト</div><div class="v" style="font-size:11px">${esc(s.ocrText).slice(0,200)||"（なし）"}</div></div>`; }
+    html+=`</div>`;
+  });
+  html+=`</div>`;
+  el.innerHTML=html;
+}
+function kv(k,v){return `<div class="kv"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;}
+/* 手入力した印字値でバーコードと再照合する(印字が読めない/バーコードのみの場合の救済) */
+async function recheckManual(realIdx){
+  const rec=pages[selected]; if(!rec) return;
+  const bar=$("#previewbar");
+  const gv=cl=>{ const el=bar.querySelector(cl); return el?(el.value||"").trim():""; };
+  const isbn=gv('.mi-isbn'), ccode=gv('.mi-c'), price=gv('.mi-p');
+  // rec.sets内で realIdx番目の「other以外」の実位置を求める
+  const pos=[]; rec.sets.forEach((s,i)=>{ if(!s.other) pos.push(i); });
+  const at=pos[realIdx]; if(at==null) return;
+  const old=rec.sets[at];
+  // 手入力を照合コアが解釈できるテキストに組み立てる
+  const parts=[];
+  if(isbn)  parts.push("ISBN"+isbn);
+  if(ccode) parts.push("C"+ccode.replace(/\D/g,""));
+  if(price) parts.push("本体"+price.replace(/[^\d]/g,"")+"円");
+  const txt=parts.join("  ");
+  const btn=bar.querySelector('.pb-btn'); if(btn){ btn.disabled=true; btn.textContent="照合中…"; }
+  try{
+    const py=await ensurePy(); const rc=py.globals.get('run_check');
+    const isbnBc=old.isbn?old.isbn.raw:"";
+    const dncBc =old.dnc ?old.dnc.raw :"";
+    const nrep=JSON.parse(rc(isbnBc,dncBc,txt)); rc.destroy?.();
+    nrep.boxes=old.boxes; nrep.ocrText=txt; nrep.manual={isbn,ccode,price};
+    rec.sets[at]=nrep;
+    rec.status=rollup(rec.sets);
+    renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="照合"; }
+  }
+}
+window.recheckManual=recheckManual;
+/* 既刊・再販の照合用に、ISBNから外部サイトを別タブで開くリンク群 */
+function extLinks(isbn){
+  const i13=(isbn.isbn13||isbn.raw||"").replace(/[^0-9Xx]/g,"");
+  if(!/^\d{13}$/.test(i13)) return "";
+  const q=encodeURIComponent(i13);
+  const links=[
+    ["Amazon.co.jp", `https://www.amazon.co.jp/s?k=${q}&i=stripbooks`],
+    ["Google 画像（書影）", `https://www.google.com/search?tbm=isch&q=${q}`],
+    ["国会図書館サーチ", `https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${q}`],
+    ["版元ドットコム", `https://www.hanmoto.com/bd/isbn/${i13}`],
+  ];
+  return `<div class="links-hd">この本をウェブで確認（別タブ）</div><div class="links">`
+    + links.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer">↗ ${esc(n)}</a>`).join("")
+    + `</div>`;
+}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+/* ---------- バナー ---------- */
+function showBanner(show,text,pct){
+  const b=$("#banner"); b.classList.toggle('show',show);
+  if(text!=null) $("#bannerText").textContent=text;
+  if(pct!=null) $("#barFill").style.width=pct+"%";
+}
+
+/* ---------- 読込 ---------- */
+async function loadFile(file){
+  if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
+  $("#btnReset").disabled=false;
+  const buf=await file.arrayBuffer();
+  pdfDoc=await pdfjsLib.getDocument({data:buf,
+    cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+  await runAll();
+}
+function resetAll(){
+  pdfDoc=null; pages=[]; selected=-1; cancelFlag=true;
+  $("#viewer").classList.add('hidden'); $("#drop").classList.remove('hidden');
+  $("#zoomctl").classList.add('hidden'); var _pb=$("#previewbar"); if(_pb){_pb.classList.add('hidden'); _pb.innerHTML='';} $(".main").classList.remove('single');
+  zoom=1;
+  $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
+  $("#result").innerHTML='<div class="empty-msg">—</div>';
+  $("#file").value=""; $("#btnReset").disabled=true; showBanner(false);
+}
+
+/* ---------- イベント ---------- */
+$("#btnOpen").onclick=()=>$("#file").click();
+$("#dropzone").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); };
+$("#btnReset").onclick=resetAll;
+$("#zIn").onclick=()=>zoomBy(1.25);
+$("#zOut").onclick=()=>zoomBy(1/1.25);
+$("#zFit").onclick=()=>zoomFit();
+$("#btnDbg").onclick=()=>{
+  const o=window.__lastOcr;
+  const w=window.open("","_blank");
+  if(!o){ w.document.write("<p style=font-family:sans-serif;padding:20px>まだOCRは実行されていません。OCRが走るのは、PDFの実テキストが読めず『文字はOCRで補完』が有効なときです。</p>"); return; }
+  w.document.write(`<div style="font-family:monospace;padding:16px">
+    <h3>OCRに渡した画像（バーコードは白塗り済み）</h3>
+    <img src="${o.img}" style="max-width:100%;border:1px solid #ccc">
+    <h3>OCR生テキスト</h3>
+    <pre style="white-space:pre-wrap;background:#f4f4f4;padding:12px;border-radius:6px">${esc2(o.text)}</pre>
+    ${chkBlock()}
+  </div>`);
+  function esc2(x){return (x==null?"(空)":String(x)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+  function chkBlock(){
+    const c=window.__lastChk; if(!c) return "";
+    return `<h3>照合デバッグ（最後のバーコード組）</h3>
+      <pre style="white-space:pre-wrap;background:#fff7e6;padding:12px;border-radius:6px">バーコードISBN: ${esc2(c.bcIsbn)}
+正規化前テキスト: ${esc2(c.txtIn)}
+正規化後テキスト: ${esc2(c.txtNorm)}
+コアが返したJSON:
+${esc2(c.repJson)}</pre>`;
+  }
+};
+$("#btnCancel").onclick=()=>{cancelFlag=true;};
+$("#btnTheme").onclick=()=>{
+  const r=document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  if(selected>=0) selectPage(selected);
+};
+const dz=$("#dropzone"), cen=$("#canvaswrap");
+;['dragenter','dragover'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+;['dragleave','drop'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+cen.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+window.addEventListener('resize',()=>{ if(selected>=0) selectPage(selected); });
+
+/* ---------- ホイールでカーソル位置を中心にズーム ---------- */
+cen.addEventListener('wheel',e=>{
+  if($("#viewer").classList.contains('hidden')) return;
+  e.preventDefault();
+  const cv=$("#pageCanvas"); if(!cv) return;
+  const old=zoom;
+  const factor=e.deltaY<0 ? 1.12 : 1/1.12;       // 上スクロールで拡大
+  zoom=Math.min(ZMAX, Math.max(ZMIN, zoom*factor));
+  if(zoom===old) return;
+  // 拡大前のカーソル→canvas左上の表示距離。拡大後その点はカーソルから ratio 倍に離れるので
+  // その差分だけスクロールを足すと、カーソル直下の点が固定される
+  const r=cv.getBoundingClientRect();
+  const dx=e.clientX-r.left, dy=e.clientY-r.top;
+  const ratio=zoom/old;
+  applyZoom();
+  cen.scrollLeft += dx*(ratio-1);
+  cen.scrollTop  += dy*(ratio-1);
+},{passive:false});
+
+/* ---------- ドラッグでプレビューを移動(パン) ---------- */
+let panning=false, panX=0, panY=0, panSL=0, panST=0;
+cen.addEventListener('mousedown',e=>{
+  if($("#viewer").classList.contains('hidden')) return;
+  if(e.button!==0) return;
+  // 入力欄やボタンの操作は妨げない(プレビュー上のみパン)
+  if(e.target.closest('input,button,a,textarea')) return;
+  panning=true; panX=e.clientX; panY=e.clientY;
+  panSL=cen.scrollLeft; panST=cen.scrollTop;
+  cen.classList.add('grabbing'); e.preventDefault();
+});
+window.addEventListener('mousemove',e=>{
+  if(!panning) return;
+  cen.scrollLeft=panSL-(e.clientX-panX);
+  cen.scrollTop =panST-(e.clientY-panY);
+});
+window.addEventListener('mouseup',()=>{ if(panning){ panning=false; cen.classList.remove('grabbing'); } });
+</script>
+</body>
+</html>

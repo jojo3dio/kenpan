@@ -1,0 +1,2906 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>目次整合検版 — 目次・柱・ノンブル相互チェック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<!-- OCR用 tesseract.js は OCR が必要なページが出たときに動的読込（初期化をブロックしない） -->
+<style>
+/* ---------- light (default / 紙色・白寄り) ---------- */
+:root{
+  --bg:#f7f4ee; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
+  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
+  --amber:#b9791a; --amber-bg:#f6ead2;
+  --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#ffffff; --shadow:0 1px 4px rgba(60,45,20,.10);
+  --hl-fill:rgba(185,121,26,.16); --hl-stroke:rgba(200,54,42,.85);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+/* ---------- dark (下版チェッカー系) ---------- */
+[data-theme="dark"]{
+  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#e8a33d; --amber-bg:#33270f;
+  --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
+  --hl-fill:rgba(232,163,61,.20); --hl-stroke:rgba(229,96,79,.9);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+     font-size:14px;transition:background .2s,color .2s}
+.app{display:flex;flex-direction:column;min-height:100%}
+
+/* ---- header: 左色バーのブランドマーク ---- */
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;
+       border-bottom:1px solid var(--line);background:var(--panel);
+       position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+.brand{display:flex;gap:2px;height:26px}
+.brand i{width:6px;border-radius:2px}
+.brand .c{background:#00AEEF}.brand .m{background:#EC008C}
+.brand .y{background:#F5D300}.brand .k{background:#555049}
+header h1{margin:0;font-size:16.5px;font-weight:700;letter-spacing:.04em}
+header h1 span{color:var(--amber)}
+header .ver{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)}
+header .sp{flex:1}
+.hbtn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+      border-radius:7px;padding:6px 14px;cursor:pointer;font-family:var(--ui);
+      font-size:12.5px;transition:.12s}
+.hbtn:hover{border-color:var(--amber);color:var(--amber)}
+.hbtn:disabled{opacity:.4;cursor:default}
+
+.wrap{max-width:1280px;margin:0 auto;padding:18px 22px 60px;width:100%}
+
+/* ---- drop zone ---- */
+#drop{border:2px dashed var(--line);border-radius:14px;padding:52px 20px;
+      text-align:center;color:var(--ink-dim);cursor:pointer;transition:.15s;
+      background:var(--panel)}
+#drop.over{border-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
+#drop .ico{font-size:30px;margin-bottom:6px}
+#drop b{color:var(--ink);font-size:16.5px}
+#drop .or{margin:10px 0;font-size:11.5px;color:var(--ink-faint)}
+#drop .pick{display:inline-block;background:var(--amber);color:#fff;
+      border-radius:7px;padding:8px 22px;font-weight:700}
+
+#opts{display:flex;gap:16px;align-items:center;margin:12px 0;flex-wrap:wrap;
+      color:var(--ink-dim);font-size:12px}
+#opts input[type=text]{background:var(--panel);border:1px solid var(--line);
+      color:var(--ink);border-radius:6px;padding:5px 9px;width:120px;
+      font-family:var(--mono)}
+#opts button{background:var(--amber);border:0;color:#fff;font-weight:700;
+      border-radius:6px;padding:6px 18px;cursor:pointer;font-family:var(--ui)}
+#opts button:disabled{opacity:.45;cursor:default}
+
+#status{font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+        margin:10px 0;white-space:pre-wrap}
+#status .on{color:var(--amber)}
+
+/* ---- results: 全画面2カラム（左=サマリー+指摘 / 右=プレビュー常時表示） ---- */
+#results{display:none;gap:14px;align-items:stretch;
+         height:calc(100vh - 168px);min-height:460px}
+#results.show{display:flex}
+.left{width:500px;min-width:400px;display:flex;
+      flex-direction:column;gap:10px;padding-right:6px;overflow:hidden}
+.left .fixed{flex:0 0 auto}
+/* バナー・カード以下（問題一覧＋対応表＋ページマップ）を1つのスクロール領域に */
+.scrollarea{flex:1 1 auto;overflow-y:auto;min-height:0;
+            display:flex;flex-direction:column;gap:10px;padding-right:4px}
+#issueList{display:flex;flex-direction:column;gap:8px}
+.scrollarea details{flex:0 0 auto}
+.right{flex:1;display:flex;min-width:0}
+.banner{border-radius:9px;padding:10px 16px;font-size:16px;font-weight:700;
+        border:1px solid}
+.banner.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.banner.ng{background:var(--err-bg);color:var(--err);border-color:var(--err)}
+.banner.wn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.cards{display:flex;flex-direction:column;gap:6px}
+.cardrow{display:grid;gap:6px}
+.cardrow.r4{grid-template-columns:repeat(4,1fr)}
+.cardrow.r3{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:7px;
+      padding:5px 10px;box-shadow:var(--shadow)}
+.card .v{font-size:16px;font-weight:700;font-family:var(--mono);line-height:1.15}
+.card .k{font-size:10px;color:var(--ink-dim)}
+#exports{display:flex;gap:8px;flex-wrap:wrap}
+#exports .hbtn{padding:5px 12px;font-size:12px}
+.sec{font-size:13.5px;font-weight:700;padding-left:8px;
+     border-left:4px solid var(--amber);margin-top:2px}
+.issue{background:var(--panel);border:1px solid var(--line);
+       border-left:5px solid var(--err);border-radius:8px;
+       padding:9px 12px;cursor:pointer;transition:.12s;
+       box-shadow:var(--shadow)}
+.issue:hover{background:var(--panel2)}
+.issue.sel{outline:2px solid var(--amber)}
+.issue.warn{border-left-color:var(--warn)}
+.issue.okmsg{border-left-color:var(--ok);cursor:default}
+.issue .top{display:flex;gap:8px;align-items:center;margin-bottom:3px}
+.badge{font-family:var(--mono);font-size:10px;font-weight:600;border-radius:4px;
+       padding:2px 7px;color:#fff;white-space:nowrap}
+.b-err{background:var(--err)}.b-warn{background:var(--warn)}
+.b-ok{background:var(--ok)}.b-info{background:var(--ink-faint)}
+.issue.info{border-left-color:var(--ink-faint);opacity:.85}
+.issue .loc{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim)}
+.issue .msg{font-size:12.5px;line-height:1.55}
+details{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+        padding:8px 12px;box-shadow:var(--shadow)}
+details summary{cursor:pointer;font-size:12.5px;font-weight:700;
+                color:var(--ink-dim)}
+details summary:hover{color:var(--amber)}
+details .inner{margin-top:8px}
+#viewer{flex:1;background:var(--panel);border:1px solid var(--line);
+        border-radius:10px;padding:10px;display:flex;flex-direction:column;
+        box-shadow:var(--shadow);min-width:0}
+#viewer .bar{display:flex;gap:8px;justify-content:center;align-items:center;
+        margin-bottom:8px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
+#viewer .bar button{background:var(--panel2);border:1px solid var(--line);
+        color:var(--ink);border-radius:5px;padding:3px 12px;cursor:pointer}
+#viewer .bar button:hover{border-color:var(--amber)}
+#viewer .bar input{background:var(--panel);border:1px solid var(--line);
+   color:var(--ink);border-radius:5px;padding:3px 7px;font-family:var(--mono);
+   font-size:12px}
+#cvwrap{flex:1;position:relative;overflow:auto;min-height:0;
+        cursor:grab}
+#cvwrap.fit{display:flex;align-items:center;justify-content:center}
+#cvwrap.dragging{cursor:grabbing}
+#pgcanvas{display:block}
+#pgcanvas{background:#fff;border-radius:4px;
+          box-shadow:0 2px 14px rgba(0,0,0,.35)}
+table{border-collapse:collapse;width:100%;background:var(--panel);
+      font-size:11.5px}
+th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;
+      vertical-align:top}
+th{background:var(--panel2);color:var(--ink-dim);font-size:10.5px;
+   letter-spacing:.05em;position:sticky;top:0}
+td.num{font-family:var(--mono)}
+tr.ng td{background:var(--err-bg)}
+.simbad{color:var(--err);font-weight:700}
+.tblwrap{overflow-x:auto}
+#pagemap{display:flex;flex-wrap:wrap;gap:3px;max-height:240px;overflow-y:auto;
+         padding:2px}
+.cell.sel{outline:2px solid var(--amber);outline-offset:1px;
+          box-shadow:0 0 0 2px var(--amber)}
+.cell{width:33px;height:27px;border-radius:4px;background:var(--panel2);
+      border:1px solid var(--line);display:flex;align-items:center;
+      justify-content:center;font-size:9.5px;font-family:var(--mono);
+      color:var(--ink-dim);cursor:pointer}
+.cell:hover{border-color:var(--amber)}
+.cell.err{background:var(--err-bg);border-color:var(--err);color:var(--err);font-weight:600}
+.cell.warn{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:600}
+.cell.hid{color:var(--ink-faint)}
+.legend{font-size:10.5px;color:var(--ink-dim);margin:2px 0 6px}
+footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
+       font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand"><i class="c"></i><i class="m"></i><i class="y"></i><i class="k"></i></div>
+  <h1>目次整合<span>検版</span></h1>
+  <span class="ver">v1.9 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
+  <span class="sp"></span>
+  <button class="hbtn" id="resetBtn" disabled>リセット</button>
+  <button class="hbtn" id="themeBtn"><span id="themeIco">◐</span> <span id="themeTxt">ダーク</span></button>
+</header>
+<div class="wrap">
+
+  <div id="drop">
+    <div class="ico">⇩</div>
+    <b>本文PDFをここにドラッグ＆ドロップ</b>
+    <div class="or">— または —</div>
+    <span class="pick">PDFを選択</span><br><br>
+    <span style="font-size:11px">横組み・通しノンブルの組版済みPDF対応／データはブラウザ外に送信されません</span>
+  </div>
+  <input type="file" id="file" accept="application/pdf" style="display:none">
+
+  <div id="opts">
+    <label>目次ページ（任意・物理番号カンマ区切り）
+      <input type="text" id="tocPages" placeholder="自動検出"></label>
+    <button class="hbtn" id="tocPreviewBtn" onclick="openTocPreview()" disabled
+            title="検出された目次ページだけを別ウィンドウでプレビュー">目次ページを表示</button>
+    <label>見出しサイズ差 <input type="text" id="hdelta" value="0.6" style="width:52px"></label>
+    <label>類似度しきい値 <input type="text" id="fuzzy" value="0.60" style="width:52px"></label>
+    <label>トンボ余白 <input type="text" id="tombo" value="0" style="width:46px"> mm</label>
+    <button id="rerun" disabled>再解析</button>
+    <button class="hbtn" id="htmlReportBtn" onclick="exportHTML()"
+            style="margin-left:auto">HTMLレポート</button>
+  </div>
+
+  <div id="status">解析エンジン（Pyodide）を準備中…</div>
+
+  <div id="results">
+    <div class="left">
+      <div class="fixed">
+        <div class="banner" id="banner"></div>
+        <div class="cards" id="cards" style="margin-top:10px"></div>
+        <div class="sec" style="margin-top:12px">検出された問題</div>
+      </div>
+      <div class="scrollarea">
+        <div id="issueList"></div>
+        <details id="tocDetails">
+          <summary>目次 ⇔ 本文見出し 対応表 <span id="tocCount"></span></summary>
+          <div class="inner tblwrap"><table id="tocTable"></table></div>
+        </details>
+        <details>
+          <summary>ページマップ</summary>
+          <div class="inner">
+            <div class="legend">赤=エラー / 黄=警告 / 「·」=ノンブル非表示。クリックで表示。</div>
+            <div id="pagemap"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="right">
+      <div id="viewer">
+        <div class="bar">
+          <button onclick="gotoPage(0)">⇤</button>
+          <button onclick="gotoPage(viewPage-1)">◀</button>
+          <span id="pginfo">—</span>
+          <button onclick="gotoPage(viewPage+1)">▶</button>
+          <button onclick="gotoPage(result?result.pages.length-1:0)">⇥</button>
+          <span style="width:10px"></span>
+          <input type="text" id="jumpInput" placeholder="ページ" title="物理ページ番号、またはノンブル（例: p25 / n30 / 30）"
+                 style="width:74px" onkeydown="if(event.key==='Enter')doJump()">
+          <button onclick="doJump()">移動</button>
+          <button onclick="fitView()" title="全体表示（フィット）">全体表示</button>
+        </div>
+        <div id="cvwrap"><canvas id="pgcanvas"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>toc-kenpan — single-file, local processing, offline after first CDN load</footer>
+</div>
+</div>
+
+<script type="text/python" id="toc-core-src">
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+toc_core.py — 目次・見出し・柱・ノンブル整合チェックの解析コア。
+
+標準ライブラリのみに依存（PDF抽出器非依存）。同一コードが
+  - CLI (toc_check.py + pymupdf)
+  - ブラウザ (toc_kenpan.html + pdf.js + Pyodide)
+の両方で動作する。エントリポイントは analyze() / analyze_json()。
+"""
+
+import json
+import re
+import sys
+import unicodedata
+from collections import Counter
+from difflib import SequenceMatcher
+
+# ---------------------------------------------------------------- 正規化
+
+LEADER_CHARS = "…‥．.・･╌┄⋯ʜ─―‐\u2010\u2011\u2012\u2013\u2014\u2015\ufffd \u3000"
+TOC_TITLE_RE = re.compile(
+    r"^(目\s*次|もくじ|目录|CONTENTS?|Contents?|INDEX|Index"
+    r"|Index\s+of\s+\w+|Table\s+of\s+Contents)$", re.I)
+
+KANJI_DIGITS = {"〇": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+                "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+
+def normalize(s: str) -> str:
+    """比較用正規化: NFKC + 空白除去 + リーダー/約物/制御文字の揺れ吸収"""
+    s = re.sub(r"[\x00-\x1f\ufeff]", "", s)   # \x08(BS)等の制御文字・BOM
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"[\s\u3000]+", "", s)
+    s = s.replace("‥", "…").replace("...", "…")
+    # ダーシ類の3連続以上は目次リーダー（点線）とみなして除去
+    s = re.sub(r"[\u2010-\u2015─―‐]{3,}", "", s)
+    s = re.sub(r"[…ʜ\ufffd]+", "", s)  # リーダー（…/ʜ/�等）は比較対象から除外
+    s = s.strip("、。・.,:;|–—-ー")
+    return s
+
+
+CHAPTER_NUM_RE = re.compile(r"^第\s*[0-9０-９一二三四五六七八九十百]{1,4}\s*章$")
+SUBTITLE_RE = re.compile(r"^[―—‐－\-]")
+MARGIN_SPLIT_RE = re.compile(
+    r"^(?P<hashira>.*?)[\s\u3000]*(?P<num>\d{1,4})$")
+MARGIN_SPLIT_RE2 = re.compile(
+    r"^(?P<num>\d{1,4}|[ivxlcIVXLC]{1,6})[\s\u3000]+(?P<hashira>.+)$")
+
+
+ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+
+
+def parse_roman(text: str):
+    """ローマ数字ノンブル（前付）→ int。i〜c想定、大文字小文字・全角対応"""
+    t = unicodedata.normalize("NFKC", text).strip().strip("\u3000 ").lower()
+    if not t or not all(c in ROMAN_MAP for c in t) or len(t) > 8:
+        return None
+    vals = [ROMAN_MAP[c] for c in t]
+    total = 0
+    for i, v in enumerate(vals):
+        total += -v if i + 1 < len(vals) and vals[i + 1] > v else v
+    return total if 0 < total < 400 else None
+
+
+def parse_pageno(text: str):
+    """ノンブル候補文字列 → int（通し番号のみ対応。漢数字は簡易対応）"""
+    t = unicodedata.normalize("NFKC", text).strip()
+    t = t.strip("-—–ー[]()（）p.P 　")
+    # pdf.js / OCR は字間に空白を挿入することがある（例 "01 7"）。
+    # 数字＋空白だけなら空白を畳んで通し番号として解釈する。
+    t_ns = re.sub(r"\s+", "", t)
+    if re.fullmatch(r"\d{1,4}", t_ns):
+        return int(t_ns)
+    # 簡易漢数字（十進混在は範囲限定: 〜九十九）
+    if t and all(c in KANJI_DIGITS for c in t):
+        if "十" in t:
+            parts = t.split("十")
+            tens = KANJI_DIGITS.get(parts[0], 1) if parts[0] else 1
+            ones = KANJI_DIGITS.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0
+            return tens * 10 + ones
+        if len(t) <= 3:
+            v = 0
+            for c in t:
+                v = v * 10 + KANJI_DIGITS[c]
+            return v
+    return None
+
+
+def similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def strict_ratio(a: str, b: str) -> float:
+    """柱照合用の厳密比較。大小は無視するが包含での甘い一致はしない。
+    柱は本文溢れや飾りを誤って拾うことがあり、包含判定だと過検出になる。"""
+    if a and b:
+        al, bl = a.casefold(), b.casefold()
+        if al == bl:
+            return 1.0
+        return SequenceMatcher(None, al, bl).ratio()
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def match_ratio(a: str, b: str) -> float:
+    """正規化済み文字列の照合。
+    大文字小文字は無視。一方が他方の前方一致（副題・付随語の有無の差）で、
+    かつ短い側が長い側の半分以上を占めるなら一致(1.0)扱い。
+    短い語が長い見出しに偶然含まれるだけの誤一致は避ける。"""
+    if a and b:
+        al, bl = a.casefold(), b.casefold()
+        if al == bl:
+            return 1.0
+        shorter = al if len(al) <= len(bl) else bl
+        longer = bl if shorter is al else al
+        if len(shorter) >= 4 and longer.startswith(shorter) \
+                and len(shorter) >= len(longer) * 0.4:
+            return 1.0
+        return SequenceMatcher(None, al, bl).ratio()
+    return SequenceMatcher(None, a, b).ratio()
+
+
+# ---------------------------------------------------------------- 抽出
+
+class PageInfo:
+    __slots__ = ("index", "nombre", "nombre_raw", "nombre_sys", "hashira",
+                 "headings", "body_size", "height", "width", "trim",
+                 "hashira_bbox", "nombre_bbox")
+
+    def __init__(self, index):
+        self.index = index          # 物理ページ index (0-based)
+        self.nombre = None          # int
+        self.nombre_raw = None      # str
+        self.nombre_sys = None      # "arabic" / "roman"
+        self.hashira = None         # str（マージン帯の非数字テキスト）
+        self.headings = []          # [{"text","size","y0","bbox"}]
+        self.body_size = None
+        self.height = 0.0
+        self.width = 0.0
+        self.trim = None            # (x0, y0, x1, y1) 仕上がり領域
+        self.hashira_bbox = None    # 柱の外接矩形 [x0,y0,x1,y1]
+        self.nombre_bbox = None     # ノンブルの外接矩形
+
+
+def page_trim(r):
+    """ページのトリム領域 (tx0,ty0,tx1,ty1)。未指定なら全面"""
+    t = r.get("trim")
+    if t and t[2] > t[0] and t[3] > t[1]:
+        return tuple(t)
+    return (0.0, 0.0, r["w"], r["h"])
+
+
+SLUG_RE = re.compile(
+    r"(\.indd\b|\.ai\b|\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2})")
+
+
+def in_trim(ln, trim):
+    """行中心がトリム内か（トンボ・スラグの除外）。
+    InDesign等が書き出すドキュメント情報（ファイル名.indd・日時）は
+    トリム情報の有無にかかわらず常に除外する。"""
+    if SLUG_RE.search(ln["text"]):
+        return False
+    tx0, ty0, tx1, ty1 = trim
+    cy = (ln["y0"] + ln["y1"]) / 2
+    cx = (ln["x0"] + ln["x1"]) / 2
+    return ty0 <= cy <= ty1 and tx0 <= cx <= tx1
+
+
+def clean_text(s: str) -> str:
+    return re.sub(r"[\x00-\x1f\ufeff]", "", s).strip()
+
+
+def assemble_lines(raw, tol=2.0, gap_factor=0.45):
+    """スパン断片粒度の生データを行粒度へ組み立てる（pdf.js 抽出向け前処理）。
+
+    y近接（±tol）でグループ化し、x順に連結。アイテム間の水平ギャップが
+    gap_factor×フォントサイズ を超える場合のみ空白を挿入する。
+    pymupdf のように行粒度で抽出できる場合は不要。
+    """
+    def key(it):
+        # ベースラインがあればそれを優先（サイズ混在行でも安定）
+        return it.get("baseline", it["y0"])
+
+    out = []
+    for r in raw:
+        items = sorted(r["lines"], key=key)
+        groups, cur, cur_y = [], [], None
+        for it in items:
+            if cur_y is None or abs(key(it) - cur_y) <= tol:
+                cur.append(it)
+                cur_y = key(it) if cur_y is None else cur_y
+            else:
+                groups.append(cur)
+                cur, cur_y = [it], key(it)
+        if cur:
+            groups.append(cur)
+        lines = []
+        for g in groups:
+            g.sort(key=lambda l: l["x0"])
+            # 大きな水平ギャップ（段組の隣カラム等）では行を分割する
+            runs, cur_run = [], [g[0]]
+            for prev, it in zip(g, g[1:]):
+                gap = it["x0"] - prev["x1"]
+                if gap > max(2.5 * max(prev["size"], it["size"]), 18.0):
+                    runs.append(cur_run)
+                    cur_run = [it]
+                else:
+                    cur_run.append(it)
+            runs.append(cur_run)
+            for run in runs:
+                text = run[0]["text"]
+                for prev, it in zip(run, run[1:]):
+                    gap = it["x0"] - prev["x1"]
+                    sep = " " if gap > gap_factor * max(prev["size"],
+                                                        it["size"]) else ""
+                    text += sep + it["text"]
+                lines.append({"text": text,
+                              "size": max(it["size"] for it in run),
+                              "x0": min(it["x0"] for it in run),
+                              "y0": min(it["y0"] for it in run),
+                              "x1": max(it["x1"] for it in run),
+                              "y1": max(it["y1"] for it in run)})
+        page = {"h": r["h"], "w": r["w"], "lines": lines}
+        if "trim" in r:
+            page["trim"] = r["trim"]
+        out.append(page)
+    return out
+
+
+def assemble_vertical(raw, tol=3.0):
+    """縦組み（wmode=1）の文字列断片を『列』に組み立てる。
+
+    縦組みは x（列）でグループ化し、列内を y 昇順（上→下）に連結する。
+    返す行は横組みと同じ {text,size,x0,y0,x1,y1} 形式（bboxは列の外接矩形）。
+    列の順序は版面上の意味づけに依らずそのまま返す（呼び出し側で扱う）。
+    """
+    out = []
+    for r in raw:
+        items = [it for it in r["lines"]]
+        # x中心でグループ化
+        items.sort(key=lambda l: (l["x0"] + l["x1"]) / 2)
+        cols, cur, cx = [], [], None
+        for it in items:
+            c = (it["x0"] + it["x1"]) / 2
+            w = max(1.0, it["x1"] - it["x0"])
+            if cx is None or abs(c - cx) <= max(tol, w * 0.6):
+                cur.append(it)
+                cx = c if cx is None else (cx * (len(cur) - 1) + c) / len(cur)
+            else:
+                cols.append(cur)
+                cur, cx = [it], c
+        if cur:
+            cols.append(cur)
+        lines = []
+        for g in cols:
+            g.sort(key=lambda l: l["y0"])
+            # 同一列内でも大きなyギャップ（別ブロック）で分割
+            runs, run = [], [g[0]]
+            for prev, it in zip(g, g[1:]):
+                gap = it["y0"] - prev["y1"]
+                if gap > max(2.2 * max(prev["size"], it["size"]), 16.0):
+                    runs.append(run); run = [it]
+                else:
+                    run.append(it)
+            runs.append(run)
+            for run in runs:
+                lines.append({
+                    "text": "".join(it["text"] for it in run),
+                    "size": max(it["size"] for it in run),
+                    "x0": min(it["x0"] for it in run),
+                    "y0": min(it["y0"] for it in run),
+                    "x1": max(it["x1"] for it in run),
+                    "y1": max(it["y1"] for it in run),
+                    "vsize": max(it["size"] for it in run)})
+        out.append({"h": r["h"], "w": r["w"], "lines": lines,
+                    **({"trim": r["trim"]} if "trim" in r else {}),
+                    "vertical": True})
+    return out
+
+
+def is_vertical(raw):
+    """ページ群が縦組み主体かを推定（wmodeフラグ優先、無ければ字形で推定）"""
+    vflag = [r.get("wmode") for r in raw if r.get("wmode") is not None]
+    if vflag:
+        return sum(1 for v in vflag if v == 1) > len(vflag) / 2
+    # フォールバック: 本文ページ群で「縦に積まれた短い断片」が支配的かを見る。
+    # 縦組みでは同一xに多数の断片が縦に連なり、断片自体は1〜数文字で縦長。
+    tall = wide = 0
+    for r in raw[5:35]:
+        for ln in r["lines"]:
+            t = ln["text"].strip()
+            if not t:
+                continue
+            wd = ln["x1"] - ln["x0"]
+            ht = ln["y1"] - ln["y0"]
+            # 1〜2文字の縦長断片＝縦組みの単位、長い横長行＝横組みの行
+            if len(t) <= 2 and ht >= wd * 0.9:
+                tall += 1
+            elif len(t) >= 8 and wd > ht * 2:
+                wide += 1
+    return tall > wide * 1.5 and tall > 20
+
+
+def detect_vertical_headings(content_lines, body_size, heading_delta,
+                             min_chars=3):
+    """横組みの本に混在する『縦組みの見出し』を検出して組み立てる。
+
+    縦組み見出しは、同一x近傍に1文字（〜数文字）の断片が縦に積まれた列。
+    複数列ある場合は版面右→左（x降順）が縦書きの読み順なので、その順で
+    タイトルを連結する。返す形式は通常の heading dict と同じ。
+    本文サイズ＋heading_delta 以上の大きさの断片のみを対象にする。
+    章扉では文字間を大きく空けることがあるため、列内の縦方向ギャップは
+    フォントサイズの数倍まで許容する。
+    """
+    big = [ln for ln in content_lines
+           if ln["size"] >= body_size + heading_delta
+           and len(clean_text(ln["text"]).strip()) <= 2]
+    if len(big) < min_chars:
+        return []
+
+    # x中心で列にグループ化
+    big.sort(key=lambda l: (l["x0"] + l["x1"]) / 2)
+    raw_cols, cur, cx = [], [], None
+    for it in big:
+        c = (it["x0"] + it["x1"]) / 2
+        w = max(1.0, it["x1"] - it["x0"])
+        if cx is None or abs(c - cx) <= max(3.0, w * 0.6):
+            cur.append(it)
+            cx = c if cx is None else (cx * (len(cur) - 1) + c) / len(cur)
+        else:
+            raw_cols.append(cur)
+            cur, cx = [it], c
+    if cur:
+        raw_cols.append(cur)
+
+    # 各列内を y 昇順に連結。大きなギャップ（フォント5倍超）で別ランに分割。
+    vcols = []
+    for g in raw_cols:
+        g.sort(key=lambda l: l["y0"])
+        runs, run = [], [g[0]]
+        for prev, it in zip(g, g[1:]):
+            gap = it["y0"] - prev["y1"]
+            if gap > max(5.0 * max(prev["size"], it["size"]), 40.0):
+                runs.append(run); run = [it]
+            else:
+                run.append(it)
+        runs.append(run)
+        for run in runs:
+            t = "".join(clean_text(x["text"]).strip() for x in run)
+            if len(t) < min_chars:
+                continue
+            h = max(x["y1"] for x in run) - min(x["y0"] for x in run)
+            w = max(x["x1"] for x in run) - min(x["x0"] for x in run)
+            if h <= w:   # 縦長でなければ縦見出しでない
+                continue
+            vcols.append({
+                "text": t, "size": max(x["size"] for x in run),
+                "x0": min(x["x0"] for x in run),
+                "y0": min(x["y0"] for x in run),
+                "x1": max(x["x1"] for x in run),
+                "y1": max(x["y1"] for x in run)})
+    if not vcols:
+        return []
+
+    # 列を行ブロック（y帯）ごとにまとめる。複数の縦見出しが上下に並ぶ場合に
+    # 別見出しとして分けるため、y0の重なりで束ねる。
+    vcols.sort(key=lambda c: c["y0"])
+    blocks = []
+    for c in vcols:
+        placed = False
+        for b in blocks:
+            ov = min(c["y1"], b["y1"]) - max(c["y0"], b["y0"])
+            if ov > 0.4 * min(c["y1"] - c["y0"], b["y1"] - b["y0"]):
+                b["cols"].append(c)
+                b["y0"] = min(b["y0"], c["y0"])
+                b["y1"] = max(b["y1"], c["y1"])
+                placed = True
+                break
+        if not placed:
+            blocks.append({"y0": c["y0"], "y1": c["y1"], "cols": [c]})
+    out = []
+    for b in blocks:
+        # 縦書きの読み順は右列→左列（x降順）
+        b["cols"].sort(key=lambda c: -(c["x0"] + c["x1"]) / 2)
+        title = "".join(c["text"] for c in b["cols"])
+        if not title:
+            continue
+        x0 = min(c["x0"] for c in b["cols"])
+        y0 = min(c["y0"] for c in b["cols"])
+        x1 = max(c["x1"] for c in b["cols"])
+        y1 = max(c["y1"] for c in b["cols"])
+        size = max(c["size"] for c in b["cols"])
+        out.append({"text": title, "size": round(size, 1),
+                    "y0": y0, "bbox": [x0, y0, x1, y1], "vertical": True})
+    return out
+
+
+def extract_roles(raw, margin_ratio=0.085, heading_delta=0.6, debug=False):
+    """生データ（抽出器非依存の行リスト）からノンブル・柱・見出しを判定する。
+
+    raw: [{"h": ページ高, "w": ページ幅,
+           "lines": [{"text","size","y0","y1","x0","x1"}, ...]}, ...]
+    text は制御文字を含んでよい（目次の章行マーカー \x08 を保持するため）。
+    役割判定時に clean_text() で除去する。
+    マージン帯 = ページ高の上下 margin_ratio 以内（自動補正あり）。
+    """
+    pages = []
+    all_sizes = Counter()
+    for r in raw:
+        trim = page_trim(r)
+        for ln in r["lines"]:
+            if not in_trim(ln, trim):
+                continue
+            all_sizes[round(ln["size"], 1)] += len(clean_text(ln["text"]))
+    body_size = all_sizes.most_common(1)[0][0] if all_sizes else 10.0
+
+    # ---- ノンブル帯の自動推定:
+    # 各ページで「短い数字のみの行」の y 位置（ページ高比）を集計
+    band_pos = []
+    for pno, r in enumerate(raw):
+        trim = page_trim(r)
+        ty0, th = trim[1], trim[3] - trim[1]
+        for ln in r["lines"]:
+            if not in_trim(ln, trim):
+                continue
+            rel = (ln["y0"] - ty0) / th
+            if 0.20 < rel < 0.80:
+                continue  # ノンブル候補は仕上がり外縁のみ（本文中の数字を除外）
+            t = clean_text(ln["text"])
+            if (parse_pageno(t) is not None or parse_roman(t) is not None) \
+                    and 0 < len(t) <= 6:
+                band_pos.append(rel)
+    top_band, bottom_band = margin_ratio, 1.0 - margin_ratio
+    if band_pos:
+        cnt_top = sum(1 for p in band_pos if p < 0.5)
+        cnt_bot = len(band_pos) - cnt_top
+        nombre_at_bottom = cnt_bot >= cnt_top
+        target = [p for p in band_pos if (p >= 0.5) == nombre_at_bottom]
+        if target:
+            med = sorted(target)[len(target) // 2]
+            if nombre_at_bottom:
+                bottom_band = min(bottom_band, med - 0.015)
+            else:
+                top_band = max(top_band, med + 0.03)
+
+    # ---- パス2: 役割判定
+    for pno, r in enumerate(raw):
+        pi = PageInfo(pno)
+        pi.height, pi.width = r["h"], r["w"]
+        pi.body_size = body_size
+        trim = page_trim(r)
+        pi.trim = trim
+        ty0, th = trim[1], trim[3] - trim[1]
+        margin_lines, content_lines = [], []
+        for ln in r["lines"]:
+            if not in_trim(ln, trim):
+                continue  # トンボ・スラグ等の仕上がり外テキストは無視
+            rel0 = (ln["y0"] - ty0) / th
+            rel1 = (ln["y1"] - ty0) / th
+            # 章扉のタイトルは版面の天地ぎりぎり（下段や上段）に大きく
+            # 置かれることがある。本文よりはるかに大きい特大テキストは
+            # マージン帯に掛かっていても見出し候補（content）として扱う。
+            # ただし数字のみ（ノンブルが大きい級数のデザイン）は除外。
+            disp_t = clean_text(ln["text"]).strip()
+            is_display = ln["size"] >= body_size * 2.3 and len(disp_t) >= 1 \
+                and parse_pageno(disp_t) is None and parse_roman(disp_t) is None
+            if (rel1 <= top_band or rel0 >= bottom_band) and not is_display:
+                margin_lines.append(ln)
+            else:
+                content_lines.append(ln)
+
+        # ノンブル / 柱（「柱＋空白＋数字」の連結行にも対応）
+        # ノンブルの妥当上限: 総ページ数を大きく超える数字（発行年など）は誤読。
+        nombre_max = len(raw) + 50
+        # マージン帯に日本語の長い文（本文・奥付）が侵入している場合は、
+        # そこに混じる数字（日付・年号など）をノンブルと誤読しないよう、
+        # 数字単独のノンブル抽出を抑制する。
+        jp_re = re.compile(r"[ぁ-んァ-ヶ一-龠]")
+        body_intrusion = sum(
+            1 for ln in margin_lines
+            if len(jp_re.findall(clean_text(ln["text"]))) >= 5) >= 2
+
+        hashira_parts = []
+        for ln in margin_lines:
+            text = clean_text(ln["text"])
+            n = parse_pageno(text)
+            if n is not None and len(text) <= 6 and n <= nombre_max \
+                    and not body_intrusion:
+                if pi.nombre is None:
+                    pi.nombre, pi.nombre_raw = n, text
+                    pi.nombre_sys = "arabic"
+                continue
+            rn = parse_roman(text)
+            if rn is not None and len(text) <= 6 and not body_intrusion:
+                if pi.nombre is None:
+                    pi.nombre, pi.nombre_raw = rn, text.strip()
+                    pi.nombre_sys = "roman"
+                continue
+            m = MARGIN_SPLIT_RE2.match(text)   # 「数字＋柱」（数字先頭）
+            if m:
+                num = m.group("num")
+                v = parse_pageno(num)
+                sys_ = "arabic"
+                if v is None:
+                    v = parse_roman(num)
+                    sys_ = "roman"
+                if v is not None:
+                    if pi.nombre is None:
+                        pi.nombre, pi.nombre_raw = v, num
+                        pi.nombre_sys = sys_
+                    hashira_parts.append(
+                        m.group("hashira").strip("\u3000 "))
+                    continue
+            m = MARGIN_SPLIT_RE.match(text)    # 「柱＋数字」（数字末尾）
+            if m and m.group("hashira").strip("\u3000 "):
+                if pi.nombre is None:
+                    pi.nombre = int(m.group("num"))
+                    pi.nombre_raw = m.group("num")
+                    pi.nombre_sys = "arabic"
+                hashira_parts.append(m.group("hashira").strip("\u3000 "))
+            elif text:
+                hashira_parts.append(text)
+        if hashira_parts:
+            pi.hashira = " / ".join(hashira_parts)
+
+        # 見出し候補: 本文よりサイズが大きい行（僅差の中見出しも拾う）
+        # まず、このページに「縦組みの見出し列」（同一x近傍に1文字断片が縦に
+        # 積まれた列）があれば、それを組んで見出しにする。
+        # 横組みの本でも、デザイン上タイトルだけ縦組みのことがある。
+        # 縦見出しの先頭/末尾文字が天地のマージン帯に掛かって欠けることが
+        # あるため、マージン帯の文字も合わせて渡す（大きめ文字のみ拾うので
+        # ノンブル・柱はノイズにならない）。
+        vhead = detect_vertical_headings(content_lines + margin_lines,
+                                         body_size, heading_delta)
+        if vhead:
+            for vh in vhead:
+                pi.headings.append(vh)
+
+        cands = []
+        consumed_y = {(round(vh["bbox"][1]), round(vh["bbox"][3]))
+                      for vh in vhead}
+        for ln in content_lines:
+            text = clean_text(ln["text"])
+            if not text or SUBTITLE_RE.match(text):
+                continue  # サブタイトル行（―…）は照合対象外
+            # 縦見出しに取り込んだ1文字断片は横見出し候補から除外
+            if len(text) <= 1 and any(
+                    y0 - 2 <= ln["y0"] and ln["y1"] <= y1 + 2
+                    for y0, y1 in consumed_y):
+                continue
+            if ln["size"] >= body_size + heading_delta and len(text) <= 60:
+                c = dict(ln)
+                c["text"] = text
+                cands.append(c)
+        cands.sort(key=lambda l: l["y0"])
+
+        # マージ: A)「第N章」単独行＋直後のタイトル行  B) 同サイズの折返し行
+        merged = []
+        i = 0
+        while i < len(cands):
+            cur = dict(cands[i])
+            j = i + 1
+            if CHAPTER_NUM_RE.match(cur["text"].strip()) and j < len(cands) \
+                    and cands[j]["y0"] - cur["y0"] < cur["size"] * 2.4:
+                cur["text"] = cur["text"].strip() + " " + cands[j]["text"]
+                cur["size"] = max(cur["size"], cands[j]["size"])
+                cur["x0"] = min(cur["x0"], cands[j]["x0"])
+                cur["x1"] = max(cur["x1"], cands[j]["x1"])
+                cur["y1"] = max(cur["y1"], cands[j]["y1"])
+                j += 1
+            while j < len(cands) \
+                    and abs(cands[j]["size"] - cands[j-1]["size"]) < 0.3 \
+                    and cands[j]["y0"] - cands[j-1]["y0"] \
+                        < cands[j-1]["size"] * 1.8 \
+                    and not CHAPTER_NUM_RE.match(cands[j]["text"].strip()):
+                cur["text"] += cands[j]["text"]
+                cur["x0"] = min(cur["x0"], cands[j]["x0"])
+                cur["x1"] = max(cur["x1"], cands[j]["x1"])
+                cur["y1"] = max(cur["y1"], cands[j]["y1"])
+                j += 1
+            merged.append(cur)
+            i = j
+        for c in merged:
+            pi.headings.append({"text": c["text"],
+                                "size": round(c["size"], 1),
+                                "y0": c["y0"],
+                                "bbox": [c["x0"], c["y0"],
+                                         c["x1"], c["y1"]]})
+        pi.headings.sort(key=lambda hd: hd["y0"])
+        pages.append(pi)
+
+        if debug:
+            print(f"[p{pno+1:>3}] nombre={pi.nombre} hashira={pi.hashira!r} "
+                  f"headings={[h['text'] for h in pi.headings]}",
+                  file=sys.stderr)
+
+    return pages, body_size, (top_band, bottom_band)
+
+
+# ---------------------------------------------------------------- 目次解析
+
+TRAILING_NUM_RE = re.compile(
+    r"^(?P<title>.+?)[" + LEADER_CHARS + r"]*\s*(?P<num>\d{1,4})\s*$")
+
+
+def group_lines_x(lines, tol=2.0):
+    """y近接（±tol）でグループ化し、(連結文字列, 最小x0) のリストを返す"""
+    lines = sorted(lines, key=lambda l: l["y0"])
+    groups, cur, cur_y = [], [], None
+    for ln in lines:
+        if cur_y is None or abs(ln["y0"] - cur_y) <= tol:
+            cur.append(ln)
+            cur_y = ln["y0"] if cur_y is None else cur_y
+        else:
+            groups.append(cur)
+            cur, cur_y = [ln], ln["y0"]
+    if cur:
+        groups.append(cur)
+    return [(" ".join(c["text"] for c in sorted(g, key=lambda l: l["x0"])),
+             min(c["x0"] for c in g)) for g in groups]
+
+
+def group_lines(lines, tol=2.0):
+    """y近接（±tol）でグループ化し、各グループを x 順に連結した文字列を返す"""
+    lines = sorted(lines, key=lambda l: l["y0"])
+    groups, cur, cur_y = [], [], None
+    for ln in lines:
+        if cur_y is None or abs(ln["y0"] - cur_y) <= tol:
+            cur.append(ln)
+            cur_y = ln["y0"] if cur_y is None else cur_y
+        else:
+            groups.append(cur)
+            cur, cur_y = [ln], ln["y0"]
+    if cur:
+        groups.append(cur)
+    return [" ".join(c["text"] for c in sorted(g, key=lambda l: l["x0"]))
+            for g in groups]
+
+
+def find_toc_pages(raw, limit=20):
+    """『目次』見出しページを起点に、目次らしい行が続く限り後続ページへ延長"""
+    start = []
+    for pidx, r in enumerate(raw[:limit]):
+        trim = page_trim(r)
+        for t in group_lines([l for l in r["lines"] if in_trim(l, trim)]):
+            if TOC_TITLE_RE.match(clean_text(t)):
+                start.append(pidx)
+                break
+    if not start:
+        return []
+
+    def toc_like_count(pidx):
+        cnt = 0
+        r = raw[pidx]
+        trim = page_trim(r)
+        for t in group_lines([l for l in r["lines"] if in_trim(l, trim)]):
+            t = clean_text(t)
+            if TRAILING_NUM_RE.match(t) and len(t) > 4:
+                cnt += 1
+        return cnt
+
+    result = sorted(set(start))
+    cur = result[-1] + 1
+    while cur < len(raw) and toc_like_count(cur) >= 3:
+        result.append(cur)
+        cur += 1
+    return result
+
+
+def clean_toc_title(title: str) -> str:
+    """章行の「タイトル \x08 著者名」から著者名部分を落とし、
+    リーダー（…/ʜ/� や任意の記号の3連続以上）を末尾から除去する"""
+    if "\x08" in title:
+        title = title.split("\x08")[0]
+    title = re.sub(r"[\x00-\x1f\ufeff\u2000-\u200a]", " ", title)
+    title = title.strip().strip(LEADER_CHARS).strip()
+    # 未知のリーダーグリフ対策: 末尾の非文字記号の3連続以上を除去
+    title = re.sub(r"([^\w])\1{2,}\s*$", "", title)
+    return title.strip().strip(LEADER_CHARS).strip()
+
+
+def parse_toc(raw, toc_page_indices, bands=(0.06, 0.94), debug=False):
+    """目次ページ群から (タイトル, 記載ノンブル) を抽出。
+
+    柱・ノンブル（マージン帯）の行は除外する。
+    行内で「タイトル＋リーダー＋数字」または
+    「タイトル行とページ番号spanが分離」の双方に対応するため、
+    y近接でグループ化し x 順に連結してから正規表現で分解する。
+    制御文字（章行マーカー \x08）はこの段階まで保持する。
+    """
+    entries = []
+    top_band, bottom_band = bands
+    for pidx in toc_page_indices:
+        r = raw[pidx]
+        trim = page_trim(r)
+        ty0, th = trim[1], trim[3] - trim[1]
+        lines = [{"y0": round(ln["y0"], 1), "x0": ln["x0"],
+                  "text": ln["text"]}
+                 for ln in r["lines"]
+                 if in_trim(ln, trim)
+                 and not (ln["y1"] <= ty0 + th * top_band
+                          or ln["y0"] >= ty0 + th * bottom_band)]
+        merged = group_lines_x(lines)
+
+        # 章行マーカー(\x08)があるのに末尾数字が無い行は、
+        # 直後の「著者名＋ノンブル」折り返し行と連結する
+        joined, skip = [], False
+        for i, (t, x0) in enumerate(merged):
+            if skip:
+                skip = False
+                continue
+            if "\x08" in t and not TRAILING_NUM_RE.match(t.strip()) \
+                    and i + 1 < len(merged):
+                nxt = merged[i + 1][0].strip()
+                if re.match(r"^\S{0,20}[\s\u3000]*\d{1,4}$", nxt):
+                    t = t + " " + nxt
+                    skip = True
+            joined.append((t, x0))
+        merged = joined
+
+        for text, gx0 in merged:
+            t = re.sub(r"[\ufeff]", "", text).strip()
+            if not t or TOC_TITLE_RE.match(t) or SUBTITLE_RE.match(t):
+                continue
+            m = TRAILING_NUM_RE.match(t)
+            if not m:
+                continue
+            title = clean_toc_title(m.group("title"))
+            num = int(m.group("num"))
+            if not title or parse_pageno(title) is not None:
+                continue
+            entries.append({"title": title, "page": num,
+                            "toc_page_index": pidx, "x0": round(gx0, 1)})
+            if debug:
+                print(f"[TOC] {title!r} -> {num}", file=sys.stderr)
+    return entries
+
+
+# ---------------------------------------------------------------- 照合
+
+def build_nombre_map(pages):
+    """nombre -> 物理index の対応と、最頻オフセット（index - nombre）"""
+    nmap, offsets = {}, Counter()
+    for pi in pages:
+        if pi.nombre is not None and pi.nombre_sys == "arabic":
+            nmap.setdefault(pi.nombre, []).append(pi.index)
+            offsets[pi.index - pi.nombre] += 1
+    main_offset = offsets.most_common(1)[0][0] if offsets else None
+    return nmap, main_offset, offsets
+
+
+def check_nombre_sequence(pages):
+    """系統（ローマ数字前付／算用数字本文）ごとに重複・通し位置を検査"""
+    issues = []
+    for sys_ in ("roman", "arabic"):
+        sp = [p for p in pages if p.nombre is not None
+              and p.nombre_sys == sys_]
+        if not sp:
+            continue
+        offsets = Counter(p.index - p.nombre for p in sp)
+        main_offset = offsets.most_common(1)[0][0]
+        seen = {}
+        label = "前付ノンブル" if sys_ == "roman" else "ノンブル"
+        for pi in sp:
+            disp = pi.nombre_raw if sys_ == "roman" else str(pi.nombre)
+            if pi.nombre in seen:
+                issues.append({
+                    "id": "NOM-1", "severity": "error",
+                    "page_index": pi.index,
+                    "msg": f"{label} {disp} が重複しています"
+                           f"（物理 {seen[pi.nombre]+1} ページ目と"
+                           f" {pi.index+1} ページ目）。"})
+            seen.setdefault(pi.nombre, pi.index)
+            if (pi.index - pi.nombre) != main_offset:
+                expected = pi.index - main_offset
+                issues.append({
+                    "id": "NOM-2", "severity": "error",
+                    "page_index": pi.index,
+                    "msg": f"{label} {disp} は通し位置と一致しません"
+                           f"（この物理ページの期待値は {expected} です）。"})
+    return issues
+
+
+def physical_index_for_nombre(n, nmap, main_offset, num_pages):
+    """記載ノンブル n の物理ページ index を返す（隠しノンブル対応）"""
+    if n in nmap:
+        return nmap[n][0]
+    if main_offset is not None:
+        idx = n + main_offset
+        if 0 <= idx < num_pages:
+            return idx  # ノンブル非表示ページ（章扉等）と推定
+    return None
+
+
+def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
+                          fuzzy_threshold=0.60, raw=None):
+    issues = []
+    matched_headings = set()
+
+    def raw_text_fallback(ent, title_n, idx):
+        """サイズ検出に掛からない見出し（後付の小級数等）を
+        生テキスト行の文字列一致で救済する"""
+        if raw is None or idx is None:
+            return False
+        for d in (0, 1, -1):
+            j = idx + d
+            if not (0 <= j < len(raw)):
+                continue
+            r0 = raw[j]
+            trim = page_trim(r0)
+            for ln in r0["lines"]:
+                if not in_trim(ln, trim):
+                    continue
+                t = normalize(clean_text(ln["text"]))
+                if not t or len(t) > len(title_n) + 8:
+                    continue
+                if t == title_n or title_n in t:
+                    ent["matched_page_index"] = j
+                    ent["matched_heading"] = clean_text(ln["text"])
+                    ent["similarity"] = 1.0
+                    matched_headings.add((j, ent["matched_heading"]))
+                    return True
+        return False
+
+    for ent in toc_entries:
+        if ent.get("page") is None:
+            continue  # ノンブル未記載（部扉見出し等）は本文照合の対象外
+        title_n = normalize(ent["title"])
+        idx = physical_index_for_nombre(ent["page"], nmap, main_offset,
+                                        len(pages))
+        if idx is None:
+            issues.append({
+                "id": "TOC-1", "severity": "error",
+                "page_index": ent["toc_page_index"],
+                "msg": f"目次項目「{ent['title']}」の記載ノンブル {ent['page']} に"
+                       f"対応するページが見つかりません。"})
+            continue
+
+        # 当該ページ近傍の見出しと照合（改ページ位置の揺れを許容）
+        best = None  # (ratio, page_index, heading_text, delta)
+        for delta in (0, 1, -1, 2, -2):
+            j = idx + delta
+            if not (0 <= j < len(pages)):
+                continue
+            for hd in pages[j].headings:
+                r = match_ratio(title_n, normalize(hd["text"]))
+                if best is None or r > best[0]:
+                    best = (r, j, hd["text"], delta)
+
+        # 近傍で一致が取れない場合は全ページから探索（大きなページずれの特定）
+        if best is None or best[0] < fuzzy_threshold:
+            gbest = None
+            for j, pg in enumerate(pages):
+                for hd in pg.headings:
+                    r = match_ratio(title_n, normalize(hd["text"]))
+                    if gbest is None or r > gbest[0]:
+                        gbest = (r, j, hd["text"], j - idx)
+            if gbest and gbest[0] >= 0.97:
+                actual_nombre = pages[gbest[1]].nombre
+                if actual_nombre is None and main_offset is not None:
+                    actual_nombre = gbest[1] - main_offset
+                issues.append({
+                    "id": "TOC-1", "severity": "error",
+                    "page_index": gbest[1],
+                    "msg": f"目次項目「{ent['title']}」の記載ノンブルは {ent['page']} "
+                           f"ですが、対応する見出し「{gbest[2]}」は"
+                           f"ノンブル {actual_nombre} のページにあります"
+                           f"（{gbest[3]:+d} ページずれ）。"})
+                ent["matched_page_index"] = gbest[1]
+                ent["matched_heading"] = gbest[2]
+                ent["similarity"] = round(gbest[0], 3)
+                matched_headings.add((gbest[1], gbest[2]))
+                continue
+
+        if best is None or best[0] < fuzzy_threshold:
+            if raw_text_fallback(ent, title_n, idx):
+                continue
+        if best is None:
+            issues.append({
+                "id": "TOC-1", "severity": "error",
+                "page_index": idx,
+                "msg": f"目次項目「{ent['title']}」（記載ノンブル {ent['page']}）の"
+                       f"ページに見出しが見つかりません。"})
+            continue
+
+        ratio, j, htext, delta = best
+        ent["matched_page_index"] = j
+        ent["matched_heading"] = htext
+        ent["similarity"] = round(ratio, 3)
+
+        if ratio >= 0.999:
+            if abs(delta) >= 2:
+                issues.append({
+                    "id": "TOC-1", "severity": "error",
+                    "page_index": j,
+                    "msg": f"目次項目「{ent['title']}」の記載ノンブルは {ent['page']} ですが、"
+                           f"見出しの実際の位置はノンブル {ent['page'] + delta} の"
+                           f"ページです（{delta:+d} ページずれ）。"})
+            matched_headings.add((j, htext))
+        elif ratio >= fuzzy_threshold:
+            loc = "" if delta == 0 else f"（実位置はノンブル {ent['page'] + delta}）"
+            issues.append({
+                "id": "TOC-2", "severity": "error",
+                "page_index": j,
+                "msg": f"目次項目「{ent['title']}」と本文見出し「{htext}」が"
+                       f"一致しません（類似度 {ratio:.2f}）。"
+                       f"誤植の可能性があります{loc}。"})
+            matched_headings.add((j, htext))
+            if delta != 0 and ratio >= 0.999:
+                pass
+        else:
+            issues.append({
+                "id": "TOC-2", "severity": "error",
+                "page_index": idx,
+                "msg": f"目次項目「{ent['title']}」（記載ノンブル {ent['page']}）の"
+                       f"ページに対応する見出しがありません"
+                       f"（最も近い見出し:「{htext}」類似度 {ratio:.2f}）。"
+                       f"章の取り違えや面付け順の誤りが疑われます。"})
+    return issues, matched_headings
+
+
+def check_headings_in_toc(toc_entries, pages, matched_headings,
+                          chapter_size=None, first_toc_index=None):
+    """本文側の大見出しが目次に存在するか（逆引き）。
+    目次より前のページ（扉・口絵等）は対象外。"""
+    issues = []
+    toc_titles = [normalize(e["title"]) for e in toc_entries]
+    chap_re = re.compile(r"第\s*[0-9０-９一二三四五六七八九十百]{1,4}\s*章")
+    chapter_style = any(chap_re.search(e["title"]) for e in toc_entries)
+    for pi in pages:
+        if first_toc_index is not None and pi.index <= first_toc_index:
+            continue
+        if pi.nombre_sys == "roman":
+            continue  # 前付（ローマ数字）ページは目次非掲載が通例
+        for hd in pi.headings:
+            htext, hsize = hd["text"], hd["size"]
+            if chapter_style and not chap_re.search(htext):
+                continue  # 章番号体裁の本では章見出しのみ逆引き
+            if chapter_size and hsize < chapter_size - 0.5:
+                continue  # 章レベルのみ逆引き
+            if (pi.index, htext) in matched_headings:
+                continue
+            hn = normalize(htext)
+            if any(match_ratio(hn, t) >= 0.999 for t in toc_titles):
+                continue
+            best = max((match_ratio(hn, t) for t in toc_titles), default=0.0)
+            issues.append({
+                "id": "TOC-3", "severity": "info",
+                "page_index": pi.index,
+                "msg": f"本文見出し「{htext}」（物理 {pi.index+1} ページ目"
+                       f"{'' if pi.nombre is None else f' / ノンブル {pi.nombre}'}）が"
+                       f"目次に見つかりません（最大類似度 {best:.2f}）。"})
+    return issues
+
+
+def check_hashira(pages, toc_entries, fuzzy_threshold=0.60):
+    """柱⇔現在章の整合。
+
+    柱パーツのうち全ページで一定のもの（書名）は除外し、
+    変動するパーツを章柱とみなして照合する。
+    """
+    issues = []
+
+    # 章の区切り: 照合に成功した目次項目のうち章レベルのもの。
+    # 柱の照合基準は目次文字列ではなく本文見出し側を使う
+    # （目次に誤植がある場合の連鎖誤検知を防ぐ）
+    chap_re = re.compile(r"第\s*[0-9０-９一二三四五六七八九十百]{1,4}\s*章")
+    matched_ents = [e for e in toc_entries if "matched_page_index" in e]
+
+    # 第一候補: 目次インデントの最浅クラスタ＝トップレベル項目。
+    # 目次ページごとに左マージン（ノド/小口）が異なるため、
+    # x0 は同一目次ページ内の最小値からの相対量で評価する。
+    chapters = []
+    page_min = {}
+    for e in matched_ents:
+        if e.get("x0") is None:
+            continue
+        k = e["toc_page_index"]
+        page_min[k] = min(page_min.get(k, 1e9), e["x0"])
+    if page_min:
+        top = [e for e in matched_ents if e.get("x0") is not None
+               and e["x0"] - page_min[e["toc_page_index"]] <= 8.0]
+        if 2 <= len(top) < len(matched_ents):
+            chapters = [(e["matched_page_index"],
+                         e.get("matched_heading", e["title"])) for e in top]
+
+    # 第二候補: 「第N章」パターン・章相当語
+    if not chapters:
+        for ent in matched_ents:
+            if chap_re.search(ent["title"]) or normalize(ent["title"]) in {
+                    "序章", "終章", "結章", "補章", "序論", "結論",
+                    "はじめに", "おわりに", "あとがき"}:
+                chapters.append((ent["matched_page_index"],
+                                 ent.get("matched_heading", ent["title"])))
+    if not chapters:  # 章番号体裁でない本: 全照合項目を境界扱い
+        chapters = [(e["matched_page_index"],
+                     e.get("matched_heading", e["title"]))
+                    for e in matched_ents]
+    chapters.sort()
+    if not chapters:
+        return issues
+
+    # 柱の偶奇パターン解析: 偶奇それぞれで定数柱（書名）かを判定
+    const_hashira = {}
+    for parity in (0, 1):
+        vals = Counter(normalize(p.hashira) for p in pages
+                       if p.hashira and p.index % 2 == parity)
+        if vals:
+            top, cnt = vals.most_common(1)[0]
+            total = sum(vals.values())
+            if cnt / total >= 0.9:
+                const_hashira[parity] = top  # ほぼ一定 → 書名柱
+
+    def current_chapter(idx):
+        cur = None
+        for cidx, ctitle in chapters:
+            if cidx <= idx:
+                cur = ctitle
+            else:
+                break
+        return cur
+
+    for pi in pages:
+        if not pi.hashira:
+            continue
+        parity = pi.index % 2
+        hn = normalize(pi.hashira)
+        if const_hashira.get(parity) == hn:
+            continue  # 書名柱
+        cur = current_chapter(pi.index)
+        if cur is None:
+            continue
+        # 章扉ページ自体は柱なしが普通なのでスキップ不要（柱があれば照合する）
+        cur_n = normalize(cur)
+        r = strict_ratio(hn, cur_n)
+        if r >= 0.999 or cur_n in hn or hn in cur_n:
+            continue
+        # どの章と一致するか調べる（前章の柱の残り検出）
+        best_other = None
+        for _, ctitle in chapters:
+            rr = strict_ratio(hn, normalize(ctitle))
+            if best_other is None or rr > best_other[0]:
+                best_other = (rr, ctitle)
+        if best_other and best_other[0] >= 0.85 and \
+                normalize(best_other[1]) != cur_n:
+            issues.append({
+                "id": "HSR-1", "severity": "error",
+                "page_index": pi.index,
+                "msg": f"柱「{pi.hashira}」は別の章のものです"
+                       f"（このページの章は「{cur}」）。"
+                       f"前章の柱が残っている可能性があります。"})
+        elif r >= fuzzy_threshold:
+            issues.append({
+                "id": "HSR-1", "severity": "error",
+                "page_index": pi.index,
+                "msg": f"柱「{pi.hashira}」と章見出し「{cur}」が一致しません"
+                       f"（類似度 {r:.2f}）。誤植の可能性があります。"})
+        # 上記いずれにも当たらない（どの章とも全く対応しない）場合は、
+        # 「柱」として拾った文字列が実際には柱でない（本文溢れ・飾り・
+        # ノンブル隅の付記など）可能性が高いため、誤検知防止のため
+        # 指摘しない。デザイン重視の本では章柱を持たないことも多い。
+    return issues
+
+
+
+
+# ---------------------------------------------------------------- パイプライン
+
+CAPTION_RE = re.compile(r"^(図|表|写真|挿図|地図)(\d{1,3})")
+MULTI_CAPTION_RE = re.compile(
+    r"^(図|表|写真|挿図|地図)(\d{1,3}(?:[，,、・]\d{1,3})*)")
+
+
+def attach_rects(issues, pages, bands):
+    """各指摘にハイライト矩形（PDF pt座標・上原点）を付与する"""
+    top_band, bottom_band = bands
+
+    def pad(b, m=6):
+        return [b[0] - m, b[1] - m, b[2] + m, b[3] + m]
+
+    for iss in issues:
+        if iss.get("rects"):
+            continue  # チェック側で矩形済み（キャプション等）
+        pi = pages[iss["page_index"]]
+        tx0, ty0, tx1, ty1 = pi.trim or (0, 0, pi.width, pi.height)
+        th = ty1 - ty0
+        rects = []
+        iid = iss["id"]
+        if iid.startswith("HSR"):
+            # 柱の実位置を優先して囲む
+            if pi.hashira_bbox:
+                rects.append(pad(pi.hashira_bbox))
+            else:
+                rects.append([tx0, ty0, tx1, ty0 + th * max(top_band, 0.07) + 6])
+                rects.append([tx0, ty0 + th * min(bottom_band, 0.93) - 6,
+                              tx1, ty1])
+        elif iid.startswith("NOM"):
+            if pi.nombre_bbox:
+                rects.append(pad(pi.nombre_bbox))
+            else:
+                rects.append([tx0, ty0, tx1, ty0 + th * max(top_band, 0.07) + 6])
+                rects.append([tx0, ty0 + th * min(bottom_band, 0.93) - 6,
+                              tx1, ty1])
+        elif iid.startswith(("TOC-1", "TOC-2")) and pi.headings:
+            x0, y0, x1, y1 = pi.headings[0]["bbox"]
+            rects.append([max(tx0, x0 - 10), max(ty0, y0 - 14),
+                          min(tx1, x1 + 10), min(ty1, y1 + 14)])
+        else:
+            if pi.headings:
+                x0, y0, x1, y1 = pi.headings[0]["bbox"]
+                rects.append([max(tx0, x0 - 10), max(ty0, y0 - 14),
+                              min(tx1, x1 + 10), min(ty1, y1 + 14)])
+            else:
+                rects.append([tx0, ty0, tx1, ty0 + th * 0.30])
+        iss["rects"] = rects
+
+
+def cap_norm(s: str, key: str = None) -> str:
+    """キャプション比較用正規化。
+    図表目次は本文キャプションの短縮形（出典・日付等の丸括弧付記を省略）が
+    通例のため、「種別＋番号＋本文ステム（最初の丸括弧の前まで）」で比較する。
+    連番キャプション（図94，95等）は番号リスト全体を読み飛ばし、
+    key 指定時はその番号で正規化する（照合対象の番号差を吸収）。"""
+    n = normalize(s)
+    m = MULTI_CAPTION_RE.match(n)
+    if not m:
+        return n
+    rest = n[m.end():].lstrip(".．,，、:：・")
+    rest = rest.split("(")[0]          # NFKC後は（→( に揃う
+    first = re.split(r"[，,、・]", m.group(2))[0]
+    return (key or m.group(1) + first) + rest.rstrip(".．,，、:：・")
+
+
+def check_captions(cap_entries, raw, pages, nmap, main_offset,
+                   fuzzy_threshold=0.60, exclude_pages=()):
+    """図表目次の項目を本文キャプション（図N./表N. 行）と照合する (TOC-4)"""
+    issues = []
+    excl = set(exclude_pages)
+
+    # 全ページのキャプション行を索引化: (種別, 番号) -> [(page_idx, text, bbox)]
+    cap_index = {}
+    for pidx, r in enumerate(raw):
+        if pidx in excl:
+            continue  # 目次ページ自身の行は索引化しない
+        trim = page_trim(r)
+        for ln in r["lines"]:
+            if not in_trim(ln, trim):
+                continue
+            t = clean_text(ln["text"])
+            tn = normalize(t)
+            m = MULTI_CAPTION_RE.match(tn)
+            if m:
+                bbox = [ln["x0"], ln["y0"], ln["x1"], ln["y1"]]
+                for num in re.split(r"[，,、・]", m.group(2)):
+                    cap_index.setdefault(m.group(1) + num, []).append(
+                        (pidx, t, bbox, m.group(1) + num))
+
+    for ent in cap_entries:
+        title_n = cap_norm(ent["title"])
+        m = CAPTION_RE.match(title_n)
+        if not m:
+            continue
+        key = m.group(1) + m.group(2)
+        idx = physical_index_for_nombre(ent["page"], nmap, main_offset,
+                                        len(pages))
+        cands = cap_index.get(key, [])
+
+        # 記載ページ±1 の候補
+        near = [c for c in cands
+                if idx is not None and abs(c[0] - idx) <= 1]
+        pool = near if near else cands
+        best = None
+        for pidx, text, bbox, ckey in pool:
+            r = match_ratio(title_n, cap_norm(text, key=ckey))
+            if best is None or r > best[0]:
+                best = (r, pidx, text, bbox)
+
+        if best is None:
+            issues.append({
+                "id": "TOC-4", "severity": "error",
+                "page_index": idx if idx is not None
+                              else ent["toc_page_index"],
+                "msg": f"図表目次「{ent['title']}」（記載ノンブル {ent['page']}）に"
+                       f"対応するキャプションが本文に見つかりません。"})
+            continue
+
+        r, pidx, text, bbox = best
+        ent["matched_page_index"] = pidx
+        ent["matched_heading"] = text
+        ent["similarity"] = round(r, 3)
+        rects = [[bbox[0] - 8, bbox[1] - 8, bbox[2] + 8, bbox[3] + 8]]
+
+        page_ok = idx is not None and abs(pidx - idx) <= 1
+        text_ok = r >= 0.999
+        if page_ok and text_ok:
+            continue
+        actual = pages[pidx].nombre
+        if not text_ok and r >= fuzzy_threshold:
+            loc = "" if page_ok else f"（実位置はノンブル {actual}）"
+            issues.append({
+                "id": "TOC-4", "severity": "error", "page_index": pidx,
+                "rects": rects,
+                "msg": f"図表目次「{ent['title']}」と本文キャプション"
+                       f"「{text}」が一致しません（類似度 {r:.2f}）。"
+                       f"誤植の可能性があります{loc}。"})
+        elif not page_ok and text_ok:
+            issues.append({
+                "id": "TOC-4", "severity": "error", "page_index": pidx,
+                "rects": rects,
+                "msg": f"図表目次「{ent['title']}」の記載ノンブルは"
+                       f" {ent['page']} ですが、キャプションの実際の位置は"
+                       f"ノンブル {actual} のページです。"})
+        else:
+            issues.append({
+                "id": "TOC-4", "severity": "error",
+                "page_index": idx if idx is not None else pidx,
+                "msg": f"図表目次「{ent['title']}」（記載ノンブル {ent['page']}）の"
+                       f"ページに対応するキャプションがありません"
+                       f"（最も近い候補:「{text}」類似度 {r:.2f}）。"})
+    return issues
+
+
+def chapter_level_size(toc_entries, pages):
+    best = None
+    for e in toc_entries:
+        if "matched_page_index" not in e:
+            continue
+        for hd in pages[e["matched_page_index"]].headings:
+            if hd["text"] == e.get("matched_heading"):
+                if best is None or hd["size"] > best:
+                    best = hd["size"]
+    return best
+
+
+VERT_PART_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}部$")
+# 目次ページ検出用の見出し語（部/編/章）。タイトル連結（例「第１章土俵の…」）も
+# 拾えるよう前方一致（$ なし）。VERT_PART_RE は他処理の挙動維持のため変更しない。
+VERT_TOC_HEAD_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[部編章]")
+# 「第N章/編」見出し（部以外＝章・節構造）。柱＝章タイトルの版面で使う。
+VERT_CHAP_HEAD_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[編章]")
+_HEAD_PREFIX_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[部編章]\s*")
+
+
+def is_chapter_head(title):
+    """『第N章/編…』形式の見出しか（部は除く）。"""
+    return bool(VERT_CHAP_HEAD_RE.match((title or "").strip()))
+
+
+def strip_head_prefix(title):
+    """見出し先頭の『第N部/編/章』を除去（柱＝接頭辞なしタイトルとの照合用）。"""
+    return _HEAD_PREFIX_RE.sub("", (title or "").strip())
+
+
+_CJK_SP_RE = re.compile(
+    r"(?<=[぀-ヿ㐀-鿿一-鿿々〆ヶ])\s+"
+    r"(?=[぀-ヿ㐀-鿿一-鿿々〆ヶ])")
+
+
+def collapse_cjk_spaces(s):
+    """pdf.js/OCR が和文字間に挿入する空白を表示用に詰める（照合には影響しない）。"""
+    return _CJK_SP_RE.sub("", s) if s else s
+
+
+def parse_toc_vertical(raw, toc_idx, debug=False):
+    """縦組み目次を解析。
+
+    構造: 列ごとに「第N部見出し(大)」または「章タイトル(縦連結)＋ノンブル(小)」。
+    各列の末尾に小級数の算用数字（章ノンブル）が付く。
+    返す: [{title, page, toc_page_index, level}]  level: 0=部, 1=章
+    """
+    entries = []
+    for pidx in toc_idx:
+        r = raw[pidx]
+        trim = page_trim(r)
+        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                   "lines": [l for l in r["lines"]
+                                             if in_trim(l, trim)]}])[0]["lines"]
+        # 列を版面右→左（x大→小）に並べ、読み順に処理
+        cols.sort(key=lambda c: -((c["x0"] + c["x1"]) / 2))
+
+        # 部見出し（「第N部」単独・大級数）は、同列の数字グループが別ブロックに
+        # 分かれてノンブルが付かないことがある。先に「部見出し列」と
+        # 「その近傍(±同x)にある単独数字グループ」を対応付ける。
+        part_cols = []
+        num_only = []  # (x中心, 数字, col)
+        for c in cols:
+            ct = clean_text(c["text"]).strip()
+            cx = (c["x0"] + c["x1"]) / 2
+            if VERT_PART_RE.match(ct) or (c.get("vsize", c["size"]) >= 11.0
+                                          and "部" in ct):
+                part_cols.append((cx, c))
+            elif re.fullmatch(r"\d{1,4}", ct):
+                num_only.append((cx, int(ct), c))
+        part_page = {}
+        used_num = set()
+        for cx, pc in part_cols:
+            best = None
+            for k, (nx, nv, nc) in enumerate(num_only):
+                if k in used_num:
+                    continue
+                if abs(nx - cx) <= max(8.0, (pc["x1"] - pc["x0"]) * 0.8):
+                    d = abs(nx - cx)
+                    if best is None or d < best[0]:
+                        best = (d, k, nv)
+            if best:
+                part_page[id(pc)] = best[2]
+                used_num.add(best[1])
+
+        for col in cols:
+            raw_t = clean_text(col["text"])
+            t = re.sub(r"[\ufeff]", "", raw_t).strip()
+            if not t:
+                continue
+            # 部見出しに紐付いた単独数字があれば、それを記載ノンブルとする
+            if id(col) in part_page:
+                title = clean_toc_title(t)
+                if title:
+                    entries.append({"title": title, "page": part_page[id(col)],
+                                    "toc_page_index": pidx, "level": 0,
+                                    "x0": round(col["x0"], 1)})
+                continue
+            # この列が、部に紐付け済みの単独数字そのものなら二重計上を防ぐ
+            if re.fullmatch(r"\d{1,4}", t) and any(
+                    part_page.get(id(pc)) == int(t)
+                    for _, pc in part_cols):
+                continue
+            # 末尾の算用数字（章ノンブル）を分離
+            m = re.search(r"(\d{1,4})\s*$", t)
+            num = int(m.group(1)) if m else None
+            title = (t[:m.start()] if m else t).strip().strip(LEADER_CHARS)
+            title = clean_toc_title(title)
+            if not title:
+                continue
+            is_part = bool(VERT_PART_RE.match(title)) or col["vsize"] >= 11.0
+            entries.append({"title": title, "page": num,
+                            "toc_page_index": pidx,
+                            "level": 0 if is_part else 1,
+                            "x0": round(col["x0"], 1)})
+            if debug:
+                print(f"[vTOC L{0 if is_part else 1}] {title!r} -> {num}",
+                      file=sys.stderr)
+    return entries
+
+
+def extract_roles_vertical(raw, debug=False):
+    """縦組みページからノンブル・柱・部/章見出しを抽出。
+
+    ノンブル: 下端の小級数の算用数字（左右どちらの隅でも可）。
+    柱      : ノンブルと同じ下端帯にある、数字でない小級数テキスト。
+    見出し  : 版面上部に右寄せで現れる大きめの縦連結テキスト（部・章扉）。
+    """
+    pages = []
+    sizes = Counter()
+    for r in raw:
+        trim = page_trim(r)
+        for ln in r["lines"]:
+            if in_trim(ln, trim):
+                sizes[round(ln["size"], 1)] += len(clean_text(ln["text"]))
+    body_size = sizes.most_common(1)[0][0] if sizes else 9.9
+
+    # 天（頭）の横組みラン（数字でない複数文字・本文サイズ以下・横長）＝天柱候補
+    def _head_hashira_runs(r, trim, th):
+        out = []
+        top_y = trim[1] + th * 0.12
+        for l in r["lines"]:
+            if not in_trim(l, trim) or l["y1"] > top_y:
+                continue
+            t = clean_text(l["text"]).strip()
+            if len(t) < 2 or len(t) > 40 or parse_pageno(t) is not None:
+                continue
+            if l["size"] > body_size + 0.5:
+                continue
+            if (l["x1"] - l["x0"]) <= (l["y1"] - l["y0"]) * 1.3:
+                continue   # 横組みランのみ（縦組み本文の先頭文字を除外）
+            out.append(l)
+        return out
+
+    # 地（下端帯）の柱候補数
+    def _foot_hashira_hits(r, trim, th):
+        fl = [l for l in r["lines"] if in_trim(l, trim)
+              and l["y0"] >= trim[1] + th * 0.90]
+        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                   "lines": fl}])[0]["lines"]
+        return sum(1 for c in cols if clean_text(c["text"])
+                   and parse_pageno(clean_text(c["text"])) is None
+                   and c["size"] <= body_size + 0.5)
+
+    # 柱位置（天/地）を文書全体から推定。地に柱が乏しく天に横組み柱が多い版面＝天柱。
+    foot_hits = head_hits = 0
+    for r in raw:
+        trim = page_trim(r)
+        th = trim[3] - trim[1]
+        if th <= 0:
+            continue
+        if _foot_hashira_hits(r, trim, th):
+            foot_hits += 1
+        if _head_hashira_runs(r, trim, th):
+            head_hits += 1
+    hashira_top = head_hits >= 3 and head_hits > foot_hits * 1.5
+
+    def _merge_hashira(pi, t, bbox):
+        t = collapse_cjk_spaces(t)
+        pi.hashira = (pi.hashira + " / " + t) if pi.hashira else t
+        if pi.hashira_bbox is None:
+            pi.hashira_bbox = list(bbox)
+        else:
+            pi.hashira_bbox = [min(pi.hashira_bbox[0], bbox[0]),
+                               min(pi.hashira_bbox[1], bbox[1]),
+                               max(pi.hashira_bbox[2], bbox[2]),
+                               max(pi.hashira_bbox[3], bbox[3])]
+
+    for pno, r in enumerate(raw):
+        pi = PageInfo(pno)
+        pi.height, pi.width = r["h"], r["w"]
+        pi.body_size = body_size
+        trim = page_trim(r)
+        pi.trim = tuple(trim)
+        ty1, th = trim[3], trim[3] - trim[1]
+        # 下端帯（縦組みノンブルは地）。柱は1〜数文字が縦に並ぶため列に組む。
+        foot_lines = [l for l in r["lines"] if in_trim(l, trim)
+                      and l["y0"] >= trim[1] + th * 0.90]
+        foot_cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                        "lines": foot_lines}])[0]["lines"]
+        for col in foot_cols:
+            t = clean_text(col["text"])
+            if not t:
+                continue
+            bbox = [col["x0"], col["y0"], col["x1"], col["y1"]]
+            n = parse_pageno(t)
+            if n is not None and len(t) <= 5 and col["size"] <= body_size + 0.5:
+                if pi.nombre is None:
+                    pi.nombre, pi.nombre_raw, pi.nombre_sys = n, t, "arabic"
+                    pi.nombre_bbox = bbox
+            elif (not hashira_top) and col["size"] <= body_size + 0.5:
+                _merge_hashira(pi, t, bbox)
+        # 天柱版面: 上端帯の横組みランを柱とする
+        if hashira_top:
+            for l in _head_hashira_runs(r, trim, th):
+                t = clean_text(l["text"]).strip()
+                _merge_hashira(pi, t,
+                               [l["x0"], l["y0"], l["x1"], l["y1"]])
+        # 見出し（部・章扉）: 上部の大きめ縦列
+        vcols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                    "lines": [l for l in r["lines"]
+                                              if in_trim(l, trim)]}])[0]["lines"]
+        for col in vcols:
+            t = clean_text(col["text"])
+            top_rel = (col["y0"] - trim[1]) / th
+            if not t or len(t) > 30:
+                continue
+            if col["vsize"] >= body_size + 1.0 and top_rel < 0.55:
+                pi.headings.append({"text": collapse_cjk_spaces(t),
+                                    "size": round(col["vsize"], 1),
+                                    "y0": col["y0"],
+                                    "bbox": [col["x0"], col["y0"],
+                                             col["x1"], col["y1"]]})
+        pi.headings.sort(key=lambda hd: hd["y0"])
+        pages.append(pi)
+        if debug:
+            print(f"[vP{pno+1}] nom={pi.nombre} hashira={pi.hashira!r} "
+                  f"head={[h['text'] for h in pi.headings]}", file=sys.stderr)
+    return pages, body_size
+
+
+def find_toc_pages_vertical(raw, pages):
+    """縦組み目次ページ検出: 『第N部/編/章』見出しがあり、章ノンブルが並ぶページ。
+    見出しがタイトルと連結している版面（例「第１章土俵の…」）にも対応。"""
+    cand = []
+    for pidx, r in enumerate(raw[:25]):
+        trim = page_trim(r)
+        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                   "lines": [l for l in r["lines"]
+                                             if in_trim(l, trim)]}])[0]["lines"]
+        parts = sum(1 for c in cols
+                    if VERT_TOC_HEAD_RE.match(clean_text(c["text"]).strip()))
+        nums = sum(1 for c in cols
+                   if re.search(r"\d{1,4}\s*$", clean_text(c["text"])))
+        if parts >= 1 and nums >= 3:
+            cand.append(pidx)
+    return cand
+
+
+def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
+                       fuzzy_threshold=0.60):
+    """縦組み: 章タイトルは『章扉ページの柱』、部見出しは『部扉の大見出し』と照合。
+
+    - level 0（第N部）: 部扉ページ（大見出し）と一致するか
+    - level 1（章）   : 記載ノンブル近傍ページの柱（部名以外）と一致するか
+                        柱に無ければ生テキスト行でフォールバック
+    """
+    issues = []
+    matched = set()
+    part_titles = {normalize(e["title"]) for e in toc_entries
+                   if e.get("level") == 0}
+    # 文書が章・節構造（level0に『第N章/編』を含む）なら、章タイトルが複数列に割れた
+    # 続き行（接頭辞なし level0）も章見出しとして緩く照合する。部/章本では False。
+    doc_chapter_style = any(e.get("level") == 0 and is_chapter_head(e["title"])
+                            for e in toc_entries)
+
+    def find_idx(n):
+        return physical_index_for_nombre(n, nmap, main_offset, len(pages))
+
+    for ent in toc_entries:
+        title_n = normalize(ent["title"])
+        lvl = ent.get("level", 1)
+
+        if lvl == 0:
+            # 部見出し: 全ページの見出しから一致を探す。
+            # 「第N章…」形式（章・節構造で柱＝章タイトル）の版面では、扉の大見出しが
+            # 複数列に分割・重複することがあるため、接頭辞を外して柱・連結見出しとも
+            # 照合し、しきい値も緩める（部『第N部』は従来どおり完全一致のみ）。
+            chapter_style = doc_chapter_style or is_chapter_head(ent["title"])
+            tgt = normalize(strip_head_prefix(ent["title"])) if chapter_style \
+                else title_n
+            best = None
+            for p in pages:
+                cand_texts = [hd["text"] for hd in p.headings]
+                if chapter_style:
+                    if p.headings:
+                        cand_texts.append("".join(h["text"] for h in p.headings))
+                    if p.hashira:
+                        cand_texts += p.hashira.split(" / ")
+                for ct in cand_texts:
+                    cb = normalize(strip_head_prefix(ct)) if chapter_style \
+                        else normalize(ct)
+                    r = match_ratio(tgt, cb)
+                    if best is None or r > best[0]:
+                        best = (r, p.index, ct)
+            accept = fuzzy_threshold if chapter_style else 0.999
+            if best and best[0] >= accept:
+                ent["matched_page_index"] = best[1]
+                ent["matched_heading"] = best[2]
+                ent["similarity"] = round(best[0], 3) if chapter_style else 1.0
+                matched.add((best[1], best[2]))
+                if chapter_style:
+                    continue   # 章扉のページずれ検査は行わない（柱一致で十分）
+                # 部見出しにも目次ノンブルがあれば、扉の実ノンブルと突き合わせる
+                if ent.get("page") is not None:
+                    exp_idx = find_idx(ent["page"])
+                    real_idx = best[1]
+                    # 扉ページの実ノンブル（隠しノンブルはオフセットで補完）
+                    real_nb = pages[real_idx].nombre
+                    if real_nb is None and main_offset is not None:
+                        real_nb = real_idx - main_offset
+                    if exp_idx is not None and abs(real_idx - exp_idx) >= 1 \
+                            and real_nb is not None and real_nb != ent["page"]:
+                        issues.append({
+                            "id": "TOC-1", "severity": "error",
+                            "page_index": real_idx,
+                            "msg": f"目次の「{ent['title']}」は記載ノンブル "
+                                   f"{ent['page']} ですが、実際の扉は"
+                                   f"ノンブル {real_nb}（物理 {real_idx+1} "
+                                   f"ページ目）です。ページずれがあります。"})
+            else:
+                kind = "章見出し" if chapter_style else "部見出し"
+                tobira = "章扉" if chapter_style else "部扉"
+                issues.append({
+                    "id": "TOC-1", "severity": "error",
+                    "page_index": best[1] if best else 0,
+                    "msg": f"目次の{kind}「{ent['title']}」に対応する"
+                           f"{tobira}が本文に見つかりません"
+                           f"（最も近い: {best[2] if best else '—'}）。"})
+            continue
+
+        if ent.get("page") is None:
+            continue
+        idx = find_idx(ent["page"])
+        if idx is None:
+            issues.append({
+                "id": "TOC-1", "severity": "error",
+                "page_index": ent["toc_page_index"],
+                "msg": f"目次項目「{ent['title']}」の記載ノンブル "
+                       f"{ent['page']} に対応するページがありません。"})
+            continue
+
+        # 近傍ページの柱（部名でないもの）を候補に
+        best = None
+        for d in (0, 1, -1, 2):
+            j = idx + d
+            if not (0 <= j < len(pages)):
+                continue
+            hv = pages[j].hashira
+            if not hv:
+                continue
+            for part in hv.split(" / "):
+                pn = normalize(part)
+                if pn in part_titles:
+                    continue  # 部名の柱は章照合に使わない
+                r = match_ratio(title_n, pn)
+                if best is None or r > best[0]:
+                    best = (r, j, part)
+
+        # 柱で見つからなければ生テキスト行で（章扉の大きめ字など）
+        if best is None or best[0] < fuzzy_threshold:
+            for d in (0, 1, -1):
+                j = idx + d
+                if not (0 <= j < len(raw)):
+                    continue
+                trim = page_trim(raw[j])
+                cols = assemble_vertical([{"h": raw[j]["h"], "w": raw[j]["w"],
+                    "lines": [l for l in raw[j]["lines"]
+                              if in_trim(l, trim)]}])[0]["lines"]
+                for c in cols:
+                    r = match_ratio(title_n, normalize(clean_text(c["text"])))
+                    if best is None or r > best[0]:
+                        best = (r, j, clean_text(c["text"]))
+
+        if best is None:
+            issues.append({
+                "id": "TOC-1", "severity": "error", "page_index": idx,
+                "msg": f"目次項目「{ent['title']}」（ノンブル {ent['page']}）の"
+                       f"ページに対応する見出し・柱が見つかりません。"})
+            continue
+
+        r, j, text = best
+        # 章境界はノンブル基準の idx を正とする（柱の誤植で境界がぶれないように）
+        ent["matched_page_index"] = idx
+        ent["matched_heading"] = text
+        ent["similarity"] = round(r, 3)
+        if r >= 0.999:
+            matched.add((j, text))
+        elif r >= fuzzy_threshold:
+            # 章タイトルと柱の不一致は HSR-2（柱検査・全ページ）で報告するため、
+            # ここでは二重に出さない（matched 扱いにとどめる）。
+            matched.add((j, text))
+        else:
+            issues.append({
+                "id": "TOC-2", "severity": "error", "page_index": idx,
+                "msg": f"目次項目「{ent['title']}」（ノンブル {ent['page']}）に"
+                       f"対応する章見出しがありません"
+                       f"（最も近い:「{text}」類似度 {r:.2f}）。"})
+    return issues, matched
+
+
+def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
+    """縦組みの柱検査。
+
+    (A) 部名の柱が、そのページの属する部と一致するか（前の部の柱残り検出）。
+    (B) 章名の柱が、そのページの属する章（目次の章タイトル）と一致するか。
+        柱は章範囲の全ページに入るため、該当する全ページで照合・指摘する。
+    """
+    issues = []
+
+    # 部の境界
+    parts = []  # (page_index, 部名)
+    for e in toc_entries:
+        if e.get("level") == 0 and "matched_page_index" in e:
+            parts.append((e["matched_page_index"],
+                          e.get("matched_heading", e["title"])))
+    parts.sort()
+    part_titles = {normalize(p[1]) for p in parts}
+
+    # 章の境界: 目次の章エントリの開始物理index（matched_page_index）で区切る。
+    # 各章は「開始index 〜 次章開始index-1」を支配する。
+    chap = []  # (start_index, 章タイトル)
+    for e in toc_entries:
+        if e.get("level") == 1 and "matched_page_index" in e \
+                and e.get("page") is not None:
+            chap.append((e["matched_page_index"], e["title"]))
+    chap.sort()
+
+    # 章・節構造（level0＝『第N章/編…』）で柱＝章タイトルの版面では、柱が章タイトル
+    # （接頭辞なし）に一致するなら正しい柱として扱い、節との不一致を誤検出しない。
+    # 部/章本は level0＝部のため下記は空となり、従来挙動を一切変えない。
+    doc_chapter_style = any(e.get("level") == 0 and is_chapter_head(e["title"])
+                            for e in toc_entries)
+    chap_head_titles = ([normalize(strip_head_prefix(e["title"]))
+                         for e in toc_entries if e.get("level") == 0]
+                        if doc_chapter_style else [])
+    chap_head_titles = [t for t in chap_head_titles if t]
+
+    def current_part(idx):
+        cur = None
+        for pidx, name in parts:
+            if pidx <= idx:
+                cur = name
+            else:
+                break
+        return cur
+
+    def current_chapter(idx):
+        cur = None
+        for pidx, title in chap:
+            if pidx <= idx:
+                cur = title
+            else:
+                break
+        return cur
+
+    for pi in pages:
+        if not pi.hashira:
+            continue
+        for part in pi.hashira.split(" / "):
+            pn = normalize(part)
+            if not pn:
+                continue
+            # 章・節構造の版面では、柱＝章タイトル（複数列に割れることがある）。
+            # 柱が章タイトル（level0）のいずれかに一致／前方一致するなら正しい柱と
+            # みなし、部名検査(A)・章検査(B)とも誤検出を出さない。
+            # 部/章本では chap_head_titles が空のため作動しない。
+            if any(match_ratio(pn, ch) >= fuzzy_threshold
+                   or (len(ch) >= 3 and (pn.startswith(ch) or ch.startswith(pn)))
+                   for ch in chap_head_titles):
+                continue
+            if pn in part_titles:
+                # (A) 部名柱の検査
+                cur = current_part(pi.index)
+                if cur is None:
+                    continue
+                if strict_ratio(pn, normalize(cur)) >= 0.999:
+                    continue
+                issues.append({
+                    "id": "HSR-1", "severity": "error",
+                    "page_index": pi.index,
+                    "msg": f"柱の部名「{part}」がこのページの属する部"
+                           f"「{cur}」と一致しません。前の部の柱が"
+                           f"残っている可能性があります。"})
+            else:
+                # (B) 章名柱の検査（目次の章タイトルと照合）
+                cur = current_chapter(pi.index)
+                if cur is None:
+                    continue
+                # 章開始ページ自身は前章の柱が残るのが通例のため対象外
+                if any(pidx == pi.index for pidx, _ in chap):
+                    continue
+                r = strict_ratio(pn, normalize(cur))
+                if r >= 0.999:
+                    continue
+                if r >= fuzzy_threshold:
+                    issues.append({
+                        "id": "HSR-2", "severity": "error",
+                        "page_index": pi.index,
+                        "msg": f"柱「{part}」が目次の章タイトル"
+                               f"「{cur}」と一致しません（類似度 {r:.2f}）。"
+                               f"誤植の可能性があります。"})
+                else:
+                    issues.append({
+                        "id": "HSR-2", "severity": "error",
+                        "page_index": pi.index,
+                        "msg": f"柱「{part}」がこのページの属する章"
+                               f"「{cur}」と対応しません（類似度 {r:.2f}）。"})
+    return issues
+
+
+def analyze_vertical(raw, toc_pages=None, fuzzy=0.60, debug=False):
+    pages, body_size = extract_roles_vertical(raw, debug=debug)
+    toc_idx = list(toc_pages) if toc_pages else find_toc_pages_vertical(raw, pages)
+    toc_entries = parse_toc_vertical(raw, toc_idx, debug=debug)
+
+    toc_set = set(toc_idx)
+    for pi in pages:
+        if pi.index in toc_set:
+            pi.headings = []
+
+    nmap, main_offset, _ = build_nombre_map(pages)
+
+    issues = []
+    issues += check_nombre_sequence(pages)
+    toc_issues, matched = check_toc_vertical(
+        toc_entries, pages, nmap, main_offset, raw, fuzzy)
+    issues += toc_issues
+    issues += check_hashira_vertical(pages, toc_entries, fuzzy)
+    bands = (0.90, 0.90)
+    attach_rects(issues, pages, bands)
+
+    return {"pages": pages, "body_size": body_size, "bands": bands,
+            "toc_pages": toc_idx, "toc_entries": toc_entries,
+            "issues": issues, "offset": main_offset,
+            "toc_found": bool(toc_idx), "vertical": True}
+
+
+def analyze(raw, toc_pages=None, fuzzy=0.60, heading_delta=0.6,
+            margin_ratio=0.085, assemble=False, debug=False):
+    """生データ → 全チェック実行。抽出器（pymupdf / pdf.js）非依存。
+
+    raw: extract_roles と同形式。
+    toc_pages: 目次ページ index(0始まり) のリスト。None なら自動検出。
+    """
+    if is_vertical(raw):
+        return analyze_vertical(raw, toc_pages=toc_pages, fuzzy=fuzzy,
+                                debug=debug)
+    if assemble:
+        raw = assemble_lines(raw)
+    pages, body_size, bands = extract_roles(
+        raw, margin_ratio=margin_ratio,
+        heading_delta=heading_delta, debug=debug)
+
+    toc_idx = list(toc_pages) if toc_pages else find_toc_pages(raw)
+    toc_entries = parse_toc(raw, toc_idx, bands=bands, debug=debug)
+
+    toc_set = set(toc_idx)
+    for pi in pages:
+        if pi.index in toc_set:
+            # 目次ページは本文ノンブル・柱・見出しを持たない。
+            # リーダー末尾の数字をノンブルと誤認しないようクリアする。
+            pi.headings = []
+            pi.nombre = None
+            pi.nombre_raw = None
+            pi.nombre_sys = None
+            pi.hashira = None
+
+    nmap, main_offset, _ = build_nombre_map(pages)
+
+    # 図表目次の項目（図N./表N./写真N.）はキャプション照合へ分離
+    head_entries, cap_entries = [], []
+    for e in toc_entries:
+        (cap_entries if CAPTION_RE.match(normalize(e["title"]))
+         else head_entries).append(e)
+
+    issues = []
+    issues += check_nombre_sequence(pages)
+    toc_issues, matched = check_toc_vs_headings(
+        head_entries, pages, nmap, main_offset, fuzzy, raw=raw)
+    issues += toc_issues
+    issues += check_captions(cap_entries, raw, pages, nmap, main_offset,
+                             fuzzy, exclude_pages=toc_idx)
+    issues += check_headings_in_toc(
+        head_entries, pages, matched,
+        chapter_level_size(head_entries, pages),
+        min(toc_idx) if toc_idx else None)
+    issues += check_hashira(pages, head_entries, fuzzy)
+    attach_rects(issues, pages, bands)
+
+    return {"pages": pages, "body_size": body_size, "bands": bands,
+            "toc_pages": toc_idx, "toc_entries": toc_entries,
+            "issues": issues, "offset": main_offset,
+            "toc_found": bool(toc_idx)}
+
+
+def page_to_dict(pi):
+    return {"index": pi.index, "nombre": pi.nombre,
+            "nombre_raw": pi.nombre_raw, "nombre_sys": pi.nombre_sys,
+            "hashira": pi.hashira,
+            "headings": pi.headings,
+            "height": pi.height, "width": pi.width}
+
+
+def analyze_json(raw_json: str, options_json: str = "{}") -> str:
+    """JSON入出力版（Pyodide / ブラウザ連携用）"""
+    raw = json.loads(raw_json)
+    opt = json.loads(options_json) if options_json else {}
+    res = analyze(raw,
+                  toc_pages=opt.get("toc_pages"),
+                  fuzzy=opt.get("fuzzy", 0.60),
+                  heading_delta=opt.get("heading_delta", 0.6),
+                  margin_ratio=opt.get("margin_ratio", 0.085),
+                  assemble=opt.get("assemble", False))
+    n_err = sum(1 for i in res["issues"] if i["severity"] == "error")
+    n_warn = sum(1 for i in res["issues"] if i["severity"] == "warning")
+    out = {"pages": [page_to_dict(p) for p in res["pages"]],
+           "body_size": res["body_size"], "bands": list(res["bands"]),
+           "toc_pages": res["toc_pages"],
+           "toc_entries": res["toc_entries"],
+           "issues": sorted(res["issues"],
+                            key=lambda x: (x["page_index"], x["id"])),
+           "offset": res["offset"], "toc_found": res["toc_found"],
+           "summary": {"errors": n_err, "warnings": n_warn}}
+    return json.dumps(out, ensure_ascii=False)
+
+</script>
+
+<script>
+"use strict";
+const PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
+
+let pyodide = null, pyReady = null;
+let pdfDoc = null, rawData = null, result = null, fileName = "";
+let viewPage = 0, viewRects = [];
+
+const $ = id => document.getElementById(id);
+const status = (msg, on) => { $("status").innerHTML = on ? `<span class="on">${msg}</span>` : msg; };
+
+// ---- テーマ切替（ライト既定）
+$("themeBtn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute("data-theme") !== "dark";
+  root.setAttribute("data-theme", dark ? "dark" : "light");
+  $("themeIco").textContent = dark ? "☀" : "◐";
+  $("themeTxt").textContent = dark ? "ライト" : "ダーク";
+  if (result) gotoPage(viewPage, true);  // ハイライト色をテーマに追従
+});
+
+// ---- リセット
+$("resetBtn").addEventListener("click", () => {
+  pdfDoc = null; rawData = null; result = null; fileName = "";
+  $("results").classList.remove("show");
+  $("banner").style.display = "none";
+  $("drop").style.display = "block";
+  $("rerun").disabled = true; $("resetBtn").disabled = true;
+  $("tocPages").value = ""; $("file").value = "";
+  status(pyodide ? "解析エンジン準備完了。PDFをドロップしてください。"
+                 : "解析エンジン（Pyodide）を準備中…");
+});
+
+document.getElementById("buildId").textContent = "061807";
+setupZoom();
+
+// ---- Pyodide はページ表示直後からバックグラウンドで準備
+pyReady = (async () => {
+  pyodide = await loadPyodide();
+  pyodide.runPython(document.getElementById("toc-core-src").textContent);
+  if (!rawData) status("解析エンジン準備完了。PDFをドロップしてください。");
+  return pyodide;
+})().catch(e => { status("⚠ Pyodideの読み込みに失敗しました（要ネットワーク）: " + e, false); });
+
+// ---- ドロップ/選択
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over");
+  const f = e.dataTransfer.files[0];
+  if (f && (f.type === "application/pdf" || /\.pdf$/i.test(f.name))) loadPDF(f);
+});
+$("file").addEventListener("change", e => { if (e.target.files[0]) loadPDF(e.target.files[0]); });
+$("rerun").addEventListener("click", () => { if (rawData) runAnalyze(); });
+
+// ============================================================ OCR フォールバック
+// スキャン画像PDF（テキスト層なし）を tesseract.js で読み取り、
+// pdf.js 抽出と同じ toc_core 形式 raw（{h,w,lines,wmode}）に変換する。
+// 設計は CLI の toc_ocr.py と揃える（横組み=行断片 / 縦組み=単字断片＋下部帯の柱・ノンブル）。
+// 座標は他経路と同じ「左上原点・y下方向・PDFポイント」。px→pt は ÷scale。
+const OCR = {
+  TEXT_THRESHOLD: 4,   // ページのテキスト総文字数がこれ未満なら画像ページ扱い
+  SCALE: 3,            // ラスタライズ倍率（3≈216dpi）。ノンブル検版と同値
+  MIN_CONF: 30,        // この信頼度未満の語/行は捨てる
+  FOOT_BAND: 0.10,     // 縦組みページ下部帯（柱・ノンブル）の比率
+  _wH: null, _wV: null, _libP: null,
+  LIB: "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+
+  // tesseract.js を動的読込（初回OCR時のみ。ページ初期化はブロックしない）
+  _loadLib() {
+    if (typeof Tesseract !== "undefined") return Promise.resolve();
+    if (!this._libP) {
+      this._libP = new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = this.LIB;
+        s.onload = () => res();
+        s.onerror = () => rej(new Error("tesseract.js の読込に失敗（要ネットワーク）"));
+        document.head.appendChild(s);
+      });
+    }
+    return this._libP;
+  },
+
+  async init() {
+    await this._loadLib();
+    if (!this._wH) {
+      this._wH = await Tesseract.createWorker("jpn");
+      await this._wH.setParameters({ tessedit_pageseg_mode: "6",
+                                     preserve_interword_spaces: "0" });
+    }
+  },
+  async _vertWorker() {
+    if (!this._wV) {
+      try {
+        this._wV = await Tesseract.createWorker("jpn_vert");
+        await this._wV.setParameters({ tessedit_pageseg_mode: "5" });
+      } catch (e) { this._wV = false; }   // jpn_vert 取得失敗時は本文縦OCRを省略
+    }
+    return this._wV;
+  },
+  async terminate() {
+    try { if (this._wH) await this._wH.terminate(); } catch (e) {}
+    try { if (this._wV) await this._wV.terminate(); } catch (e) {}
+    this._wH = null; this._wV = null;
+  },
+
+  // blocks 出力 → 語配列（ノンブル検版と同じ辿り方）
+  _words(data) {
+    const words = [];
+    (data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p =>
+      (p.lines || []).forEach(l => (l.words || []).forEach(w => words.push(w)))));
+    if (!words.length && data.words) words.push(...data.words);
+    return words.filter(w => (w.text || "").trim() &&
+                             (w.confidence || 0) >= OCR.MIN_CONF);
+  },
+  // blocks 出力 → 行配列（横組み用）
+  _lines(data) {
+    const lines = [];
+    (data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p =>
+      (p.lines || []).forEach(l => lines.push(l))));
+    return lines.filter(l => (l.text || "").trim() &&
+                             (l.confidence || 0) >= OCR.MIN_CONF);
+  },
+
+  // 横組み判定: 横長で複数文字の語が多数あれば横組み（toc_ocr._looks_vertical と同じ）
+  _looksVertical(words) {
+    if (!words.length) return true;
+    const wide = words.filter(w => Array.from(w.text.trim()).length >= 2 &&
+                                   (w.bbox.x1 - w.bbox.x0) >
+                                   (w.bbox.y1 - w.bbox.y0) * 1.3).length;
+    return !(wide >= 12 && wide / words.length >= 0.03);
+  },
+
+  // 行 → toc_core 形式の横組み行断片（px→pt, y は band オフセット込み）
+  _hline(l, S, yOff = 0) {
+    const b = l.bbox;
+    const x0 = b.x0 / S, x1 = b.x1 / S;
+    const y0 = (b.y0 + yOff) / S, y1 = (b.y1 + yOff) / S;
+    return { text: (l.text || "").replace(/\s+/g, ""), size: (y1 - y0),
+             x0, y0, x1, y1, baseline: y1 };
+  },
+
+  // 柱とノンブルが連結した下部帯断片から数字部を独立断片に（NFKC で丸数字→算用数字）
+  _splitNombre(line) {
+    const norm = line.text.normalize("NFKC");
+    const digits = (norm.match(/\d/g) || []).length;
+    const nonSpace = norm.replace(/\s/g, "").length;
+    if (digits === 0 || digits === nonSpace) return [];
+    const m = norm.match(/\d{1,4}/);
+    if (!m) return [];
+    const L = Math.max(1, norm.length), span = line.x1 - line.x0;
+    return [{ text: m[0], size: line.size,
+              x0: line.x0 + span * (m.index / L),
+              y0: line.y0,
+              x1: line.x0 + span * ((m.index + m[0].length) / L),
+              y1: line.y1, baseline: line.baseline }];
+  },
+
+  // 縦組みの語を単字断片に分割（pdf.js 縦割りと同様）
+  _vchars(words, S, out) {
+    for (const w of words) {
+      const chars = Array.from(w.text.trim());
+      if (!chars.length) continue;
+      const b = w.bbox, adv = (b.y1 - b.y0) / chars.length;
+      const x0 = b.x0 / S, x1 = b.x1 / S, sz = x1 - x0;
+      for (let ci = 0; ci < chars.length; ci++) {
+        if (!chars[ci].trim()) continue;
+        out.push({ text: chars[ci], size: sz, x0, x1,
+                   y0: (b.y0 + ci * adv) / S, y1: (b.y0 + (ci + 1) * adv) / S });
+      }
+    }
+  },
+
+  async recognizePage(page) {
+    const S = this.SCALE;
+    const vp = page.getViewport({ scale: S });
+    const cv = document.createElement("canvas");
+    cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+    await page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+    const Hpt = vp.height / S, Wpt = vp.width / S;
+
+    const dH = (await this._wH.recognize(cv, {}, { blocks: true })).data;
+    const hwords = this._words(dH);
+    const vertical = this._looksVertical(hwords);
+
+    if (!vertical) {
+      const lines = this._lines(dH).map(l => this._hline(l, S));
+      return { h: Hpt, w: Wpt, lines, wmode: 0 };
+    }
+
+    // ---- 縦組みページ ----
+    const lines = [];
+    const wV = await this._vertWorker();
+    if (wV) {
+      const dV = (await wV.recognize(cv, {}, { blocks: true })).data;
+      this._vchars(this._words(dV), S, lines);
+    }
+    // 下部帯（柱・ノンブルは縦組み紙面でも横組み配置が多い）
+    const yOff = Math.floor(cv.height * (1 - this.FOOT_BAND));
+    const band = document.createElement("canvas");
+    band.width = cv.width; band.height = cv.height - yOff;
+    band.getContext("2d").drawImage(cv, 0, yOff, cv.width, band.height,
+                                    0, 0, cv.width, band.height);
+    const dB = (await this._wH.recognize(band, {}, { blocks: true })).data;
+    for (const l of this._lines(dB)) {
+      const fl = this._hline(l, S, yOff);
+      lines.push(fl);
+      this._splitNombre(fl).forEach(f => lines.push(f));
+    }
+    return { h: Hpt, w: Wpt, lines, wmode: 1 };
+  }
+};
+
+// ---- pdf.js 抽出: スパン断片＋ベースライン座標を toc_core 形式で収集
+async function loadPDF(file) {
+  fileName = file.name;
+  $("results").classList.remove("show");
+  status(`読込中: ${fileName}`, true);
+  const buf = await file.arrayBuffer();
+  // 日本語(CID)フォントの描画には cMap / 標準フォントの指定が必須
+  // cMap/標準フォントは npm 完全ミラーの jsDelivr から取得（.bcmap配信が確実）
+  const ASSETS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/";
+  pdfDoc = await pdfjsLib.getDocument({
+    data: buf,
+    cMapUrl: ASSETS + "cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: ASSETS + "standard_fonts/"
+  }).promise;
+  const N = pdfDoc.numPages;
+  rawData = [];
+  const scanPages = [];   // テキスト層が無い（スキャン画像）ページ
+  for (let p = 1; p <= N; p++) {
+    const page = await pdfDoc.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const H = vp.height;
+    const tc = await page.getTextContent();
+    const items = [];
+    let vCount = 0, hCount = 0, textLen = 0;
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      textLen += it.str.trim().length;
+      const tr = it.transform;
+      const size = Math.hypot(tr[0], tr[1]) || it.height || 1;
+      // 縦組み判定（pdf.js実挙動）: 縦組みは width≈font・height≈font×文字数 で
+      // 1ラン=1item として返る（transformのb成分は0なので使えない）。
+      // → height が width を大きく上回り複数文字なら縦組みラン。
+      const e = tr[4], itw = it.width || 0, ith = it.height || 0;
+      const nchar = Array.from(it.str).length;
+      const vertical = nchar >= 2 && ith > itw * 1.5 && ith > size * 1.5;
+      if (vertical) vCount++; else hCount++;
+      const yTopPDF = H - tr[5];   // ラン上端（上原点）
+      if (vertical) {
+        // str を1字ずつ縦に割る。1字の縦送り = ラン高 / 文字数。
+        const chars = Array.from(it.str);
+        const adv = ith / chars.length;
+        for (let ci = 0; ci < chars.length; ci++) {
+          const cy = yTopPDF + ci * adv;
+          items.push({ text: chars[ci], size: size,
+            x0: e, x1: e + size,
+            y0: cy, y1: cy + adv, baseline: cy + adv });
+        }
+      } else {
+        // 横組み: tr[5] はベースライン。
+        const yB = H - tr[5], asc = size * 0.88, desc = size * 0.12;
+        items.push({ text: it.str, size: size,
+          x0: e, x1: e + (itw || size),
+          y0: yB - asc, y1: yB + desc, baseline: yB });
+      }
+    }
+    const wmode = vCount > hCount ? 1 : 0;
+    rawData.push({ h: H, w: vp.width, lines: items, wmode: wmode });
+    // テキストがほぼ無く、ページに画像があれば OCR 対象（スキャン頁）
+    if (textLen < OCR.TEXT_THRESHOLD && await pageHasImage(page))
+      scanPages.push(p);
+    if (p % 10 === 0 || p === N) status(`テキスト抽出中… ${p} / ${N} ページ`, true);
+  }
+
+  // ---- スキャン画像ページの OCR フォールバック
+  if (scanPages.length) {
+    status(`OCRエンジン起動中…（初回は数MB取得） 対象 ${scanPages.length} ページ`, true);
+    try {
+      await OCR.init();
+      for (let k = 0; k < scanPages.length; k++) {
+        const p = scanPages[k];
+        status(`OCR解析中… ${k + 1} / ${scanPages.length}（p.${p}）`, true);
+        const page = await pdfDoc.getPage(p);
+        rawData[p - 1] = await OCR.recognizePage(page);
+      }
+      await OCR.terminate();
+    } catch (e) {
+      status("⚠ OCRに失敗しました（要ネットワーク）: " + e, false);
+    }
+  }
+
+  $("drop").style.display = "none";
+  $("resetBtn").disabled = false;
+  await runAnalyze();
+}
+
+// ページに画像描画があるか（スキャン頁判定）
+async function pageHasImage(page) {
+  try {
+    const ops = await page.getOperatorList();
+    const OPS = pdfjsLib.OPS;
+    for (const fn of ops.fnArray)
+      if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject ||
+          fn === OPS.paintImageMaskXObject || fn === OPS.paintInlineImageXObject)
+        return true;
+  } catch (e) {}
+  return false;
+}
+
+// ---- 解析（toc_core を Pyodide で実行）
+async function runAnalyze() {
+  status("解析エンジン待機中…", true);
+  await pyReady;
+  if (!pyodide) return;
+  status("整合チェック実行中…", true);
+  // 縦組みページが主体なら横用assembleは無効化（コアが縦処理に分岐）
+  const vpages = rawData.filter(p => p.wmode === 1).length;
+  const opts = { assemble: vpages <= rawData.length / 2 };
+  const tp = $("tocPages").value.trim();
+  if (tp) opts.toc_pages = tp.split(",").map(s => parseInt(s.trim(), 10) - 1);
+  const hd = parseFloat($("hdelta").value); if (!isNaN(hd)) opts.heading_delta = hd;
+  const fz = parseFloat($("fuzzy").value);  if (!isNaN(fz)) opts.fuzzy = fz;
+
+  // トンボ余白(mm)を仕上がり領域として適用（pdf.jsはTrimBox非公開のため手動）
+  const mm = parseFloat($("tombo").value) || 0;
+  const inset = mm * 72 / 25.4;
+  const payload = inset > 0
+    ? rawData.map(p => ({ ...p, trim: [inset, inset, p.w - inset, p.h - inset] }))
+    : rawData;
+  pyodide.globals.set("raw_json", JSON.stringify(payload));
+  pyodide.globals.set("opts_json", JSON.stringify(opts));
+  const out = pyodide.runPython("analyze_json(raw_json, opts_json)");
+  result = JSON.parse(out);
+  $("rerun").disabled = false;
+  render();
+}
+
+// ---- 描画
+function render() {
+  const s = result.summary;
+  status(`完了: ${fileName} ｜ ${result.pages.length}ページ ｜ ` +
+         `目次${result.toc_entries.length}項目 ｜ オフセット ${result.offset}` +
+         (result.toc_found ? "" : " ｜ ⚠目次ページ未検出（手動指定してください）"));
+  $("results").classList.add("show");
+
+  const b = $("banner");
+  b.style.display = "block";
+  if (s.errors === 0 && s.warnings === 0) {
+    b.className = "banner ok"; b.textContent = "✓ 問題は検出されませんでした";
+  } else if (s.errors > 0) {
+    b.className = "banner ng"; b.textContent = `✗ エラー ${s.errors} 件 / 警告 ${s.warnings} 件`;
+  } else {
+    b.className = "banner wn"; b.textContent = `⚠ 警告 ${s.warnings} 件`;
+  }
+
+  const matched = result.toc_entries.filter(e => e.matched_heading).length;
+  const nomCnt = result.pages.filter(p => p.nombre !== null).length;
+  const needCheck = result.toc_entries.filter(
+    e => !(e.similarity !== undefined && e.similarity >= 0.999)).length;
+  const mkCard = ([k, v, sev]) => {
+    const clk = (sev === "error" || sev === "warning")
+        ? ` style="cursor:pointer" title="${k}を順に表示" onclick="cycleIssue('${sev}')"`
+      : (sev === "check")
+        ? ` style="cursor:pointer" title="対応表の要確認を表示" onclick="openTocTable()"` : "";
+    const vc = (sev === "error" && s.errors) ? "color:var(--err)"
+             : (sev === "warning" && s.warnings) ? "color:var(--warn)"
+             : (sev === "check" && needCheck) ? "color:var(--warn)" : "";
+    return `<div class="card"${clk}><div class="v" style="${vc}">${v}</div><div class="k">${k}</div></div>`;
+  };
+  const row1 = [
+    ["総ページ数", result.pages.length, null],
+    ["目次項目", result.toc_entries.length, null],
+    ["照合成功", `${matched}/${result.toc_entries.length}`, null],
+    ["ノンブル検出", nomCnt, null],
+  ];
+  const row2 = [
+    ["エラー", s.errors, s.errors ? "error" : null],
+    ["警告", s.warnings, s.warnings ? "warning" : null],
+    ["要確認", needCheck, needCheck ? "check" : null],
+  ];
+  $("cards").innerHTML =
+    `<div class="cardrow r4">${row1.map(mkCard).join("")}</div>` +
+    `<div class="cardrow r3">${row2.map(mkCard).join("")}</div>`;
+
+  const L = $("issueList");
+  if (!result.issues.length) {
+    L.innerHTML = `<div class="issue okmsg">
+      <div class="top"><span class="badge b-ok">OK</span></div>
+      <div class="msg">すべての照合に成功しました。右のビューアでページを確認できます。</div></div>`;
+  } else {
+    const sevName = { error: "エラー", warning: "警告", info: "参考" };
+    const sevCls = { error: "", warning: " warn", info: " info" };
+    const sevBadge = { error: "b-err", warning: "b-warn", info: "b-info" };
+    L.innerHTML = result.issues.map((iss, i) => {
+      const sv = iss.severity;
+      return `<div class="issue${sevCls[sv] || ""}" id="iss${i}" onclick="selectIssue(${i})">
+        <div class="top"><span class="badge ${sevBadge[sv]}">${sevName[sv]} ${iss.id}</span>
+        <span class="loc">${pageLabel(iss.page_index)}</span></div>
+        <div class="msg">${esc(iss.msg)}</div></div>`;
+    }).join("");
+  }
+
+  $("tocPreviewBtn").disabled = !(result.toc_pages && result.toc_pages.length);
+  $("tocCount").textContent = `（${result.toc_entries.length}項目）`;
+  $("tocTable").innerHTML =
+    "<tr><th>#</th><th>目次項目</th><th>記載</th><th>照合見出し</th><th>類似度</th><th>判定</th></tr>" +
+    result.toc_entries.map((e, i) => {
+      const ok = e.similarity !== undefined && e.similarity >= 0.999;
+      const sim = e.similarity === undefined ? "—" :
+        (ok ? e.similarity : `<span class="simbad">${e.similarity}</span>`);
+      return `<tr class="${ok ? "" : "ng"}" style="cursor:pointer"
+        title="このページのプレビューへ" onclick="gotoTocEntry(${i})"><td class="num">${i + 1}</td>
+        <td>${esc(e.title)}</td><td class="num">${e.page}</td>
+        <td>${esc(e.matched_heading || "—")}</td><td class="num">${sim}</td>
+        <td>${ok ? '<span class="badge b-ok">OK</span>' : '<span class="badge b-err">要確認</span>'}</td></tr>`;
+    }).join("");
+
+  const sevMap = {};
+  for (const iss of result.issues) {
+    const cur = sevMap[iss.page_index];
+    if (cur !== "error") sevMap[iss.page_index] = (cur === undefined || iss.severity === "error") ? iss.severity : cur;
+  }
+  $("pagemap").innerHTML = result.pages.map(p => {
+    const sev = sevMap[p.index];
+    const cls = sev === "error" ? "cell err" : sev === "warning" ? "cell warn"
+      : (p.nombre === null ? "cell hid" : "cell");
+    const tip = [`物理 ${p.index + 1}`,
+      p.nombre !== null ? `ノンブル ${p.nombre_raw ?? p.nombre}` : "ノンブルなし",
+      p.hashira ? `柱: ${p.hashira}` : "",
+      ...p.headings.slice(0, 2).map(h => `見出し: ${h.text}`)].filter(Boolean).join(" ｜ ");
+    return `<div class="${cls}" data-idx="${p.index}" title="${esc(tip)}" onclick="gotoPage(${p.index})">${p.nombre ?? "·"}</div>`;
+  }).join("");
+  markMapSelection(viewPage);
+
+  if (result.issues.length) selectIssue(0); else gotoPage(0);
+}
+
+// 対応表の行クリック → そのページのプレビューへ
+function gotoTocEntry(i) {
+  if (!result) return;
+  const e = result.toc_entries[i];
+  if (!e) return;
+  if (e.matched_page_index != null) gotoPage(e.matched_page_index);
+  else if (e.page != null) jumpToNombre(String(e.page));
+}
+
+// 「目次ページを表示」→ 検出された目次ページだけを別ウィンドウでプレビュー
+async function openTocPreview() {
+  if (!result || !pdfDoc) return;
+  const idxs = (result.toc_pages || []).slice().sort((a, b) => a - b);
+  if (!idxs.length) {
+    alert("目次ページが検出されていません。上部の「目次ページ」に物理番号を入力して再解析してください。");
+    return;
+  }
+  const w = window.open("", "tocPreview",
+    "width=900,height=1000,scrollbars=yes,resizable=yes");
+  if (!w) {
+    alert("ポップアップがブロックされました。ブラウザでこのサイトのポップアップを許可してください。");
+    return;
+  }
+  const list = idxs.map(i => i + 1).join(", ");
+  w.document.open();
+  w.document.write(
+    "<!doctype html><html lang='ja'><head><meta charset='utf-8'>" +
+    "<title>目次ページ プレビュー — " + (fileName || "") + "</title><style>" +
+    "body{margin:0;background:#33312c;font-family:'Hiragino Sans','Yu Gothic',sans-serif;color:#eee}" +
+    "header{position:sticky;top:0;background:#222;padding:10px 14px;font-size:13px;font-weight:700;" +
+    "box-shadow:0 1px 6px rgba(0,0,0,.4)}" +
+    ".lbl{text-align:center;font-size:12px;color:#cbb;margin:16px 0 6px}" +
+    "img.pg{display:block;margin:0 auto;max-width:96%;background:#fff;border-radius:3px;" +
+    "box-shadow:0 2px 14px rgba(0,0,0,.5)}" +
+    "footer{padding:18px;text-align:center;color:#998;font-size:11px}</style></head>" +
+    "<body><header>目次ページ プレビュー ｜ 物理 " + list + " ページ</header>" +
+    "<div id='c'><p style='text-align:center;margin-top:40px'>レンダリング中…</p></div>" +
+    "<footer>" + (fileName || "") + "</footer></body></html>");
+  w.document.close();
+  const cont = w.document.getElementById("c");
+  cont.innerHTML = "";
+  for (const i of idxs) {
+    try {
+      const page = await pdfDoc.getPage(i + 1);
+      const vp = page.getViewport({ scale: 2 });
+      const cv = document.createElement("canvas");
+      cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+      await page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+      const lbl = w.document.createElement("div");
+      lbl.className = "lbl"; lbl.textContent = "物理 " + (i + 1) + " ページ";
+      const img = w.document.createElement("img");
+      img.className = "pg"; img.src = cv.toDataURL("image/png");
+      cont.appendChild(lbl); cont.appendChild(img);
+    } catch (e) { /* このページはスキップ */ }
+  }
+}
+
+// 要確認カード → 対応表を開いて表示
+function openTocTable() {
+  const d = $("tocDetails");
+  if (!d) return;
+  d.open = true;
+  d.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// ページマップで現在表示中ページを強調
+function markMapSelection(idx) {
+  const map = $("pagemap");
+  if (!map) return;
+  map.querySelectorAll(".cell.sel").forEach(c => c.classList.remove("sel"));
+  const cell = map.querySelector(`.cell[data-idx="${idx}"]`);
+  if (cell) {
+    cell.classList.add("sel");
+    cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+}
+
+function pageLabel(idx) {
+  const p = result.pages[idx];
+  return p.nombre !== null ? `物理 ${idx + 1} / ノンブル ${p.nombre}`
+                           : `物理 ${idx + 1}（ノンブル非表示）`;
+}
+
+let selIssue = -1;
+function selectIssue(i) {
+  selIssue = i;
+  document.querySelectorAll(".issue").forEach(el => el.classList.remove("sel"));
+  const el = $("iss" + i);
+  if (el) {
+    el.classList.add("sel");
+    // 指摘リスト内だけをスクロール（サマリーや左カラム全体は動かさない）
+    const box = $("issueList");
+    const r = el.getBoundingClientRect(), br = box.getBoundingClientRect();
+    if (r.top < br.top) box.scrollTop -= (br.top - r.top) + 6;
+    else if (r.bottom > br.bottom) box.scrollTop += (r.bottom - br.bottom) + 6;
+  }
+  const iss = result.issues[i];
+  viewRects = iss.rects || [];
+  gotoPage(iss.page_index, true);
+}
+
+// 種別（error/warning）ごとに該当指摘を順に巡回。
+// 同種を一巡したら、もう一方の種別も含めた全指摘へと続けて巡る。
+const cycleState = { error: -1, warning: -1 };
+function cycleIssue(sev) {
+  const list = result.issues.map((x, n) => n)
+    .filter(n => result.issues[n].severity === sev);
+  if (!list.length) return;
+  cycleState[sev] = (cycleState[sev] + 1) % list.length;
+  selectIssue(list[cycleState[sev]]);
+}
+
+// 指摘リストのキーボード送り（↑↓）も可能に
+// 物理ページ / ノンブル の両対応ジャンプ。
+//  "p25"=物理25, "n30"/"#30"=ノンブル30, 数字のみ=ノンブル優先→無ければ物理
+function doJump() {
+  if (!result) return;
+  const raw = ($("jumpInput").value || "").trim();
+  if (!raw) return;
+  let m;
+  if ((m = raw.match(/^[pP]\.?\s*(\d+)$/))) {
+    return gotoPage(parseInt(m[1], 10) - 1);
+  }
+  if ((m = raw.match(/^[nN#]\.?\s*([ivxlcIVXLC]+|\d+)$/))) {
+    return jumpToNombre(m[1]);
+  }
+  // 数字のみ: まずノンブル一致、無ければ物理ページ
+  if (/^\d+$/.test(raw)) {
+    const hit = result.pages.findIndex(p => String(p.nombre) === raw);
+    if (hit >= 0) return gotoPage(hit);
+    return gotoPage(parseInt(raw, 10) - 1);
+  }
+  // ローマ数字のみ
+  jumpToNombre(raw);
+}
+
+function jumpToNombre(token) {
+  const t = String(token).toLowerCase();
+  const hit = result.pages.findIndex(p =>
+    String(p.nombre) === t || (p.nombre_raw && String(p.nombre_raw).toLowerCase() === t));
+  if (hit >= 0) gotoPage(hit);
+  else $("pginfo").textContent = `ノンブル「${token}」は見つかりません`;
+}
+
+function fitView() { zoom = 1; renderPage(); }
+
+window.addEventListener("keydown", (e) => {
+  if (!result || !result.issues.length) return;
+  if (e.target && e.target.tagName === "INPUT") return;  // 入力中は無効
+  if (e.key === "ArrowDown" || e.key === "j") {
+    selectIssue((selIssue + 1) % result.issues.length); e.preventDefault();
+  } else if (e.key === "ArrowUp" || e.key === "k") {
+    selectIssue((selIssue - 1 + result.issues.length) % result.issues.length);
+    e.preventDefault();
+  }
+});
+
+// ---- ページビューア（pdf.js レンダリング + ハイライト矩形）
+let renderToken = 0;
+let zoom = 1;            // 1 = 画面フィット。ホイールで拡縮
+let fitScale = 1;       // フィット時の実スケール
+let curPageObj = null;  // 現在ページの pdf.js page
+
+async function renderPage(anchor) {
+  // anchor: {relX, relY, clientX, clientY} カーソル基準アンカー（任意）
+  if (!pdfDoc || !result) return;
+  const box = $("cvwrap");
+  const tok = ++renderToken;
+  const page = curPageObj || await pdfDoc.getPage(viewPage + 1);
+  curPageObj = page;
+  const v1 = page.getViewport({ scale: 1 });
+  fitScale = Math.min(
+    Math.max(0.3, (box.clientWidth - 12) / v1.width),
+    Math.max(0.3, (box.clientHeight - 12) / v1.height));
+  const scale = Math.min(8, fitScale * zoom);
+  const vp = page.getViewport({ scale });
+  const cv = $("pgcanvas"), ctx = cv.getContext("2d");
+  cv.width = vp.width; cv.height = vp.height;
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  if (tok !== renderToken) return;
+  const css = getComputedStyle(document.documentElement);
+  ctx.lineWidth = 2.5;
+  ctx.fillStyle = css.getPropertyValue("--hl-fill").trim() || "rgba(240,165,0,.18)";
+  ctx.strokeStyle = css.getPropertyValue("--hl-stroke").trim() || "rgba(229,83,75,.9)";
+  for (const r of viewRects) {
+    const [x0, y0, x1, y1] = r.map(v => v * scale);
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
+  // フィット時は中央寄せ、拡大時は左上基準＋スクロール
+  box.classList.toggle("fit", zoom <= 1.01);
+  if (anchor) {
+    // カーソルが指していた版面位置を、同じ画面位置に保つ
+    box.scrollLeft = anchor.relX * cv.width - anchor.offX;
+    box.scrollTop = anchor.relY * cv.height - anchor.offY;
+  }
+  $("pginfo").textContent = pageLabel(viewPage) +
+    (zoom > 1.01 ? ` ｜ ${Math.round(zoom * 100)}%` : "");
+}
+
+async function gotoPage(idx, keepRects, keepZoom) {
+  if (!pdfDoc || !result) return;
+  idx = Math.max(0, Math.min(result.pages.length - 1, idx));
+  if (idx !== viewPage) curPageObj = null;
+  if (!keepRects) {
+    viewRects = result.issues.filter(x => x.page_index === idx)
+                             .flatMap(x => x.rects || []);
+  }
+  if (!keepZoom) zoom = 1;
+  viewPage = idx;
+  markMapSelection(idx);
+  await renderPage();
+}
+
+function setupZoom() {
+  const box = $("cvwrap");
+  // --- ホイール: カーソル位置を厳密なアンカーにして拡縮
+  box.addEventListener("wheel", async (e) => {
+    if (!pdfDoc || !result) return;
+    e.preventDefault();
+    const rect = box.getBoundingClientRect();
+    const cv = $("pgcanvas");
+    if (!cv.width) return;
+    // カーソル下の版面相対位置（canvas左上=スクロール0基準）
+    const offX = e.clientX - rect.left;
+    const offY = e.clientY - rect.top;
+    const relX = (box.scrollLeft + offX) / cv.width;
+    const relY = (box.scrollTop + offY) / cv.height;
+    const prev = zoom;
+    zoom = Math.min(6, Math.max(1, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    if (Math.abs(zoom - prev) < 1e-3) return;
+    await renderPage({ relX, relY, offX, offY });
+  }, { passive: false });
+  // --- ダブルクリックでフィット復帰
+  box.addEventListener("dblclick", () => {
+    if (zoom > 1.01) { zoom = 1; renderPage(); }
+  });
+  // --- ドラッグでパン（拡大時のみ）
+  let drag = null;
+  box.addEventListener("mousedown", (e) => {
+    if (zoom <= 1.01) return;
+    drag = { x: e.clientX, y: e.clientY,
+             sl: box.scrollLeft, st: box.scrollTop };
+    box.classList.add("dragging");
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    box.scrollLeft = drag.sl - (e.clientX - drag.x);
+    box.scrollTop = drag.st - (e.clientY - drag.y);
+  });
+  window.addEventListener("mouseup", () => {
+    drag = null; box.classList.remove("dragging");
+  });
+}
+
+// ---- エクスポート
+function dl(name, mime, data) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type: mime }));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+const base = () => fileName.replace(/\.pdf$/i, "");
+function exportJSON() { dl(base() + "_toc_check.json", "application/json", JSON.stringify(result, null, 2)); }
+function exportCSV() {
+  const rows = [["ID", "判定", "物理ページ", "ノンブル", "内容"]];
+  for (const i of result.issues) {
+    const p = result.pages[i.page_index];
+    rows.push([i.id, i.severity === "error" ? "エラー" : "警告",
+               i.page_index + 1, p.nombre ?? "", i.msg]);
+  }
+  const csv = "\uFEFF" + rows.map(r =>
+    r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  dl(base() + "_issues.csv", "text/csv", csv);
+}
+async function exportHTML() {
+  status("HTMLレポート生成中…", true);
+  const clips = [];
+  for (const iss of result.issues.slice(0, 60)) {
+    const imgs = [];
+    const page = await pdfDoc.getPage(iss.page_index + 1);
+    const vp1 = page.getViewport({ scale: 1.6 });
+    const off = document.createElement("canvas");
+    off.width = vp1.width; off.height = vp1.height;
+    await page.render({ canvasContext: off.getContext("2d"), viewport: vp1 }).promise;
+    for (const r of (iss.rects || []).slice(0, 3)) {
+      const [x0, y0, x1, y1] = r.map(v => v * 1.6);
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, x1 - x0); c.height = Math.max(1, y1 - y0);
+      c.getContext("2d").drawImage(off, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+      imgs.push(c.toDataURL("image/png"));
+    }
+    clips.push(imgs);
+  }
+  const s = result.summary;
+  const ok = s.errors === 0 && s.warnings === 0;
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+<title>整合チェックレポート - ${esc(fileName)}</title><style>
+body{font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;background:#f4f5f7;color:#1c1e21;margin:0;font-size:14px}
+.wrap{max-width:1000px;margin:0 auto;padding:24px}
+.banner{color:#fff;border-radius:10px;padding:16px 22px;font-size:20px;font-weight:700;background:${ok ? "#1a7f37" : (s.errors ? "#c93030" : "#b8860b")}}
+.iss{background:#fff;border-radius:8px;border-left:5px solid #c93030;padding:12px 16px;margin:12px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.iss.w{border-left-color:#b8860b} .iss img{display:block;border:1px solid #ccc;border-radius:4px;max-width:100%;margin-top:6px}
+table{border-collapse:collapse;width:100%;background:#fff;margin-top:8px}
+th,td{border-bottom:1px solid #e7e9ec;padding:6px 9px;text-align:left;font-size:12.5px}
+th{background:#2d3748;color:#fff} tr.ng{background:#fdf0f0} .meta{color:#666;font-size:12px;margin:8px 0 16px}
+</style></head><body><div class="wrap">
+<div class="banner">${ok ? "✓ 問題は検出されませんでした" : `✗ エラー ${s.errors} 件 / 警告 ${s.warnings} 件`}</div>
+<div class="meta">対象: ${esc(fileName)} ／ ${result.pages.length}ページ ／ 目次${result.toc_entries.length}項目 ／ 生成: ${new Date().toLocaleString("ja-JP")} ／ toc-kenpan v1.1</div>
+<h2>検出された問題</h2>
+${result.issues.length ? result.issues.map((iss, i) => `
+<div class="iss${iss.severity === "warning" ? " w" : ""}">
+<b>[${iss.id}] ${pageLabel(iss.page_index)}</b><div>${esc(iss.msg)}</div>
+${(clips[i] || []).map(d => `<img src="${d}">`).join("")}</div>`).join("") : "<p>ありません。</p>"}
+<h2>目次 ⇔ 本文見出し 対応表</h2>
+<table><tr><th>#</th><th>目次項目</th><th>記載</th><th>照合見出し</th><th>類似度</th></tr>
+${result.toc_entries.map((e, i) => {
+  const ok2 = e.similarity !== undefined && e.similarity >= 0.999;
+  return `<tr${ok2 ? "" : ' class="ng"'}><td>${i + 1}</td><td>${esc(e.title)}</td><td>${e.page}</td><td>${esc(e.matched_heading || "—")}</td><td>${e.similarity ?? "—"}</td></tr>`;
+}).join("")}
+</table></div></body></html>`;
+  dl(base() + "_toc_report.html", "text/html", html);
+  status(`完了: ${fileName}`);
+}
+
+let rszT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(rszT);
+  rszT = setTimeout(() => { if (result) gotoPage(viewPage, true); }, 200);
+});
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>
