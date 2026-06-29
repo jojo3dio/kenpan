@@ -84,32 +84,30 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 /* 右：見出し＋タイル */
 .right h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
 .right .sub{margin:0 0 20px;color:var(--ink-dim);font-size:13px;line-height:1.7}
-.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:22px 14px}
 
-.tile{position:relative;isolation:isolate;--glow:var(--accent);cursor:pointer;
-  font:inherit;color:inherit;appearance:none;-webkit-appearance:none;
-  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
-  border:1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
-  border-radius:16px;padding:16px 10px 13px;text-align:center;
-  display:flex;flex-direction:column;align-items:center;gap:10px;
+.cell{display:flex;flex-direction:column;align-items:center;gap:9px}
+.iconbtn{position:relative;isolation:isolate;--glow:var(--accent);cursor:pointer;
+  font:inherit;appearance:none;-webkit-appearance:none;color:var(--glow);
+  width:72px;height:72px;border-radius:20px;
+  background:color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  display:flex;align-items:center;justify-content:center;
   transition:transform .16s, box-shadow .16s, border-color .16s, background .16s}
-[data-theme="dark"] .tile{--glow:color-mix(in srgb, var(--accent) 68%, white);
-  background:color-mix(in srgb, var(--accent) 16%, var(--panel));
-  border-color:color-mix(in srgb, var(--accent) 36%, var(--line))}
-.tile .ico{width:54px;height:54px;border-radius:15px;color:var(--glow);
-  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
-  border:1px solid color-mix(in srgb, var(--glow) 24%, transparent);
-  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-.tile .ico svg{width:28px;height:28px}
-.tile .tt{font-size:12.5px;line-height:1.35;font-weight:500}
-.tile:hover{transform:translateY(-2px);
-  box-shadow:0 2px 4px rgba(40,32,20,.06),0 12px 28px color-mix(in srgb, var(--glow) 22%, transparent)}
-.tile.sel{border-color:var(--glow);background:color-mix(in srgb, var(--glow) 11%, var(--panel))}
-.tile.sel::before{content:'';position:absolute;top:9px;right:9px;width:8px;height:8px;
-  border-radius:50%;background:var(--glow);box-shadow:0 0 6px var(--glow)}
+[data-theme="dark"] .iconbtn{--glow:color-mix(in srgb, var(--accent) 70%, white);
+  background:color-mix(in srgb, var(--accent) 22%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 42%, var(--line))}
+.iconbtn svg{width:34px;height:34px}
+.iconbtn:hover{transform:translateY(-3px);
+  box-shadow:0 4px 10px rgba(40,32,20,.07),0 14px 30px color-mix(in srgb, var(--glow) 26%, transparent)}
+.iconbtn.sel{border-color:var(--glow);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--glow) 45%, transparent)}
 
-/* タイル：ホバーでLEDが縁を一周 */
-.tile::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.7px;
+.cap{font-size:12px;line-height:1.35;font-weight:500;text-align:center;color:var(--ink);max-width:96px}
+.iconbtn.sel + .cap{color:var(--glow);font-weight:700}
+
+/* ホバーでLEDがアイコンの縁を一周 */
+.iconbtn::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.8px;
   background:conic-gradient(from var(--a),
      #fff 0deg, var(--glow) 14deg,
      color-mix(in srgb, var(--glow) 0%, transparent) 78deg, transparent 360deg);
@@ -117,20 +115,20 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
   -webkit-mask-composite:xor;mask-composite:exclude;
   filter:drop-shadow(0 0 3px color-mix(in srgb, var(--glow) 70%, transparent));
   opacity:0;transition:opacity .25s;pointer-events:none;z-index:3}
-.tile:hover::after{opacity:1;animation:led 1.4s linear infinite}
+.iconbtn:hover::after{opacity:1;animation:led 1.4s linear infinite}
 @keyframes led{ to{ --a:360deg; } }
-@media (prefers-reduced-motion: reduce){ .tile:hover::after{animation:none;opacity:.9} }
+@media (prefers-reduced-motion: reduce){ .iconbtn:hover::after{animation:none;opacity:.9} }
 
-.tile .del{position:absolute;top:7px;left:7px;width:22px;height:22px;border-radius:7px;
+.iconbtn .del{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;
   border:1px solid var(--line);background:var(--panel);color:var(--ink-faint);z-index:4;
   display:none;align-items:center;justify-content:center;cursor:pointer;font-size:13px;line-height:1}
-.tile .del:hover{border-color:#c8362a;color:#c8362a}
-body.editing .tile .del{display:flex}
+.iconbtn .del:hover{border-color:#c8362a;color:#c8362a}
+body.editing .iconbtn .del{display:flex}
 
-.tile.add{border-style:dashed;color:var(--ink-faint);background:transparent;justify-content:center}
-.tile.add:hover{border-color:var(--amber);color:var(--amber);transform:none;box-shadow:none}
-.tile.add::after{display:none}
-.tile.add .plus{font-size:26px;line-height:1}
+.iconbtn.add{background:transparent;border-style:dashed;color:var(--ink-faint)}
+.iconbtn.add:hover{border-color:var(--amber);color:var(--amber);box-shadow:none}
+.iconbtn.add::after{display:none}
+.iconbtn.add .plus{font-size:28px;line-height:1}
 
 /* フッタ */
 .foot{max-width:1180px;margin:0 auto;padding:8px 28px 44px;color:var(--ink-faint);font-size:12px;line-height:1.7}
@@ -298,23 +296,24 @@ function scheduleDetail(i){ if(frozen) return; clearTimeout(hoverTimer); hoverTi
 function renderTiles(){
   const g=$('#tiles'); g.innerHTML='';
   tools.forEach((t,i)=>{
-    const el=document.createElement('button');
-    el.className='tile'+(i===shown?' sel':''); el.type='button';
-    el.style.setProperty('--accent', colorOf(t.icon));
-    el.title=t.name+'を開く';
-    el.innerHTML=`<span class="del" title="削除" data-del="${i}">×</span>
-      <span class="ico">${ICONS[t.icon]||ICONS.check}</span>
-      <span class="tt">${esc(t.name)}</span>`;
-    el.addEventListener('mouseenter',()=>scheduleDetail(i));
-    el.addEventListener('focus',()=>showDetail(i));
-    el.addEventListener('click',e=>{ if(e.target.closest('.del')) return; openUrl(t.url); });
-    g.appendChild(el);
+    const cell=document.createElement('div'); cell.className='cell';
+    const b=document.createElement('button');
+    b.className='iconbtn'+(i===shown?' sel':''); b.type='button';
+    b.style.setProperty('--accent', colorOf(t.icon));
+    b.title=t.name+'を開く';
+    b.innerHTML=`<span class="del" title="削除" data-del="${i}">×</span>${ICONS[t.icon]||ICONS.check}`;
+    b.addEventListener('mouseenter',()=>scheduleDetail(i));
+    b.addEventListener('focus',()=>showDetail(i));
+    b.addEventListener('click',e=>{ if(e.target.closest('.del')) return; openUrl(t.url); });
+    const cap=document.createElement('span'); cap.className='cap'; cap.textContent=t.name;
+    cell.appendChild(b); cell.appendChild(cap); g.appendChild(cell);
   });
-  const add=document.createElement('button');
-  add.className='tile add'; add.type='button';
-  add.innerHTML=`<span class="ico" style="border-style:dashed;background:transparent"><span class="plus">＋</span></span><span class="tt">追加</span>`;
+  const acell=document.createElement('div'); acell.className='cell';
+  const add=document.createElement('button'); add.className='iconbtn add'; add.type='button'; add.title='ツールを追加';
+  add.innerHTML=`<span class="plus">＋</span>`;
   add.addEventListener('click',openModal);
-  g.appendChild(add);
+  const acap=document.createElement('span'); acap.className='cap'; acap.textContent='追加';
+  acell.appendChild(add); acell.appendChild(acap); g.appendChild(acell);
   g.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick=e=>{ e.stopPropagation(); const i=+b.dataset.del;
       if(confirm(`「${tools[i].name}」を一覧から削除しますか？\n（ファイル自体は消えません）`)){
@@ -323,7 +322,7 @@ function renderTiles(){
         renderTiles(); renderDetail(shown); } };
   });
 }
-function markShown(){ const els=$('#tiles').querySelectorAll('.tile:not(.add)');
+function markShown(){ const els=$('#tiles').querySelectorAll('.iconbtn:not(.add)');
   els.forEach((e,i)=>e.classList.toggle('sel', i===shown)); }
 
 /* グリッドを離れたら保留中の切替を取消（最後に確定した表示を維持） */
