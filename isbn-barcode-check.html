@@ -16,7 +16,7 @@
 :root{
   --bg:#f7f4ee; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
   --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
-  --amber:#b9791a; --amber-bg:#f6ead2;
+  --amber:#2563eb; --amber-bg:#e8effd;
   --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
   --ok:#2e7d46; --ok-bg:#e7f2ea;
   --stage:#fcfaf5; --shadow:0 1px 4px rgba(60,45,20,.10);
@@ -27,7 +27,7 @@
 [data-theme="dark"]{
   --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
   --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
-  --amber:#e8a33d; --amber-bg:#33270f;
+  --amber:#6ea0f5; --amber-bg:#182a44;
   --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
   --ok:#4fae6e; --ok-bg:#15301f;
   --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
@@ -197,7 +197,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true"></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-06-26c</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-06-22s</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -552,8 +552,7 @@ function checkBarcodeQuality(canvas, box){
   // 3) バー帯内の複数走査線でrun-length
   const lines=[]; const nScan=7;
   for(let k=0;k<nScan;k++){
-    // 端は人間可読数字やガードバーのはみ出しを踏みやすいので、バー帯の中央60%だけを走査する
-    const y=Math.round(ry0+(ry1-ry0)*(0.2+0.6*k/(nScan-1)));
+    const y=Math.round(ry0+(ry1-ry0)*k/(nScan-1));
     let sum=0,cnt=0; for(let x=cx0;x<=cx1;x++){ sum+=lum(x,y); cnt++; }
     const thr=sum/cnt*0.82;
     const b=[]; for(let x=cx0;x<=cx1;x++) b.push(lum(x,y)<thr?1:0);
@@ -576,8 +575,6 @@ function checkBarcodeQuality(canvas, box){
   const transMed=med(lines.map(l=>l.trans));
   const maxRatioMed=med(lines.map(l=>l.maxRatio));
   const transVar=Math.max(...lines.map(l=>l.trans))-Math.min(...lines.map(l=>l.trans));
-  // 中央値から大きく外れる走査線の本数。端の数字行を1本踏んだ程度の単発外れでは騒がない
-  const transOutliers=lines.filter(l=>Math.abs(l.trans-transMed)>=6).length;
   const issues=[];
   // EAN-13: 黒バー30本/遷移59前後。端処理で前後するので幅を持たせる
   // EAN-13は規格上、要素(白黒run)59・黒バー30が固定。1本でも欠けると遷移が2減る。
@@ -585,10 +582,10 @@ function checkBarcodeQuality(canvas, box){
   if(barsMed<29||barsMed>31) issues.push("読み込みができません（バーの欠け・余分の可能性）");
   if(transMed<58||transMed>60) issues.push("読み込みができません（バーの欠け・つぶれの可能性）");
   if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
-  if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
+  if(transVar>=8) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
   const uniq=[...new Set(issues)];
   return {ok:issues.length===0, note:uniq.join(" / "), tightBox,
-          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transVar,transOutliers}};
+          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transVar}};
 }
 
 /* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
@@ -805,15 +802,8 @@ function normalizeOcrIsbn(txt, bcIsbn){
   if(!txt) return txt;
   // OCRは数字を英字に誤読する(9→O, 1→I 等)。ISBN直後の英数混在列を数字へ補正し、
   // バーコード値やチェックデジットで13桁に整える。
-  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,24})/i, (m, head, body)=>{
-    // bodyを先頭から1文字ずつ数字化し、ISBN13桁に達した時点で打ち切る。
-    // 残り(" C0093"等の後続トークン)はそのまま温存し、誤って飲み込まないようにする。
-    let digits='', consumed=0;
-    for(let i=0;i<body.length;i++){
-      digits+=ocrFixDigits(body[i]).replace(/[^0-9Xx]/gi,''); consumed=i+1;
-      if(digits.length>=13) break;
-    }
-    const rest=body.slice(consumed);  // ISBN13桁以降(Cコード等)はそのまま戻す
+  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,20})/i, (m, head, body)=>{
+    let digits=ocrFixDigits(body).replace(/[^0-9Xx]/gi,'');
     if(digits.length<13) return m;
     digits=digits.slice(0,13);
     let fixed=null;
@@ -821,8 +811,8 @@ function normalizeOcrIsbn(txt, bcIsbn){
     else if(/^97[89]/.test(digits) && ean13ok(digits)) fixed=digits;
     else if(ean13ok('978'+digits.slice(3))) fixed='978'+digits.slice(3);
     else if(ean13ok('979'+digits.slice(3))) fixed='979'+digits.slice(3);
-    if(!fixed) fixed=digits.slice(0,13);
-    return head+fixed+' '+rest;
+    if(!fixed) return head+digits.slice(0,13)+' ';
+    return head+fixed+' ';
   });
 }
 function ean13ok(code){

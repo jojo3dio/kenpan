@@ -81,8 +81,8 @@ ol.steps>li b{color:var(--ink)}
 .faq dt{font-weight:700;font-size:14px;margin-top:16px}
 .faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
 
-.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
-  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--glow);
+  border-radius:12px;padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
 .note b{color:var(--ink)}
 ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
 ul.plain li{margin:5px 0}
@@ -102,11 +102,11 @@ ul.plain li{margin:5px 0}
     <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/><circle cx="20" cy="18" r="1.4" fill="currentColor"/></svg></div>
     <div>
       <h1>目次整合検版</h1>
-      <p>目次・見出し・柱・ノンブルの相互整合をチェック。横組み・縦組みに対応します。</p>
+      <p>本文PDFから見出し・柱・ノンブルを解析し、目次との整合をチェック。対応表・類似度・問題抽出・HTMLレポートに対応します（ブラウザ内解析）。</p>
       <a class="open" href="toc_kenpan.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
     </div>
   </div>
-  <div class='note'>※この手順は機能概要から作成した<b>ドラフト</b>です。実機のボタン名に合わせて文言を調整してください。</div><h2>このツールでできること</h2><p class='lead'>目次に書かれた項目と、本文の見出し・柱（はしら）・ノンブルの<b>相互整合</b>をチェックします。横組み・縦組みのどちらにも対応します。</p><ol class="steps"><li><b>PDFを読み込む。</b>対象の組版PDFを開きます。</li><li><b>組方向を確認。</b>横組み／縦組みを選びます（自動判定後に必要なら手動修正）。</li><li><b>目次を抽出。</b>目次ページから「項目名」と「対応ページ番号」を取り出します。</li><li><b>本文と突き合わせ。</b>各項目について、本文側の見出し・柱・ノンブルと一致するかを照合します。</li><li><b>不整合一覧を確認。</b>「目次のページ番号と実ページがずれている」「見出しの文言が違う」などを抽出します。</li><li><b>該当ページへ。</b>指摘から該当ページにジャンプして現物を確認します。</li></ol><h2>チェックする観点</h2><div class="cards"><div class="c"><div class="t">ページ番号の一致</div><div class="d">目次の番号と、本文の実ノンブルが一致するか。</div></div><div class="c"><div class="t">見出し文言の一致</div><div class="d">目次の項目名と本文見出しの表記ゆれ・誤字。</div></div><div class="c"><div class="t">柱（はしら）の整合</div><div class="d">各ページの柱が章・節と合っているか。</div></div><div class="c"><div class="t">抜け・重複</div><div class="d">目次にあるのに本文に無い項目、その逆。</div></div></div><h2>うまくいかないとき</h2><dl class="faq"><dt>目次が読み取れない</dt><dd>目次ページの範囲を指定し、リーダー（……）や改行の入り方を確認してください。</dd><dt>文言が違うと出るが実際は同じ</dt><dd>全角・半角や約物の違いを拾っている場合があります。表記統一の確認に使えます。</dd><dt>縦組みで位置がずれる</dt><dd>組方向の指定が縦組みになっているか確認してください。</dd></dl>
+  <h2>このツールでできること</h2><p class='lead'>本文PDFから見出し・柱・ノンブルを解析し、<b>目次との整合</b>をチェックします。目次の各項目が本文のどの見出し・ページに対応するかを突き合わせ、ページ番号のずれ・抜け・表記違いを抽出します。解析はブラウザ内の Python エンジン（Pyodide）で行い、ファイルは外部に送信されません。</p><ol class="steps"><li><b>本文PDFを読み込む。</b>「本文PDFをここにドラッグ＆ドロップ」または「PDFを選択」。初回は<b>解析エンジン（Pyodide）の準備</b>に少し時間がかかります（「準備中…」表示）。</li><li><b>目次ページを指定（任意）。</b>「目次ページ（物理番号カンマ区切り）」に、目次が載っている<b>物理ページ番号</b>を入力します。「目次ページを表示」でプレビュー確認できます。</li><li><b>しきい値を調整。</b>必要に応じて「類似度しきい値」「見出しサイズ差」「トンボ余白」を設定します（まずは既定のままでOK）。</li><li><b>「判定／再解析」を押す。</b>「目次 ⇔ 本文見出し 対応表」と「検出された問題」が表示されます。</li><li><b>対応表を確認。</b>各行で 目次項目／記載（目次のページ）／照合見出し／類似度／ノンブル を確認し、<span class='tag'>要確認</span> の行を精査。「移動」で本文の該当ページへジャンプします。</li><li><b>ページマップで俯瞰。</b>「ページマップ」「全体表示」と <span class='tag'>⇤ ◀ ▶ ⇥</span> でページを移動して現物を確認します。</li><li><b>レポート出力。</b>「HTMLレポート」で整合チェックレポートを書き出し、校正記録として残せます。</li></ol><h2>チェックする観点</h2><div class="cards"><div class="c"><div class="t">ページ番号の一致</div><div class="d">目次の記載ページと、本文の実ノンブルが合っているか。</div></div><div class="c"><div class="t">見出し文言の一致</div><div class="d">目次項目と本文見出しの一致度を「類似度」で評価。表記ゆれ・誤字を発見。</div></div><div class="c"><div class="t">柱・ノンブルの整合</div><div class="d">各ページの柱・ノンブルが内容と整合しているか。</div></div><div class="c"><div class="t">抜け・要確認</div><div class="d">対応が見つからない／怪しい項目を抽出します。</div></div></div><h2>対応表の見かた</h2><div class="cards"><div class="c"><div class="t">目次項目</div><div class="d">目次から読み取った項目名。</div></div><div class="c"><div class="t">記載</div><div class="d">目次に書かれているページ番号。</div></div><div class="c"><div class="t">照合見出し</div><div class="d">本文側で対応づいた見出し。</div></div><div class="c"><div class="t">類似度</div><div class="d">目次項目と本文見出しの一致度。低い行は表記違いの可能性。</div></div><div class="c"><div class="t">移動</div><div class="d">クリックで本文の該当ページを表示。</div></div></div><div class='note'><b>目次ページ指定のコツ：</b>目次が自動で拾えないときは、目次のある<b>物理ページ</b>（ファイルの先頭からの通し枚数）をカンマ区切りで指定すると確実です。「目次ページを表示」で範囲が正しいか確認してから判定してください。</div><h2>うまくいかないとき</h2><dl class="faq"><dt>「準備中…」から進まない</dt><dd>初回はエンジン読み込みに時間がかかります。少し待つか、ページを再読み込みしてから再試行してください。</dd><dt>目次が読み取れない</dt><dd>「目次ページ（物理番号カンマ区切り）」で目次の物理ページを指定してください。リーダー（……）や改行の入り方で読み取りが変わります。</dd><dt>同じ見出しなのに不一致になる</dt><dd>「類似度しきい値」を下げると拾いやすくなります。全角・半角や約物の違いが原因のこともあります。</dd><dt>見出しでない行を拾う</dt><dd>「見出しサイズ差」を調整して、本文と見出しの文字サイズ差で絞り込んでください。</dd></dl>
   <div class="foot">検版ハブ｜目次整合検版 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
 </div>
 <script>
