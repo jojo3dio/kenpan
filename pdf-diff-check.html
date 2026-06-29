@@ -30,7 +30,7 @@
     --amber:#7c3aed; --amber-soft:#ece5fb;
     --red:#d83a2e; --cyan:#1f93a6; --ok:#3f9a37;
     --headerGrad:linear-gradient(180deg,#ffffff,#f3f0ea);
-    --stage1:#e8e4db; --stage2:#dedacf;
+    --stage1:#efeafb; --stage2:#e6def7;
     --bodyGlow:radial-gradient(1200px 600px at 80% -10%,#efe9fc 0,transparent 60%);
     --hudBg:rgba(255,255,255,.85); --zoomBg:rgba(255,255,255,.92); --busyBg:rgba(245,243,238,.6);
   }
@@ -49,7 +49,7 @@
     border-bottom:1px solid var(--line);background:var(--headerGrad);
     flex:0 0 auto;
   }
-  .brand{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+  .brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
   .brand .mk{
     width:11px;height:24px;background:repeating-linear-gradient(90deg,var(--cyan) 0 3px,transparent 3px 6px),var(--red);
     border-radius:1px;transform:translateY(4px)}
@@ -271,6 +271,9 @@
     background:var(--amber-soft);color:var(--amber);min-width:30px;text-align:center}
   .psec-h .count.zero{background:#16241a;color:var(--ok)}
   body.light .psec-h .count.zero{background:#e4f2e0}
+  @keyframes errpulse{0%,100%{background:var(--red);color:#fff;box-shadow:0 0 0 0 color-mix(in srgb,var(--red) 55%,transparent)}50%{background:color-mix(in srgb,var(--red) 30%,var(--panel));color:var(--red);box-shadow:0 0 0 5px transparent}}
+  #diffCount:not(.zero),#allCount:not(.zero){animation:errpulse 1.05s ease-in-out infinite}
+  @media (prefers-reduced-motion: reduce){#diffCount:not(.zero),#allCount:not(.zero){animation:none;background:var(--red);color:#fff}}
   .psec-cur .summary{flex:0 0 auto}
   .psec-cur .reglist{flex:1 1 0}
   .psec-all .allpages{flex:1 1 0;display:block}
@@ -304,6 +307,7 @@
     border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
   .fbverdict button:hover{border-color:var(--amber)}
   .fbverdict button.on{background:var(--amber);color:#181410;border-color:var(--amber);font-weight:700}
+  body.light .modes button.on,body.light .btn.primary,body.light .secbtn.allpg:hover:not(:disabled),body.light .fbverdict button.on{color:#fff}
   .fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
   .fbactions{display:flex;gap:9px;margin-top:18px}
   .fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
