@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-/* LED縁取り用：角度をアニメーションできるよう登録 */
 @property --a{ syntax:'<angle>'; initial-value:0deg; inherits:false; }
 
 :root{
@@ -27,7 +26,6 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
   -webkit-font-smoothing:antialiased;min-height:100vh}
-a{color:inherit}
 
 /* ヘッダ */
 .top{display:flex;align-items:center;gap:14px;padding:20px 28px;background:var(--strip);border-bottom:1px solid var(--line)}
@@ -42,85 +40,98 @@ a{color:inherit}
 .tbtn.primary{border-color:var(--amber);background:var(--amber);color:#1a1205;font-weight:700}
 .tbtn.primary:hover{filter:brightness(1.05)}
 
-/* リード */
-.lead{max-width:1080px;margin:0 auto;padding:34px 28px 8px}
-.lead h1{font-size:26px;margin:0 0 8px;letter-spacing:.01em}
-.lead p{margin:0;color:var(--ink-dim);font-size:14px;line-height:1.7;max-width:62ch}
+/* 2カラム本体 */
+.app{max-width:1180px;margin:0 auto;padding:28px;
+  display:grid;grid-template-columns:390px 1fr;gap:28px;align-items:start}
 
-/* グリッド */
-.grid{max-width:1080px;margin:0 auto;padding:22px 28px 60px;
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
-
-/* カード（横並び：アイコン左／説明右） */
-.card{position:relative;isolation:isolate;display:flex;flex-direction:row;
-  align-items:flex-start;gap:15px;
-  background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  padding:18px 20px;box-shadow:var(--shadow);min-height:138px;
-  transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease}
-
-/* ツールカードは薄く同系色のティント＋アクセント縁 */
-.card.tool{--glow:var(--accent);cursor:pointer;
+/* 左：詳細パネル */
+.detail{position:sticky;top:24px;--glow:var(--accent);
   background:color-mix(in srgb, var(--accent) 5%, var(--panel));
-  border-color:color-mix(in srgb, var(--accent) 18%, var(--line))}
-[data-theme="dark"] .card.tool{
-  --glow:color-mix(in srgb, var(--accent) 68%, white);
-  background:color-mix(in srgb, var(--accent) 22%, var(--panel));
-  border-color:color-mix(in srgb, var(--accent) 48%, var(--line))}
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:30px 28px;box-shadow:var(--shadow);
+  transition:background .25s, border-color .25s}
+[data-theme="dark"] .detail{--glow:color-mix(in srgb, var(--accent) 68%, white);
+  background:color-mix(in srgb, var(--accent) 18%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 42%, var(--line))}
+.detail .dicon{width:76px;height:76px;border-radius:20px;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center;margin-bottom:20px}
+.detail .dicon svg{width:40px;height:40px}
+.detail .dcat{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--glow);margin-bottom:8px}
+.detail h2{margin:0 0 14px;font-size:25px;line-height:1.3}
+.detail .ddesc{margin:0 0 12px;color:var(--ink-dim);font-size:14.5px;line-height:1.85}
+.detail .dfile{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
+  margin:0 0 24px;word-break:break-all}
+.dact{display:flex;flex-direction:row;gap:12px}
+.dact button{flex:1;aspect-ratio:1/1;max-height:150px;font-family:var(--ui);font-size:13.5px;
+  font-weight:600;cursor:pointer;border-radius:18px;border:1px solid transparent;transition:.15s;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px}
+.dact button .bi{display:flex;align-items:center;justify-content:center}
+.dact button .bi svg{width:28px;height:28px}
+.dact .open{background:var(--glow);color:#fff;
+  box-shadow:0 10px 24px color-mix(in srgb, var(--glow) 30%, transparent)}
+.dact .open:hover{filter:brightness(1.07);transform:translateY(-2px)}
+.dact .man{background:color-mix(in srgb, var(--glow) 8%, var(--panel));color:var(--ink);
+  border-color:color-mix(in srgb, var(--glow) 34%, var(--line))}
+.dact .man:hover{background:color-mix(in srgb, var(--glow) 14%, var(--panel));border-color:var(--glow);transform:translateY(-2px)}
+.dact .man[disabled]{opacity:.4;cursor:not-allowed;transform:none}
+.dact .man[disabled]:hover{transform:none;border-color:color-mix(in srgb, var(--glow) 34%, var(--line));background:color-mix(in srgb, var(--glow) 8%, var(--panel))}
 
-.card.tool:hover{transform:translateY(-2px);
-  box-shadow:0 2px 4px rgba(40,32,20,.06),
-             0 14px 34px color-mix(in srgb, var(--glow) 22%, transparent)}
+/* 右：見出し＋タイル */
+.right h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
+.right .sub{margin:0 0 20px;color:var(--ink-dim);font-size:13px;line-height:1.7}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:14px}
 
-/* LEDが縁を一周する演出 */
-.card.tool::after{
-  content:'';position:absolute;inset:0;border-radius:inherit;padding:1.7px;
+.tile{position:relative;isolation:isolate;--glow:var(--accent);cursor:pointer;
+  font:inherit;color:inherit;appearance:none;-webkit-appearance:none;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
+  border-radius:16px;padding:16px 10px 13px;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  transition:transform .16s, box-shadow .16s, border-color .16s, background .16s}
+[data-theme="dark"] .tile{--glow:color-mix(in srgb, var(--accent) 68%, white);
+  background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 36%, var(--line))}
+.tile .ico{width:54px;height:54px;border-radius:15px;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 24%, transparent);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.tile .ico svg{width:28px;height:28px}
+.tile .tt{font-size:12.5px;line-height:1.35;font-weight:500}
+.tile:hover{transform:translateY(-2px);
+  box-shadow:0 2px 4px rgba(40,32,20,.06),0 12px 28px color-mix(in srgb, var(--glow) 22%, transparent)}
+.tile.sel{border-color:var(--glow);background:color-mix(in srgb, var(--glow) 11%, var(--panel))}
+.tile.sel::before{content:'';position:absolute;top:9px;right:9px;width:8px;height:8px;
+  border-radius:50%;background:var(--glow);box-shadow:0 0 6px var(--glow)}
+
+/* タイル：ホバーでLEDが縁を一周 */
+.tile::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.7px;
   background:conic-gradient(from var(--a),
-     #ffffff 0deg,
-     var(--glow) 14deg,
-     color-mix(in srgb, var(--glow) 0%, transparent) 78deg,
-     transparent 360deg);
+     #fff 0deg, var(--glow) 14deg,
+     color-mix(in srgb, var(--glow) 0%, transparent) 78deg, transparent 360deg);
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
   filter:drop-shadow(0 0 3px color-mix(in srgb, var(--glow) 70%, transparent));
   opacity:0;transition:opacity .25s;pointer-events:none;z-index:3}
-.card.tool:hover::after{opacity:1;animation:led 1.5s linear infinite}
+.tile:hover::after{opacity:1;animation:led 1.4s linear infinite}
 @keyframes led{ to{ --a:360deg; } }
-@media (prefers-reduced-motion: reduce){
-  .card.tool:hover::after{animation:none;opacity:.9}
-}
+@media (prefers-reduced-motion: reduce){ .tile:hover::after{animation:none;opacity:.9} }
 
-/* アイコンチップ */
-.card .icon{width:50px;height:50px;border-radius:13px;color:var(--glow);
-  background:color-mix(in srgb, var(--glow) 13%, var(--panel));
-  border:1px solid color-mix(in srgb, var(--glow) 24%, transparent);
-  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-.card .icon svg{width:27px;height:27px}
-
-/* 本文側 */
-.card .body{flex:1;min-width:0;display:flex;flex-direction:column;min-height:50px}
-.card .cat{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--glow);margin-bottom:5px}
-.card h3{margin:0 0 6px;font-size:16px;line-height:1.3}
-.card p{margin:0;color:var(--ink-dim);font-size:12.5px;line-height:1.6}
-.card .go{margin-top:auto;padding-top:12px;display:flex;align-items:center;gap:6px;
-  font-size:12.5px;color:var(--ink-faint);font-weight:500;transition:color .16s}
-.card.tool:hover .go{color:var(--glow)}
-
-.card .del{position:absolute;top:11px;right:11px;width:26px;height:26px;border-radius:8px;
+.tile .del{position:absolute;top:7px;left:7px;width:22px;height:22px;border-radius:7px;
   border:1px solid var(--line);background:var(--panel);color:var(--ink-faint);z-index:4;
-  display:none;align-items:center;justify-content:center;cursor:pointer;font-size:15px;line-height:1}
-.card .del:hover{border-color:#c8362a;color:#c8362a}
-body.editing .card .del{display:flex}
+  display:none;align-items:center;justify-content:center;cursor:pointer;font-size:13px;line-height:1}
+.tile .del:hover{border-color:#c8362a;color:#c8362a}
+body.editing .tile .del{display:flex}
 
-/* 追加カード */
-.card.add{align-items:center;justify-content:center;flex-direction:column;text-align:center;
-  cursor:pointer;border-style:dashed;color:var(--ink-faint);background:transparent;box-shadow:none;gap:8px}
-.card.add:hover{border-color:var(--amber);color:var(--amber)}
-.card.add .plus{font-size:30px;line-height:1}
-.card.add small{font-size:12px}
+.tile.add{border-style:dashed;color:var(--ink-faint);background:transparent;justify-content:center}
+.tile.add:hover{border-color:var(--amber);color:var(--amber);transform:none;box-shadow:none}
+.tile.add::after{display:none}
+.tile.add .plus{font-size:26px;line-height:1}
 
 /* フッタ */
-.foot{max-width:1080px;margin:0 auto;padding:0 28px 40px;color:var(--ink-faint);font-size:12px;line-height:1.7}
+.foot{max-width:1180px;margin:0 auto;padding:8px 28px 44px;color:var(--ink-faint);font-size:12px;line-height:1.7}
 .foot code{font-family:var(--mono);background:var(--panel2);padding:1px 5px;border-radius:4px}
 
 /* モーダル */
@@ -128,7 +139,7 @@ body.editing .card .del{display:flex}
   align-items:center;justify-content:center;z-index:50;padding:20px}
 .modal-bg.show{display:flex}
 .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  width:100%;max-width:440px;padding:24px;box-shadow:var(--shadow)}
+  width:100%;max-width:460px;padding:24px;box-shadow:var(--shadow);max-height:90vh;overflow:auto}
 .modal h2{margin:0 0 4px;font-size:17px}
 .modal .hint{margin:0 0 18px;font-size:12px;color:var(--ink-dim);line-height:1.6}
 .field{margin-bottom:14px}
@@ -143,15 +154,18 @@ body.editing .card .del{display:flex}
 .iconrow button{width:42px;height:42px;border-radius:11px;border:1px solid var(--line);
   background:var(--panel2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .iconrow button svg{width:23px;height:23px}
-.iconrow button.sel{border-color:currentColor;
-  background:color-mix(in srgb, currentColor 12%, var(--panel))}
+.iconrow button.sel{border-color:currentColor;background:color-mix(in srgb, currentColor 12%, var(--panel))}
+
+@media(max-width:860px){
+  .app{grid-template-columns:1fr;gap:20px}
+  .detail{position:static}
+}
 </style>
 </head>
 <body>
 
 <div class="top">
   <div class="brand">
-    <!-- 署名マーク: 検版=点検の目盛り入り検版定規 -->
     <svg class="mark" viewBox="0 0 60 52" fill="none" aria-hidden="true">
       <rect x="3" y="3" width="54" height="46" rx="6" fill="var(--amber-bg)" stroke="var(--amber)" stroke-width="2.5"/>
       <line x1="3" y1="16" x2="11" y2="16" stroke="var(--amber)" stroke-width="2.5"/>
@@ -159,35 +173,36 @@ body.editing .card .del{display:flex}
       <line x1="3" y1="36" x2="11" y2="36" stroke="var(--amber)" stroke-width="2.5"/>
       <path d="M26 27l6 6 12-14" stroke="var(--amber)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <div>
-      <b>検版ハブ</b><br><span>下版前点検ツール</span>
-    </div>
+    <div><b>検版ハブ</b><br><span>下版前点検ツール</span></div>
   </div>
   <div class="sp"></div>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
 </div>
 
-<div class="lead">
-  <h1>点検したいデータを選ぶ</h1>
-  <p>各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。タイルを押すと別タブで開きます。新しく作ったツールはいつでも追加できます。</p>
-</div>
+<div class="app">
+  <aside class="detail" id="detail"></aside>
 
-<div class="grid" id="grid"></div>
+  <section class="right">
+    <h1>点検ツールを選ぶ</h1>
+    <p class="sub">アイコンをクリックすると、そのツールが別タブで開きます。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。</p>
+    <div class="tiles" id="tiles"></div>
+  </section>
+</div>
 
 <div class="foot">
-  <p>このページと各ツールのHTMLは同じフォルダに置いてください。リンクは相対パス（例 <code>isbn-barcode-check.html</code>）で開きます。設定はこのブラウザに保存され、次回も同じ並びで表示されます。</p>
+  <p>このページと各ツール・マニュアルのHTMLは同じフォルダに置いてください。リンクは相対パス（例 <code>isbn-barcode-check.html</code>）で開きます。設定はこのブラウザに保存されます。</p>
 </div>
 
-<!-- 追加/編集モーダル -->
 <div class="modal-bg" id="modalBg">
   <div class="modal">
     <h2 id="modalTitle">ツールを追加</h2>
-    <p class="hint">同じフォルダにあるHTMLファイル名（相対パス）と、表示する情報を入力してください。</p>
+    <p class="hint">同じフォルダにあるHTMLファイル名（相対パス）と表示情報を入力してください。マニュアルは任意です。</p>
     <div class="field"><label>ツール名</label><input id="fName" placeholder="例：ノンブル検版"></div>
     <div class="field"><label>ファイル名 / URL</label><input id="fUrl" class="mono" placeholder="例：nombre-check.html"></div>
+    <div class="field"><label>マニュアル（任意）</label><input id="fMan" class="mono" placeholder="例：manual-nombre.html"></div>
     <div class="field"><label>分類（任意）</label><input id="fCat" placeholder="例：位置・体裁"></div>
-    <div class="field"><label>説明（任意）</label><textarea id="fDesc" placeholder="どんな点検をするツールかを一言で"></textarea></div>
+    <div class="field"><label>説明（任意）</label><textarea id="fDesc" placeholder="どんな点検をするツールかを説明"></textarea></div>
     <div class="field"><label>アイコン</label><div class="iconrow" id="iconRow"></div></div>
     <div class="modal-actions">
       <button class="tbtn" id="cancelBtn">キャンセル</button>
@@ -200,7 +215,6 @@ body.editing .card .del{display:flex}
 const $=s=>document.querySelector(s);
 const STORE='kenpan-hub-tools-v1', THEME='kenpan-hub-theme', SEEN='kenpan-hub-seen-defaults-v1';
 
-/* アイコン集（currentColor＝カード毎のアクセント色で描画） */
 const ICONS={
   barcode:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg>',
   diff:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg>',
@@ -211,117 +225,121 @@ const ICONS={
   ruler:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>'
 };
 const ICON_KEYS=Object.keys(ICONS);
-
-/* アイコンごとのアクセント色（見分けやすさ） */
-const ICON_COLORS={
-  barcode:'#2563eb',  /* 青   */
-  position:'#0d9488', /* ティール */
-  diff:'#7c3aed',     /* 紫   */
-  toc:'#d97706',      /* 橙   */
-  check:'#16a34a',    /* 緑   */
-  doc:'#e11d48',      /* ローズ */
-  ruler:'#0891b2'     /* シアン */
-};
+const ICON_COLORS={ barcode:'#2563eb',position:'#0d9488',diff:'#7c3aed',toc:'#d97706',check:'#16a34a',doc:'#e11d48',ruler:'#0891b2' };
 const colorOf=k=>ICON_COLORS[k]||'#64748b';
 
-/* 既定のツール（中田さんの既存ツール群） */
 const DEFAULTS=[
-  {name:'ISBN検版', url:'isbn-barcode-check.html', cat:'バーコード照合', icon:'barcode',
-   desc:'表紙・カバーの2段バーコードを検出し、ISBN・Cコード・価格の印字と照合。バーの欠け・つぶれも検知します。'},
-  {name:'ノンブル検版', url:'nombre-check.html', cat:'位置・体裁', icon:'position',
-   desc:'ノンブルの位置を検版。ズーム/パン、OCRモード、表裏見当チェックに対応します。'},
-  {name:'下版差分チェッカー', url:'pdf-diff-check.html', cat:'差分', icon:'diff',
-   desc:'同一DPIレンダリングで2つの下版PDFをピクセル差分検出。5つの表示モードと全ページ概観スキャン。'},
-  {name:'目次整合検版', url:'toc_kenpan.html', cat:'整合', icon:'toc',
-   desc:'目次・見出し・柱・ノンブルの相互整合をチェック。横組み・縦組み両対応。'}
+  {name:'ISBN検版', url:'isbn-barcode-check.html', manual:'manual-isbn.html', cat:'バーコード照合', icon:'barcode',
+   desc:'表紙・カバーの2段バーコードを検出し、ISBN・Cコード・価格の印字と照合します。バーの欠け・つぶれといった品質不良も検知し、人が読む数字行を誤検出しないよう調整済みです。'},
+  {name:'ノンブル検版', url:'nombre-check.html', manual:'manual-nombre.html', cat:'位置・体裁', icon:'position',
+   desc:'ノンブル（ページ番号）の位置を検版します。ズーム／パン、OCRモード、表裏の見当チェックに対応します。'},
+  {name:'下版差分チェッカー', url:'pdf-diff-check.html', manual:'manual-pdf-diff.html', cat:'差分', icon:'diff',
+   desc:'同一DPIでレンダリングした2つの下版PDFをピクセル単位で差分検出します。5つの表示モードと、全ページを一気に見渡す概観スキャンを備えています。'},
+  {name:'目次整合検版', url:'toc_kenpan.html', manual:'manual-toc.html', cat:'整合', icon:'toc',
+   desc:'目次・見出し・柱・ノンブルの相互整合をチェックします。横組み・縦組みの両方に対応します。'}
 ];
 
 let tools=load();
+let shown=0;          // 現在左に表示中のツール
+let frozen=false;     // 詳細パネルにカーソルがある間は切替を止める
+let hoverTimer=null;  // ホバー遅延（通過しただけでは切り替えない）
 
-/* 保存済みを読み込みつつ、新しい既定ツールだけ自動で追加（削除済みは復活させない） */
 function load(){
   let saved=null;
   try{ const j=localStorage.getItem(STORE); if(j) saved=JSON.parse(j); }catch(e){}
-  if(!saved){
-    try{ localStorage.setItem(SEEN, JSON.stringify(DEFAULTS.map(d=>d.url))); }catch(e){}
-    return DEFAULTS.slice();
-  }
+  if(!saved){ try{ localStorage.setItem(SEEN, JSON.stringify(DEFAULTS.map(d=>d.url))); }catch(e){} return DEFAULTS.slice(); }
   let seen=[]; try{ seen=JSON.parse(localStorage.getItem(SEEN)||'[]'); }catch(e){}
-  const seenSet=new Set(seen); let changed=false;
-  DEFAULTS.forEach(d=>{
-    if(!seenSet.has(d.url)){
-      if(!saved.some(t=>t.url===d.url)) saved.push({...d});
-      seenSet.add(d.url); changed=true;
-    }
-  });
-  if(changed){
-    try{ localStorage.setItem(SEEN, JSON.stringify([...seenSet])); }catch(e){}
-    try{ localStorage.setItem(STORE, JSON.stringify(saved)); }catch(e){}
-  }
+  const set=new Set(seen); let changed=false;
+  DEFAULTS.forEach(d=>{ if(!set.has(d.url)){ if(!saved.some(t=>t.url===d.url)) saved.push({...d}); set.add(d.url); changed=true; } });
+  if(changed){ try{localStorage.setItem(SEEN,JSON.stringify([...set]));}catch(e){} try{localStorage.setItem(STORE,JSON.stringify(saved));}catch(e){} }
+  saved.forEach(t=>{ if(t.manual===undefined) t.manual=''; });
   return saved;
 }
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(tools)); }catch(e){} }
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function openUrl(u){ if(u) window.open(u,'_blank','noopener'); }
 
-/* テーマ */
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{localStorage.setItem(THEME,t);}catch(e){} }
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
 $('#themeBtn').onclick=()=>{ const d=document.documentElement.getAttribute('data-theme')==='dark'; applyTheme(d?'light':'dark'); };
 
-/* 描画 */
-function render(){
-  const g=$('#grid'); g.innerHTML='';
+function renderDetail(i){
+  shown=i; const t=tools[i]; if(!t){ $('#detail').innerHTML=''; return; }
+  const d=$('#detail'); d.style.setProperty('--accent', colorOf(t.icon));
+  const hasMan=!!(t.manual&&t.manual.trim());
+  d.innerHTML=`
+    <div class="dicon">${ICONS[t.icon]||ICONS.check}</div>
+    ${t.cat?`<div class="dcat">${esc(t.cat)}</div>`:''}
+    <h2>${esc(t.name)}</h2>
+    <p class="ddesc">${esc(t.desc||'説明は未設定です。')}</p>
+    <p class="dfile">${esc(t.url)}</p>
+    <div class="dact">
+      <button class="open" title="${esc(t.name)}を別タブで開く">
+        <span class="bi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>開く</span>
+      </button>
+      <button class="man" ${hasMan?'':'disabled'} title="${hasMan?'操作マニュアルを別タブで開く':'マニュアル未設定'}">
+        <span class="bi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2zM20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2z" stroke-linejoin="round"/></svg></span>
+        <span>マニュアル</span>
+      </button>
+    </div>`;
+  d.querySelector('.open').onclick=()=>openUrl(t.url);
+  if(hasMan) d.querySelector('.man').onclick=()=>window.open(t.manual,'_blank','noopener');
+}
+
+function showDetail(i){ shown=i; markShown(); renderDetail(i); }
+function scheduleDetail(i){ if(frozen) return; clearTimeout(hoverTimer); hoverTimer=setTimeout(()=>showDetail(i),120); }
+
+function renderTiles(){
+  const g=$('#tiles'); g.innerHTML='';
   tools.forEach((t,i)=>{
-    const c=document.createElement('div');
-    c.className='card tool'; c.tabIndex=0;
-    c.style.setProperty('--accent', colorOf(t.icon));
-    c.innerHTML=`
-      <button class="del" title="削除" data-del="${i}">×</button>
-      <div class="icon">${ICONS[t.icon]||ICONS.check}</div>
-      <div class="body">
-        ${t.cat?`<div class="cat">${esc(t.cat)}</div>`:''}
-        <h3>${esc(t.name)}</h3>
-        <p>${esc(t.desc||'')}</p>
-        <div class="go">開く（別タブ） →</div>
-      </div>`;
-    const open=()=>{ if(document.body.classList.contains('editing')) return; window.open(t.url,'_blank','noopener'); };
-    c.addEventListener('click',e=>{ if(e.target.closest('.del')) return; open(); });
-    c.addEventListener('keydown',e=>{ if(e.key==='Enter') open(); });
-    g.appendChild(c);
+    const el=document.createElement('button');
+    el.className='tile'+(i===shown?' sel':''); el.type='button';
+    el.style.setProperty('--accent', colorOf(t.icon));
+    el.title=t.name+'を開く';
+    el.innerHTML=`<span class="del" title="削除" data-del="${i}">×</span>
+      <span class="ico">${ICONS[t.icon]||ICONS.check}</span>
+      <span class="tt">${esc(t.name)}</span>`;
+    el.addEventListener('mouseenter',()=>scheduleDetail(i));
+    el.addEventListener('focus',()=>showDetail(i));
+    el.addEventListener('click',e=>{ if(e.target.closest('.del')) return; openUrl(t.url); });
+    g.appendChild(el);
   });
-  // 追加カード
-  const add=document.createElement('div');
-  add.className='card add'; add.tabIndex=0;
-  add.innerHTML=`<div class="plus">＋</div><small>ツールを追加</small>`;
-  add.addEventListener('click',()=>openModal());
-  add.addEventListener('keydown',e=>{ if(e.key==='Enter') openModal(); });
+  const add=document.createElement('button');
+  add.className='tile add'; add.type='button';
+  add.innerHTML=`<span class="ico" style="border-style:dashed;background:transparent"><span class="plus">＋</span></span><span class="tt">追加</span>`;
+  add.addEventListener('click',openModal);
   g.appendChild(add);
-  // 削除
   g.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick=e=>{ e.stopPropagation(); const i=+b.dataset.del;
-      if(confirm(`「${tools[i].name}」を一覧から削除しますか？\n（ファイル自体は消えません）`)){ tools.splice(i,1); save(); render(); } };
+      if(confirm(`「${tools[i].name}」を一覧から削除しますか？\n（ファイル自体は消えません）`)){
+        tools.splice(i,1); save();
+        if(shown>=tools.length) shown=Math.max(0,tools.length-1);
+        renderTiles(); renderDetail(shown); } };
   });
 }
-function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function markShown(){ const els=$('#tiles').querySelectorAll('.tile:not(.add)');
+  els.forEach((e,i)=>e.classList.toggle('sel', i===shown)); }
 
-/* 編集モード */
+/* グリッドを離れたら保留中の切替を取消（最後に確定した表示を維持） */
+$('#tiles').addEventListener('mouseleave',()=>clearTimeout(hoverTimer));
+/* 詳細パネル上では切替を凍結（開く・マニュアルを確実に押せる） */
+$('#detail').addEventListener('mouseenter',()=>{ frozen=true; clearTimeout(hoverTimer); });
+$('#detail').addEventListener('mouseleave',()=>{ frozen=false; });
+
 $('#editBtn').onclick=()=>{ document.body.classList.toggle('editing');
   $('#editBtn').textContent=document.body.classList.contains('editing')?'完了':'並べ替え・削除'; };
 
-/* モーダル */
 let selIcon='check';
 function buildIconRow(){
   const r=$('#iconRow'); r.innerHTML='';
-  ICON_KEYS.forEach(k=>{
-    const b=document.createElement('button'); b.innerHTML=ICONS[k]; b.dataset.k=k;
-    b.style.color=colorOf(k);
-    if(k===selIcon) b.classList.add('sel');
-    b.onclick=()=>{ selIcon=k; buildIconRow(); };
-    r.appendChild(b);
-  });
+  ICON_KEYS.forEach(k=>{ const b=document.createElement('button'); b.innerHTML=ICONS[k];
+    b.style.color=colorOf(k); if(k===selIcon) b.classList.add('sel');
+    b.onclick=()=>{ selIcon=k; buildIconRow(); }; r.appendChild(b); });
 }
 function openModal(){
   selIcon='check'; buildIconRow();
-  $('#fName').value=''; $('#fUrl').value=''; $('#fCat').value=''; $('#fDesc').value='';
+  $('#fName').value=''; $('#fUrl').value=''; $('#fMan').value=''; $('#fCat').value=''; $('#fDesc').value='';
   $('#modalBg').classList.add('show'); $('#fName').focus();
 }
 function closeModal(){ $('#modalBg').classList.remove('show'); }
@@ -330,12 +348,14 @@ $('#modalBg').onclick=e=>{ if(e.target===$('#modalBg')) closeModal(); };
 $('#saveBtn').onclick=()=>{
   const name=$('#fName').value.trim(), url=$('#fUrl').value.trim();
   if(!name||!url){ alert('ツール名とファイル名は必須です。'); return; }
-  tools.push({name, url, cat:$('#fCat').value.trim(), desc:$('#fDesc').value.trim(), icon:selIcon});
-  save(); closeModal(); render();
+  tools.push({name, url, manual:$('#fMan').value.trim(), cat:$('#fCat').value.trim(),
+    desc:$('#fDesc').value.trim(), icon:selIcon});
+  save(); closeModal(); shown=tools.length-1; renderTiles(); renderDetail(shown);
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
 
-render();
+renderTiles();
+renderDetail(shown);
 </script>
 </body>
 </html>
