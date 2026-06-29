@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISBN検版 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#2563eb;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:820px;margin:0 auto;padding:34px 24px 80px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
+  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">ISBN検版</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></div>
+    <div>
+      <h1>ISBN検版</h1>
+      <p>表紙・カバーの2段バーコードを読み取り、ISBN・Cコード・価格の印字と照合し、印刷品質も判定します。</p>
+      <a class="open" href="isbn-barcode-check.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+  <h2>このツールでできること</h2><p class='lead'>表紙・カバーに刷られた2段バーコードを読み取り、<b>下段の数字（192＋Cコード4桁＋税抜本体価格5桁＋チェックデジット）</b>や上段ISBNと、近傍に印字された文字情報を突き合わせて、刷り間違い・組み合わせ違いを検出します。バーの欠けやつぶれといった<b>印刷品質</b>も同時に判定します。</p><ol class="steps"><li><b>PDFを読み込む。</b>画面に PDF をドラッグ＆ドロップするか、「PDFを選択」から開きます。</li><li><b>ページを選ぶ。</b>複数ページの場合はページを切り替え、「−／＋／全体」で表示倍率を調整して、バーコードが画面に収まるようにします。</li><li><b>自動検出を待つ。</b>バーコードを検出すると、ISBN・Cコード・価格を抽出します。文字が読みにくい箇所は OCR で補完し、縦向き（90°回転）の配置も探索します。</li><li><b>「照合」を押す。</b>バーコードから読んだ値と、近傍に印字された文字（OCR）を突き合わせます。結果は <span class='tag'>一致</span> <span class='tag'>不一致</span> <span class='tag'>要確認</span> で表示されます。</li><li><b>必要なら手入力で照合。</b>印字が薄いなどで自動が難しいときは「印字を手入力して照合」に正しい値を入れて確認します。</li><li><b>裏取り。</b>「OCR確認」で生テキストを確認、「この本をウェブで確認」で書誌情報を別タブ検索できます。</li></ol><h2>結果の見かた</h2><div class="cards"><div class="c"><div class="t">照合結果</div><div class="d">✓ 一致／✕ 不一致／要確認。バーコードの値と印字の対応を表します。</div></div><div class="c"><div class="t">縞パターン</div><div class="d">「縞パターン正常」=バーの並びが健全。「異常の疑い」はバーの欠け・つぶれの可能性。</div></div><div class="c"><div class="t">照合デバッグ</div><div class="d">最後に読んだバーコード組の生データを表示。原因切り分けに使います。</div></div><div class="c"><div class="t">読み取った近傍テキスト</div><div class="d">バーコード周辺で拾った文字。OCR の精度確認に。</div></div></div><div class='note'><b>誤検出対策：</b>バーコード下の「人が読む数字行」をバーの一部と取り違えて品質異常を出さないよう、走査範囲をバー帯の中央部に絞って判定しています。それでも「異常の疑い」が続く場合は、解像度を上げる／トリミングを見直すと改善します。</div><h2>うまくいかないとき</h2><dl class="faq"><dt>「バーコードが検出できませんでした」と出る</dt><dd>表示倍率を上げてバーコードを画面内に大きく収める、PDF の解像度を上げる、傾きを直す、といった対処を試してください。</dd><dt>「バーコード読取不可」になる</dt><dd>バーがつぶれている可能性があります。元データ（高解像度の入稿 PDF）で再確認するか、手入力照合に切り替えてください。</dd><dt>価格やCコードがずれて読まれる</dt><dd>Cコードと価格の桁を取り違えないよう13桁で区切って解釈します。手入力照合で正しい値を与えると確実です。</dd></dl>
+  <div class="foot">検版ハブ｜ISBN検版 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+</body>
+</html>

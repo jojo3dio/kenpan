@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノンブル検版 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#0d9488;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:820px;margin:0 auto;padding:34px 24px 80px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
+  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">ノンブル検版</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1.5"/><circle cx="12" cy="12" r="3"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3" stroke-linecap="round"/></svg></div>
+    <div>
+      <h1>ノンブル検版</h1>
+      <p>各ページのノンブル位置を検版。OCR検出・表裏チェック・レポート出力に対応します。</p>
+      <a class="open" href="nombre-check.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+  <h2>このツールでできること</h2><p class='lead'>各ページのノンブル（ページ番号）の<b>位置</b>を検版します。ページを送りながら確認でき、OCR による自動検出、表裏の見当（ノド／小口側のばらつき）チェック、レポート出力に対応します。</p><ol class="steps"><li><b>PDFを開く。</b>「PDFを開く／PDFを選択」から読み込みます。</li><li><b>ページを送る。</b><span class='tag'>⏮ ◀ ▶ ⏭</span> で移動。「−／＋／全体表示」で倍率調整します。</li><li><b>「OCRで検出」。</b>ノンブルを自動抽出し、ページ内の位置を取得します。</li><li><b>位置を確認。</b>「位置オーバービュー」で全ページのノンブル位置を俯瞰、「デザイングループ」でレイアウトの揃いを確認します。</li><li><b>指摘を見る。</b>「指摘（エラー結果）」に位置ずれ等の候補が並びます。「表裏チェック」で見開きの見当を確認します。</li><li><b>例外設定。</b>扉や中扉などノンブルが無いページは「ノンブル無しにする」、戻すときは「解除」。誤選択は「選択クリア」。</li><li><b>出力。</b>「レポート」から CSV／JSON／PNG／印刷で結果を保存・共有できます。</li></ol><h2>画面の見かた</h2><div class="cards"><div class="c"><div class="t">位置オーバービュー</div><div class="d">全ページのノンブル位置を一覧で重ね、外れ値を見つけやすくします。</div></div><div class="c"><div class="t">デザイングループ</div><div class="d">同じ体裁のページをまとめ、グループ内の揃いを確認します。</div></div><div class="c"><div class="t">指摘（エラー結果）</div><div class="d">位置ずれなどの要確認ページを抽出します。</div></div><div class="c"><div class="t">表裏チェック</div><div class="d">奇数・偶数ページの見当（左右の振り分け）を確認します。</div></div><div class="c"><div class="t">ページ別 一覧</div><div class="d">ページごとの検出結果を一覧表示します。</div></div></div><h2>うまくいかないとき</h2><dl class="faq"><dt>ノンブルが検出されない</dt><dd>「OCRで検出」を再実行し、倍率を上げて番号がはっきり写る状態にしてください。装飾ノンブルは認識しにくい場合があります。</dd><dt>ノンブルが無いページが指摘される</dt><dd>扉などは「ノンブル無しにする」で対象外にできます。</dd><dt>結果を共有したい</dt><dd>「レポート」から CSV／JSON で書き出し、PNG や印刷で校正紙に添付できます。</dd></dl>
+  <div class="foot">検版ハブ｜ノンブル検版 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+</body>
+</html>

@@ -254,7 +254,10 @@ function load(){
   const set=new Set(seen); let changed=false;
   DEFAULTS.forEach(d=>{ if(!set.has(d.url)){ if(!saved.some(t=>t.url===d.url)) saved.push({...d}); set.add(d.url); changed=true; } });
   if(changed){ try{localStorage.setItem(SEEN,JSON.stringify([...set]));}catch(e){} try{localStorage.setItem(STORE,JSON.stringify(saved));}catch(e){} }
-  saved.forEach(t=>{ if(t.manual===undefined) t.manual=''; });
+  // 既存の保存データに、後から追加したマニュアルを補完（削除済みツールは復活させない）
+  const dmap=Object.fromEntries(DEFAULTS.map(d=>[d.url,d]));
+  saved.forEach(t=>{ if(t.manual===undefined) t.manual='';
+    if(!t.manual && dmap[t.url] && dmap[t.url].manual) t.manual=dmap[t.url].manual; });
   return saved;
 }
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(tools)); }catch(e){} }
