@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>検版ハブ — 下版前点検ツール</title>
+<title>KENPAN — 検版ハブ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -31,8 +31,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 .top{display:flex;align-items:center;gap:14px;padding:20px 28px;background:var(--strip);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:12px}
 .mark{width:30px;height:26px;display:block;flex:0 0 auto}
-.brand b{font-size:17px;letter-spacing:.02em}
-.brand span{font-size:12px;color:var(--ink-dim)}
+.brand .wmwrap{display:flex;flex-direction:column;gap:3px}
+.brand .wm{font-size:20px;font-weight:700;letter-spacing:.2em;line-height:1;color:var(--ink)}
+.brand .wm i{font-style:normal;color:var(--amber)}
+.brand .tag{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink-faint)}
 .sp{flex:1}
 .tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
   background:var(--panel);color:var(--ink);border-radius:9px;padding:8px 14px;transition:.15s}
@@ -64,20 +66,20 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 .detail .ddesc{margin:0 0 12px;color:var(--ink-dim);font-size:14.5px;line-height:1.85}
 .detail .dfile{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);
   margin:0 0 24px;word-break:break-all}
-.dact{display:flex;flex-direction:row;gap:12px}
-.dact button{flex:1;aspect-ratio:1/1;max-height:150px;font-family:var(--ui);font-size:13.5px;
-  font-weight:600;cursor:pointer;border-radius:18px;border:1px solid transparent;transition:.15s;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px}
+.dact{display:flex;gap:10px;margin-top:8px}
+.dact button{flex:1;height:48px;font-family:var(--ui);font-size:13px;font-weight:600;
+  cursor:pointer;border-radius:12px;border:1px solid transparent;transition:.16s;
+  display:flex;align-items:center;justify-content:center;gap:7px}
 .dact button .bi{display:flex;align-items:center;justify-content:center}
-.dact button .bi svg{width:28px;height:28px}
+.dact button .bi svg{width:18px;height:18px}
 .dact .open{background:var(--glow);color:#fff;
-  box-shadow:0 10px 24px color-mix(in srgb, var(--glow) 30%, transparent)}
-.dact .open:hover{filter:brightness(1.07);transform:translateY(-2px)}
-.dact .man{background:color-mix(in srgb, var(--glow) 8%, var(--panel));color:var(--ink);
-  border-color:color-mix(in srgb, var(--glow) 34%, var(--line))}
-.dact .man:hover{background:color-mix(in srgb, var(--glow) 14%, var(--panel));border-color:var(--glow);transform:translateY(-2px)}
-.dact .man[disabled]{opacity:.4;cursor:not-allowed;transform:none}
-.dact .man[disabled]:hover{transform:none;border-color:color-mix(in srgb, var(--glow) 34%, var(--line));background:color-mix(in srgb, var(--glow) 8%, var(--panel))}
+  box-shadow:0 6px 16px color-mix(in srgb, var(--glow) 20%, transparent)}
+.dact .open:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.dact .man{background:transparent;color:var(--ink-dim);
+  border-color:color-mix(in srgb, var(--glow) 30%, var(--line))}
+.dact .man:hover{color:var(--glow);border-color:var(--glow);background:color-mix(in srgb,var(--glow) 7%, var(--panel))}
+.dact .man[disabled]{opacity:.4;cursor:not-allowed}
+.dact .man[disabled]:hover{color:var(--ink-dim);border-color:color-mix(in srgb, var(--glow) 30%, var(--line));background:transparent}
 
 /* 右：見出し＋タイル */
 .right h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
@@ -173,7 +175,7 @@ body.editing .tile .del{display:flex}
       <line x1="3" y1="36" x2="11" y2="36" stroke="var(--amber)" stroke-width="2.5"/>
       <path d="M26 27l6 6 12-14" stroke="var(--amber)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <div><b>検版ハブ</b><br><span>下版前点検ツール</span></div>
+    <div class="wmwrap"><span class="wm">KEN<i>PAN</i></span><span class="tag">検版ハブ · 下版前点検</span></div>
   </div>
   <div class="sp"></div>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
