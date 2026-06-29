@@ -14,7 +14,7 @@
 <style>
 /* ---------- light (default / 紙色) ---------- */
 :root{
-  --bg:#eef3fd; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
+  --bg:#eef3fd; --panel:#ffffff; --panel2:#eaeff7; --line:#ddd5c4;
   --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
   --amber:#2563eb; --amber-bg:#e8effd;
   --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
@@ -76,8 +76,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .pb-input.isbn{width:170px}.pb-input.c{width:78px}.pb-input.p{width:72px}
 .pb-input:focus{outline:none;border-color:var(--amber);background:var(--panel)}
 .pb-btn{font-size:12px;padding:6px 15px;border:1px solid var(--amber);background:var(--amber);
-  color:#1a1205;font-weight:700;border-radius:7px;cursor:pointer;white-space:nowrap;transition:.15s}
-.pb-btn:hover{filter:brightness(1.05)}.pb-btn:disabled{opacity:.6;cursor:default}
+  color:#fff;font-weight:700;border-radius:7px;cursor:pointer;white-space:nowrap;transition:.15s}
+.pb-btn:hover{filter:brightness(1.05)}
+[data-theme="dark"] .pb-btn{color:#1a1205}.pb-btn:disabled{opacity:.6;cursor:default}
 .pb-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 0}
 .pb-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .pb-links a{font-size:11px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;
@@ -197,7 +198,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-06-22s</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-06-29</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -347,7 +348,12 @@ def extract_isbn_text(text):
     else: res["error"]="桁数異常(%d桁)"%len(digits)
     return res
 def extract_ccode_text(text):
-    m=re.search(r"C\s*([0-9]{4})",norm(text)); return m.group(1) if m else None
+    t=norm(text)
+    m=re.search(r"[Cc(\[©]\s*([0-9]{4})", t)
+    if m: return m.group(1)
+    m=re.search(r"(?<![0-9¥￥])([0-9]{4})\s*[¥￥Ee]", t)
+    if m: return m.group(1)
+    return None
 def extract_price_text(text):
     t=norm(text)
     for pat in [r"[¥\\]\s*([0-9][0-9,]{1,7})\s*E", r"本体(?:価格)?\s*([0-9][0-9,]{1,7})\s*円?",
@@ -552,7 +558,7 @@ function checkBarcodeQuality(canvas, box){
   // 3) バー帯内の複数走査線でrun-length
   const lines=[]; const nScan=7;
   for(let k=0;k<nScan;k++){
-    const y=Math.round(ry0+(ry1-ry0)*k/(nScan-1));
+    const y=Math.round(ry0+(ry1-ry0)*(0.2+0.6*k/(nScan-1)));
     let sum=0,cnt=0; for(let x=cx0;x<=cx1;x++){ sum+=lum(x,y); cnt++; }
     const thr=sum/cnt*0.82;
     const b=[]; for(let x=cx0;x<=cx1;x++) b.push(lum(x,y)<thr?1:0);
@@ -574,7 +580,7 @@ function checkBarcodeQuality(canvas, box){
   const barsMed=med(lines.map(l=>l.bars));
   const transMed=med(lines.map(l=>l.trans));
   const maxRatioMed=med(lines.map(l=>l.maxRatio));
-  const transVar=Math.max(...lines.map(l=>l.trans))-Math.min(...lines.map(l=>l.trans));
+  const transOutliers=lines.filter(l=>Math.abs(l.trans-transMed)>=6).length;
   const issues=[];
   // EAN-13: 黒バー30本/遷移59前後。端処理で前後するので幅を持たせる
   // EAN-13は規格上、要素(白黒run)59・黒バー30が固定。1本でも欠けると遷移が2減る。
@@ -582,10 +588,10 @@ function checkBarcodeQuality(canvas, box){
   if(barsMed<29||barsMed>31) issues.push("読み込みができません（バーの欠け・余分の可能性）");
   if(transMed<58||transMed>60) issues.push("読み込みができません（バーの欠け・つぶれの可能性）");
   if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
-  if(transVar>=8) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
+  if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
   const uniq=[...new Set(issues)];
   return {ok:issues.length===0, note:uniq.join(" / "), tightBox,
-          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transVar}};
+          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transOutliers}};
 }
 
 /* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
@@ -802,17 +808,27 @@ function normalizeOcrIsbn(txt, bcIsbn){
   if(!txt) return txt;
   // OCRは数字を英字に誤読する(9→O, 1→I 等)。ISBN直後の英数混在列を数字へ補正し、
   // バーコード値やチェックデジットで13桁に整える。
-  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,20})/i, (m, head, body)=>{
-    let digits=ocrFixDigits(body).replace(/[^0-9Xx]/gi,'');
-    if(digits.length<13) return m;
-    digits=digits.slice(0,13);
+  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,40})/i, (m, head, body)=>{
+    let coll='', consumed=0;
+    for(let i=0;i<body.length;i++){
+      const ch=body[i];
+      if(/[0-9Xx]/.test(ch)){ coll+=ch.toUpperCase(); consumed=i+1; if(coll.length>=13) break; continue; }
+      const f=ocrFixDigits(ch);
+      if(/[0-9]/.test(f)){ coll+=f; consumed=i+1; if(coll.length>=13) break; continue; }
+      if(/[A-Za-z]/.test(ch)) break;
+      if(coll.length>=13) break;
+      consumed=i+1;
+    }
+    if(coll.length<13) return m;
+    let digits=coll.slice(0,13);
+    const rest=body.slice(consumed);
     let fixed=null;
     if(/^\d{13}$/.test(bcIsbn||'') && bcIsbn.slice(4)===digits.slice(4)) fixed=bcIsbn; // 末9桁一致ならBC採用
     else if(/^97[89]/.test(digits) && ean13ok(digits)) fixed=digits;
     else if(ean13ok('978'+digits.slice(3))) fixed='978'+digits.slice(3);
     else if(ean13ok('979'+digits.slice(3))) fixed='979'+digits.slice(3);
-    if(!fixed) return head+digits.slice(0,13)+' ';
-    return head+fixed+' ';
+    if(!fixed) return head+digits+rest;
+    return head+fixed+rest;
   });
 }
 function ean13ok(code){
