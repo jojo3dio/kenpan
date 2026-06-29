@@ -1,0 +1,18 @@
+# macOS が自動生成する管理ファイル（Gitで追跡しない）
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows 用（念のため）
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# エディタの一時ファイル
+*~
+*.swp
+*.bak
