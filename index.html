@@ -135,6 +135,21 @@ body.editing .iconbtn .del{display:flex}
 .foot code{font-family:var(--mono);background:var(--panel2);padding:1px 5px;border-radius:4px}
 
 /* モーダル */
+/* マニュアル表示パネル（ブラウザ設定に依存せず確実に小さく開く） */
+.manwrap{position:fixed;inset:0;background:rgba(20,15,10,.5);display:none;
+  align-items:center;justify-content:center;z-index:60;padding:24px}
+.manwrap.show{display:flex}
+.manpanel{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  box-shadow:var(--shadow);width:720px;max-width:100%;height:88vh;display:flex;
+  flex-direction:column;overflow:hidden}
+.manbar{display:flex;align-items:center;gap:8px;padding:9px 12px;
+  border-bottom:1px solid var(--line);background:var(--strip)}
+.manbar .t{font-size:13px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.manbar button{font-family:var(--ui);font-size:12.5px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 11px;transition:.15s}
+.manbar button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.manpanel iframe{flex:1;border:0;width:100%;background:var(--panel)}
+
 .modal-bg{position:fixed;inset:0;background:rgba(20,15,10,.45);display:none;
   align-items:center;justify-content:center;z-index:50;padding:20px}
 .modal-bg.show{display:flex}
@@ -192,6 +207,17 @@ body.editing .iconbtn .del{display:flex}
 
 <div class="foot">
   <p>このページと各ツール・マニュアルのHTMLは同じフォルダに置いてください。リンクは相対パス（例 <code>isbn-barcode-check.html</code>）で開きます。設定はこのブラウザに保存されます。</p>
+</div>
+
+<div class="manwrap" id="manWrap">
+  <div class="manpanel">
+    <div class="manbar">
+      <span class="t" id="manTitle">操作マニュアル</span>
+      <button id="manPop" title="別ウインドウで開く">↗ 別ウインドウ</button>
+      <button id="manClose">閉じる</button>
+    </div>
+    <iframe id="manFrame" title="操作マニュアル"></iframe>
+  </div>
 </div>
 
 <div class="modal-bg" id="modalBg">
@@ -287,11 +313,7 @@ function renderDetail(i){
       </button>
     </div>`;
   d.querySelector('.open').onclick=()=>openUrl(t.url);
-  if(hasMan) d.querySelector('.man').onclick=()=>{
-    const w=Math.min(700, (screen.availWidth||900)), h=Math.min(800, (screen.availHeight||820));
-    const l=Math.max(0,((screen.availWidth||w)-w)/2), tp=Math.max(0,((screen.availHeight||h)-h)/2);
-    window.open(t.manual,'_blank','noopener,noreferrer,width='+w+',height='+h+',left='+l+',top='+tp);
-  };
+  if(hasMan) d.querySelector('.man').onclick=()=>openManualPanel(t.manual, t.name);
 }
 
 function showDetail(i){ shown=i; markShown(); renderDetail(i); }
@@ -361,6 +383,25 @@ $('#saveBtn').onclick=()=>{
   save(); closeModal(); shown=tools.length-1; renderTiles(); renderDetail(shown);
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+
+/* マニュアルパネル */
+let manUrl='';
+function openManualPanel(url,name){
+  manUrl=url;
+  $('#manTitle').textContent=(name?name+' ':'')+'操作マニュアル';
+  $('#manFrame').src=url;
+  $('#manWrap').classList.add('show');
+}
+function closeManual(){ $('#manWrap').classList.remove('show'); $('#manFrame').src='about:blank'; }
+$('#manClose').onclick=closeManual;
+$('#manWrap').addEventListener('click',e=>{ if(e.target===$('#manWrap')) closeManual(); });
+$('#manPop').onclick=()=>{
+  const w=Math.min(700,(screen.availWidth||900)), h=Math.min(800,(screen.availHeight||820));
+  const l=Math.max(0,((screen.availWidth||w)-w)/2), tp=Math.max(0,((screen.availHeight||h)-h)/2);
+  window.open(manUrl,'_blank','noopener,width='+w+',height='+h+',left='+l+',top='+tp);
+  closeManual();
+};
+document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#manWrap').classList.contains('show')) closeManual(); });
 
 renderTiles();
 renderDetail(shown);
