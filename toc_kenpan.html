@@ -13,9 +13,9 @@
 <style>
 /* ---------- light (default / 紙色・白寄り) ---------- */
 :root{
-  --bg:#fdf4e8; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
+  --bg:#f7f4ee; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
   --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
-  --amber:#d97706; --amber-bg:#fdecd9;
+  --amber:#b9791a; --amber-bg:#f6ead2;
   --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
   --ok:#2e7d46; --ok-bg:#e7f2ea;
   --stage:#ffffff; --shadow:0 1px 4px rgba(60,45,20,.10);
@@ -27,7 +27,7 @@
 [data-theme="dark"]{
   --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
   --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
-  --amber:#f2a23c; --amber-bg:#3a2a12;
+  --amber:#e8a33d; --amber-bg:#33270f;
   --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
   --ok:#4fae6e; --ok-bg:#15301f;
   --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
@@ -56,6 +56,37 @@ header .sp{flex:1}
       font-size:12.5px;transition:.12s}
 .hbtn:hover{border-color:var(--amber);color:var(--amber)}
 .hbtn:disabled{opacity:.4;cursor:default}
+
+/* ---- フィードバック・モーダル ---- */
+#fbOverlay{position:fixed;inset:0;background:rgba(20,15,8,.55);z-index:1000;
+  display:none;align-items:center;justify-content:center}
+#fbOverlay.show{display:flex}
+#fbModal{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);width:min(520px,92vw);
+  max-height:90vh;overflow:auto;padding:22px 24px;font-size:13px}
+#fbModal h2{margin:0 0 4px;font-size:16px;font-weight:700}
+#fbModal .sub{margin:0 0 16px;color:var(--ink-dim);font-size:11.5px}
+#fbModal .row{margin-bottom:13px;display:flex;flex-direction:column;gap:5px}
+#fbModal label.lab{font-weight:700;font-size:12px}
+#fbModal input[type=text],#fbModal select,#fbModal textarea{
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+  border-radius:7px;padding:7px 9px;font-family:var(--ui);font-size:13px;width:100%;box-sizing:border-box}
+#fbModal textarea{resize:vertical;min-height:64px}
+#fbModal .verdict{display:flex;gap:8px;flex-wrap:wrap}
+#fbModal .verdict label{flex:1;min-width:90px;display:flex;align-items:center;gap:6px;
+  border:1px solid var(--line);border-radius:7px;padding:8px 10px;cursor:pointer;background:var(--panel2)}
+#fbModal .verdict input{accent-color:var(--amber)}
+#fbModal .two{display:flex;gap:10px}
+#fbModal .two>.row{flex:1;margin-bottom:0}
+#fbModal .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+#fbModal .acts button{border-radius:7px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid var(--line)}
+#fbModal #fbCancel{background:var(--panel2);color:var(--ink)}
+#fbModal #fbSend{background:var(--amber);color:#fff;border:0}
+#fbModal #fbSend:disabled{opacity:.5;cursor:default}
+#fbMsg{font-size:12px;margin-top:10px;min-height:16px}
+#fbMsg.ok{color:var(--ok)} #fbMsg.err{color:var(--err)}
+#fbModal .nocfg{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn);
+  border-radius:7px;padding:8px 10px;font-size:11.5px;margin-bottom:14px;display:none}
 
 .wrap{max-width:1280px;margin:0 auto;padding:18px 22px 60px;width:100%}
 
@@ -183,10 +214,11 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 <body>
 <div class="app">
 <header>
-  <div class="brand" style="height:26px;color:var(--amber);display:flex;align-items:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/><circle cx="20" cy="18" r="1.4" fill="currentColor"/></svg></div>
+  <div class="brand"><i class="c"></i><i class="m"></i><i class="y"></i><i class="k"></i></div>
   <h1>目次整合<span>検版</span></h1>
   <span class="ver">v1.9 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
   <span class="sp"></span>
+  <button class="hbtn" id="fbBtn" onclick="openFb()" title="検出結果の可否を報告する">✎ フィードバック</button>
   <button class="hbtn" id="resetBtn" disabled>リセット</button>
   <button class="hbtn" id="themeBtn"><span id="themeIco">◐</span> <span id="themeTxt">ダーク</span></button>
 </header>
@@ -259,6 +291,59 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 
   <footer>toc-kenpan — single-file, local processing, offline after first CDN load</footer>
 </div>
+</div>
+
+<!-- ====== フィードバック・モーダル ====== -->
+<div id="fbOverlay" onclick="if(event.target===this)closeFb()">
+  <div id="fbModal">
+    <h2>フィードバック</h2>
+    <p class="sub">この検版結果の可否を教えてください。週1回まとめて集計されます。</p>
+    <div class="nocfg" id="fbNoCfg">⚠ 送信先（GAS）が未設定です。FEEDBACK_ENDPOINT を設定するまで送信できません。</div>
+
+    <div class="row">
+      <span class="lab">検出は正しかったですか？</span>
+      <div class="verdict">
+        <label><input type="radio" name="fbVerdict" value="correct" checked>正しい</label>
+        <label><input type="radio" name="fbVerdict" value="false_positive">誤検知</label>
+        <label><input type="radio" name="fbVerdict" value="missed">見逃し</label>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="row">
+        <label class="lab" for="fbCategory">種別</label>
+        <select id="fbCategory">
+          <option>目次</option><option>見出し</option><option>柱</option>
+          <option>ノンブル</option><option>図表キャプション</option><option>その他</option>
+        </select>
+      </div>
+      <div class="row">
+        <label class="lab" for="fbPage">ページ</label>
+        <input type="text" id="fbPage" placeholder="例: p25 / n30">
+      </div>
+    </div>
+
+    <div class="row">
+      <label class="lab" for="fbFile">対象ファイル名</label>
+      <input type="text" id="fbFile" placeholder="（PDF読み込み時に自動入力）">
+    </div>
+
+    <div class="row">
+      <label class="lab" for="fbComment">コメント（自由記述）</label>
+      <textarea id="fbComment" placeholder="見逃し・誤検知の具体的内容や要望など"></textarea>
+    </div>
+
+    <div class="row">
+      <label class="lab" for="fbUser">利用者名</label>
+      <input type="text" id="fbUser" placeholder="お名前">
+    </div>
+
+    <div id="fbMsg"></div>
+    <div class="acts">
+      <button id="fbCancel" onclick="closeFb()">閉じる</button>
+      <button id="fbSend" onclick="sendFb()">送信</button>
+    </div>
+  </div>
 </div>
 
 <script type="text/python" id="toc-core-src">
@@ -2128,6 +2213,12 @@ def analyze_json(raw_json: str, options_json: str = "{}") -> str:
 const PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 
+// ====== フィードバック送信先 ======
+// 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
+// デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
+const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+const FB_APP_VERSION = "v1.9";
+
 let pyodide = null, pyReady = null;
 let pdfDoc = null, rawData = null, result = null, fileName = "";
 let viewPage = 0, viewRects = [];
@@ -2157,7 +2248,56 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "061807";
+document.getElementById("buildId").textContent = "063007";
+
+// ====== フィードバック ======
+function openFb(){
+  $("fbNoCfg").style.display = FEEDBACK_ENDPOINT ? "none" : "block";
+  $("fbSend").disabled = !FEEDBACK_ENDPOINT;
+  $("fbFile").value = fileName || "";
+  if (result && typeof viewPage === "number") $("fbPage").value = "p" + (viewPage + 1);
+  try { const u = localStorage.getItem("toc_fb_user"); if (u && !$("fbUser").value) $("fbUser").value = u; } catch(e){}
+  $("fbMsg").textContent = ""; $("fbMsg").className = "";
+  $("fbOverlay").classList.add("show");
+}
+function closeFb(){ $("fbOverlay").classList.remove("show"); }
+async function sendFb(){
+  if (!FEEDBACK_ENDPOINT) return;
+  const verdict = (document.querySelector('input[name="fbVerdict"]:checked')||{}).value || "";
+  const user = $("fbUser").value.trim();
+  const payload = {
+    tool: "toc_kenpan",
+    verdict,
+    category: $("fbCategory").value,
+    file: $("fbFile").value.trim(),
+    page: $("fbPage").value.trim(),
+    comment: $("fbComment").value.trim(),
+    reporter: user,
+    appVersion: FB_APP_VERSION,
+    userAgent: navigator.userAgent
+  };
+  try { localStorage.setItem("toc_fb_user", user); } catch(e){}
+  const msg = $("fbMsg");
+  $("fbSend").disabled = true; msg.className = ""; msg.textContent = "送信中…";
+  try {
+    // 差分チェッカーと同方式: JSON を text/plain で no-cors POST（GAS側は postData.contents を JSON.parse）
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+    // no-cors のため応答は読めない。ネットワーク送信成功＝受理とみなす。
+    msg.className = "ok"; msg.textContent = "送信しました。ありがとうございました。";
+    $("fbComment").value = "";
+    setTimeout(closeFb, 1200);
+  } catch(err) {
+    msg.className = "err"; msg.textContent = "送信に失敗しました。ネットワークをご確認ください。";
+    $("fbSend").disabled = false;
+  }
+}
+// Escキーで閉じる
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("fbOverlay").classList.contains("show")) closeFb(); });
 setupZoom();
 
 // ---- Pyodide はページ表示直後からバックグラウンドで準備
