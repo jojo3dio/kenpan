@@ -61,7 +61,8 @@ header .sp{flex:1}
 .fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--ui);font-size:12.5px;font-weight:700;
   color:#fff;background:var(--amber);border:1px solid var(--amber);border-radius:8px;
   padding:6px 14px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em;
-  box-shadow:0 0 0 0 rgba(217,119,6,.5);animation:fbpulse 2.2s ease-out infinite}
+  box-shadow:0 0 0 0 rgba(217,119,6,.5)}
+.fbbtn.invite{animation:fbpulse 2.2s ease-out 3}
 .fbbtn:hover{filter:brightness(1.06);transform:translateY(-1px);animation:none;box-shadow:0 5px 16px rgba(217,119,6,.45)}
 .fbbtn:active{transform:translateY(0)}
 .fbbtn svg{width:15px;height:15px}
@@ -100,6 +101,27 @@ header .sp{flex:1}
   background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
 .fbnote.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
 .fbnote code{font-family:var(--mono);font-size:10.5px}
+/* 結果直後の軽い誘導 */
+.fbinline{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:8px;
+  background:var(--amber-bg);border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-size:12px}
+.fbinline .q{color:var(--ink-dim);font-weight:600}
+.fbinline .sp{flex:1}
+.fbinline button{font-family:var(--ui);font-size:12px;font-weight:700;cursor:pointer;
+  border:1px solid var(--line);border-radius:7px;padding:5px 11px;background:var(--panel);color:var(--ink);transition:.12s}
+.fbinline button:hover{border-color:var(--amber);color:var(--amber)}
+.fbinline .done{color:var(--ok);font-weight:700}
+/* 初回ヒントの吹き出し */
+.fbhintbubble{position:fixed;top:50px;right:16px;z-index:900;max-width:200px;
+  background:var(--amber);color:#fff;font-size:11.5px;line-height:1.5;border-radius:9px;
+  padding:9px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.fbhintbubble::after{content:"";position:absolute;top:-7px;right:24px;border:7px solid transparent;border-bottom-color:var(--amber);border-top:0}
+.fbhintbubble b{cursor:pointer;margin-left:6px;opacity:.85}
+/* 各問題行の「誤検知?」報告ラベル（常時表示・控えめ） */
+.issue .top .issfb{margin-left:auto;background:var(--panel2);border:1px solid var(--line);
+  color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
+  border-radius:6px;padding:2px 8px;line-height:1.3;transition:.12s;white-space:nowrap;flex:0 0 auto}
+.issue:hover .top .issfb{color:var(--ink-dim);border-color:var(--ink-faint)}
+.issue .top .issfb:hover{color:var(--err);border-color:var(--err);background:var(--err-bg)}
 
 .wrap{max-width:1280px;margin:0 auto;padding:18px 22px 60px;width:100%}
 
@@ -238,6 +260,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     <span>フィードバック</span>
   </button>
 </header>
+<div class="fbhintbubble" id="fbHint" style="display:none">変だと思ったら、ここで教えてください<b id="fbHintX">✕</b></div>
 <div class="wrap">
 
   <div id="drop">
@@ -268,6 +291,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     <div class="left">
       <div class="fixed">
         <div class="banner" id="banner"></div>
+        <div class="fbinline" id="fbInline" style="display:none"></div>
         <div class="cards" id="cards" style="margin-top:10px"></div>
         <div class="sec" style="margin-top:12px">検出された問題</div>
       </div>
@@ -2269,7 +2293,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "063007";
+document.getElementById("buildId").textContent = "063008";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -2294,17 +2318,50 @@ document.getElementById("buildId").textContent = "063007";
     n.className = "fbnote" + (ok ? " ok" : "");
     n.innerHTML = msg;
   }
-  function openModal(){
+  function markUsed(){
+    try{ localStorage.setItem("toc-fb-used", "1"); }catch(e){}
+    $("fbOpen").classList.remove("invite");
+  }
+  function guessCategory(msg){
+    msg = msg || "";
+    if(/目次/.test(msg)) return "目次";
+    if(/柱/.test(msg)) return "柱";
+    if(/ノンブル|ページ番号|頁/.test(msg)) return "ノンブル";
+    if(/図|表|キャプション/.test(msg)) return "図表キャプション";
+    if(/見出し|章|節/.test(msg)) return "見出し";
+    return "";
+  }
+  function openModal(pre){
+    pre = pre || {};
     $("fbFile").value = fileName || "（未読込）";
     $("fbFileHint").textContent = "表示ページ: " + (curPage() || "—");
-    $("fbPage").value = curPage();
+    $("fbPage").value = pre.page || curPage();
+    $("fbCategory").value = pre.category || "";
+    $("fbComment").value = pre.comment || "";
     $("fbReporter").value = reporterStore(true);
     $("fbNote").style.display = "none";
     $("fbSend").disabled = false; $("fbSend").textContent = "送信する";
-    setVerdict("");
+    setVerdict(pre.verdict || "");
     modal.classList.add("show");
   }
   function closeModal(){ modal.classList.remove("show"); }
+
+  async function postFeedback(payload){
+    // JSON を text/plain で no-cors POST（GAS側は postData.contents を JSON.parse）
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+  }
+  function basePayload(extra){
+    return Object.assign({
+      tool: "toc_kenpan", verdict: "", category: "",
+      file: fileName || "", page: curPage(), comment: "",
+      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      userAgent: navigator.userAgent
+    }, extra || {});
+  }
 
   async function send(){
     if(!fbVerdict){ showNote("「検出結果は正しかった？」を選択してください。", false); return; }
@@ -2314,27 +2371,19 @@ document.getElementById("buildId").textContent = "063007";
     }
     const reporter = $("fbReporter").value.trim();
     reporterStore(false, reporter);
-    const payload = {
-      tool: "toc_kenpan",
+    const payload = basePayload({
       verdict: fbVerdict,
       category: $("fbCategory").value,
       file: $("fbFile").value.trim(),
       page: $("fbPage").value.trim(),
       comment: $("fbComment").value.trim(),
-      reporter,
-      appVersion: FB_APP_VERSION,
-      userAgent: navigator.userAgent
-    };
+      reporter
+    });
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";
     try{
-      // JSON を text/plain で no-cors POST（GAS側は postData.contents を JSON.parse）
-      await fetch(FEEDBACK_ENDPOINT, {
-        method: "POST", mode: "no-cors",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload)
-      });
+      await postFeedback(payload);
       showNote("送信しました。ありがとうございます！", true);
-      $("fbComment").value = ""; setVerdict("");
+      $("fbComment").value = ""; setVerdict(""); markUsed();
       setTimeout(closeModal, 1100);
     }catch(err){
       showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
@@ -2342,12 +2391,62 @@ document.getElementById("buildId").textContent = "063007";
     }
   }
 
-  $("fbOpen").addEventListener("click", openModal);
+  // ---- 結果直後の軽い誘導
+  function renderInline(state){
+    const el = $("fbInline");
+    if(state === "thanks"){ el.innerHTML = '<span class="done">✓ ありがとうございます！</span>'; return; }
+    el.innerHTML =
+      '<span class="q">検出結果はどうでしたか？</span><span class="sp"></span>' +
+      '<button id="fbInY">👍 正しい</button>' +
+      '<button id="fbInN">👎 気になる点がある</button>';
+    $("fbInY").onclick = fbInlineGood;
+    $("fbInN").onclick = fbInlineBad;
+  }
+  async function fbInlineGood(){
+    if(!FEEDBACK_ENDPOINT){ renderInline("thanks"); return; }
+    try{ await postFeedback(basePayload({ verdict: "correct" })); }catch(e){}
+    renderInline("thanks"); markUsed();
+  }
+  function fbInlineBad(){ openModal({ verdict: "false_positive" }); }
+
+  function fbFromIssue(i){
+    const iss = (result && result.issues && result.issues[i]) ? result.issues[i] : null;
+    if(!iss){ openModal({ verdict: "false_positive" }); return; }
+    openModal({
+      verdict: "false_positive",
+      category: guessCategory(iss.msg),
+      page: (typeof pageLabel === "function") ? pageLabel(iss.page_index) : "",
+      comment: "［該当検出: " + iss.id + "／" + (iss.msg || "") + "］"
+    });
+  }
+
+  // 解析完了時に showResults から呼ばれる
+  function fbAfterResults(){
+    renderInline();
+    $("fbInline").style.display = "flex";
+    let used = false, hinted = false;
+    try{ used = !!localStorage.getItem("toc-fb-used"); hinted = !!localStorage.getItem("toc-fb-hint-seen"); }catch(e){}
+    if(!used){ const btn = $("fbOpen"); btn.classList.remove("invite"); void btn.offsetWidth; btn.classList.add("invite"); }
+    if(!hinted){
+      const h = $("fbHint"); h.style.display = "block";
+      try{ localStorage.setItem("toc-fb-hint-seen", "1"); }catch(e){}
+      setTimeout(() => { h.style.display = "none"; }, 8000);
+    }
+  }
+
+  $("fbOpen").addEventListener("click", () => { $("fbHint").style.display = "none"; openModal(); });
   $("fbCancel").addEventListener("click", closeModal);
   modal.addEventListener("click", e => { if(e.target === modal) closeModal(); });
   document.addEventListener("keydown", e => { if(e.key === "Escape" && modal.classList.contains("show")) closeModal(); });
   document.querySelectorAll("#fbVerdict button").forEach(b => b.addEventListener("click", () => setVerdict(b.dataset.v)));
   $("fbSend").addEventListener("click", send);
+  $("fbHintX").addEventListener("click", () => { $("fbHint").style.display = "none"; });
+
+  // 結果描画・各問題行から呼べるよう公開
+  window.fbFromIssue = fbFromIssue;
+  window.fbInlineGood = fbInlineGood;
+  window.fbInlineBad = fbInlineBad;
+  window.fbAfterResults = fbAfterResults;
 })();
 setupZoom();
 
@@ -2664,6 +2763,7 @@ function render() {
          `目次${result.toc_entries.length}項目 ｜ オフセット ${result.offset}` +
          (result.toc_found ? "" : " ｜ ⚠目次ページ未検出（手動指定してください）"));
   $("results").classList.add("show");
+  if (typeof fbAfterResults === "function") fbAfterResults();
 
   const b = $("banner");
   b.style.display = "block";
@@ -2717,7 +2817,8 @@ function render() {
       const sv = iss.severity;
       return `<div class="issue${sevCls[sv] || ""}" id="iss${i}" onclick="selectIssue(${i})">
         <div class="top"><span class="badge ${sevBadge[sv]}">${sevName[sv]} ${iss.id}</span>
-        <span class="loc">${pageLabel(iss.page_index)}</span></div>
+        <span class="loc">${pageLabel(iss.page_index)}</span>
+        <button class="issfb" title="この検出は誤検知（出すぎ）だと報告する" onclick="event.stopPropagation();fbFromIssue(${i})">👎 誤検知?</button></div>
         <div class="msg">${esc(iss.msg)}</div></div>`;
     }).join("");
   }

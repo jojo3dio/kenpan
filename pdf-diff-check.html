@@ -280,14 +280,41 @@
 
   /* ---------- フィードバック ---------- */
   .fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--ui);font-size:12.5px;font-weight:700;
-    color:#06222a;background:var(--cyan);border:1px solid var(--cyan);border-radius:8px;
+    color:#181410;background:var(--amber);border:1px solid var(--amber);border-radius:8px;
     padding:7px 15px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em;
-    box-shadow:0 0 0 0 rgba(70,200,218,.5);animation:fbpulse 2.2s ease-out infinite}
-  .fbbtn:hover{filter:brightness(1.08);transform:translateY(-1px);animation:none;box-shadow:0 5px 16px rgba(70,200,218,.5)}
+    box-shadow:0 0 0 0 rgba(169,134,245,.5)}
+  .fbbtn.invite{animation:fbpulse 2.2s ease-out 3}   /* 常時パルス廃止→結果時に3回だけ */
+  .fbbtn:hover{filter:brightness(1.08);transform:translateY(-1px);animation:none;box-shadow:0 5px 16px rgba(169,134,245,.5)}
   .fbbtn:active{transform:translateY(0)}
   .fbbtn svg{width:16px;height:16px}
-  @keyframes fbpulse{0%{box-shadow:0 0 0 0 rgba(70,200,218,.5)}70%{box-shadow:0 0 0 9px rgba(70,200,218,0)}100%{box-shadow:0 0 0 0 rgba(70,200,218,0)}}
-  @media (prefers-reduced-motion:reduce){.fbbtn{animation:none}}
+  @keyframes fbpulse{0%{box-shadow:0 0 0 0 rgba(169,134,245,.5)}70%{box-shadow:0 0 0 9px rgba(169,134,245,0)}100%{box-shadow:0 0 0 0 rgba(169,134,245,0)}}
+  @media (prefers-reduced-motion:reduce){.fbbtn,.fbbtn.invite{animation:none}}
+
+  /* 改善1: 結果直後の軽い誘導（👍即送信／👎モーダル） */
+  .fbinline{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-top:8px;
+    background:var(--amber-soft);border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:12px}
+  .fbinline .q{color:var(--ink-dim);font-weight:600;white-space:nowrap}
+  .fbinline .sp{flex:1;min-width:2px}
+  .fbinline button{font-family:var(--ui);font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;
+    border:1px solid var(--line);border-radius:7px;padding:5px 9px;background:var(--panel);color:var(--ink);transition:.12s}
+  .fbinline button:hover{border-color:var(--amber);color:var(--amber)}
+  .fbinline .done{color:var(--ok);font-weight:700}
+
+  /* 改善2: 各検出の「👎 誤検知?」常時ラベル */
+  .issfbrow{display:block;text-align:right;margin-top:5px}
+  .issfb{display:inline-block;background:transparent;border:1px solid var(--line);color:var(--ink-faint);
+    cursor:pointer;font-size:10px;font-family:var(--ui);font-weight:600;
+    border-radius:6px;padding:2px 7px;line-height:1.3;transition:.12s;white-space:nowrap}
+  .issfb:hover{color:var(--red);border-color:var(--red);background:var(--amber-soft)}
+
+  /* 改善3: 初回だけ出るヒントの吹き出し */
+  .fbhintbubble{position:fixed;top:50px;right:16px;z-index:900;max-width:200px;
+    background:var(--amber);color:#181410;font-size:11.5px;line-height:1.5;border-radius:9px;
+    padding:9px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  body.light .fbhintbubble{color:#fff}
+  .fbhintbubble::after{content:"";position:absolute;top:-7px;right:24px;
+    border:7px solid transparent;border-bottom-color:var(--amber);border-top:0}
+  .fbhintbubble b{cursor:pointer;margin-left:6px;opacity:.85}
   .fbmodal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
     background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}
   .fbmodal.show{display:flex}
@@ -307,13 +334,14 @@
     border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
   .fbverdict button:hover{border-color:var(--amber)}
   .fbverdict button.on{background:var(--amber);color:#181410;border-color:var(--amber);font-weight:700}
-  body.light .modes button.on,body.light .btn.primary,body.light .secbtn.allpg:hover:not(:disabled),body.light .fbverdict button.on{color:#fff}
+  body.light .modes button.on,body.light .btn.primary,body.light .secbtn.allpg:hover:not(:disabled),body.light .fbverdict button.on,body.light .fbbtn{color:#fff}
   .fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
   .fbactions{display:flex;gap:9px;margin-top:18px}
   .fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
   .fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
   .fbactions .fbcancel:hover{color:var(--ink)}
-  .fbactions .fbsend{background:var(--cyan);border:1px solid var(--cyan);color:#06222a;font-weight:700}
+  .fbactions .fbsend{background:var(--amber);border:1px solid var(--amber);color:#181410;font-weight:700}
+  body.light .fbactions .fbsend{color:#fff}
   .fbactions .fbsend:hover{filter:brightness(1.08)}
   .fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
   .fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
@@ -548,6 +576,7 @@
         </div>
         <div class="allpages" id="allpages"></div>
       </div>
+      <div class="fbinline" id="fbInline" style="display:none;margin:8px 8px 0"></div>
       <div class="help">
         ドラッグ=移動 / ホイール=ズーム / <kbd>←↑↓→</kbd>=B位置微調整 / <kbd>n</kbd><kbd>p</kbd>=差分送り
       </div>
@@ -555,6 +584,7 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="fbhintbubble" id="fbHint" style="display:none">変だと思ったら、ここで教えてください<b id="fbHintX">✕</b></div>
 
 <script>
 "use strict";
@@ -1004,6 +1034,7 @@ async function refreshPage(suggestCenter){
     }
     setCompareRects(a, aligned);
     computeDiff(); buildContent(); fitView(); draw(); updatePanel(); updatePageLabel();
+    if(S.docA && S.docB && window.fbAfterResults) window.fbAfterResults();
   }catch(err){ console.error(err); toast("レンダリングに失敗しました"); }
   finally{ showBusy(false); }
 }
@@ -1834,19 +1865,17 @@ function mm(px){ return (px/S.dpi*25.4); }
 function updatePanel(){
   const n=S.regions.length;
   const cEl=$("#diffCount"); cEl.textContent=n; cEl.className="count"+(n===0?" zero":"");
-  // サマリ
+  // サマリ（常時表示は最小限：サイズ差の警告／対応ページ警告／違いの内訳のみ。
+  //          A・B の実寸は差がある時だけ tooltip で確認できるようにし、行は出さない）
   const sm=$("#summary");
   let html="";
-  const aSize = S.aPtW? `${(S.aPtW*PT2MM).toFixed(1)} × ${(S.aPtH*PT2MM).toFixed(1)}` : "—";
-  const bSize = S.bPtW? `${(S.bPtW*PT2MM).toFixed(1)} × ${(S.bPtH*PT2MM).toFixed(1)}` : "—";
-  html+=`<div class="row"><span>A 顧客 (mm)</span><span>${aSize}</span></div>`;
-  html+=`<div class="row"><span>B 下版 (mm)</span><span>${bSize}</span></div>`;
   if(S.aPtW&&S.bPtW){
     const dw=(S.bPtW-S.aPtW)*PT2MM, dh=(S.bPtH-S.aPtH)*PT2MM;
-    if(Math.abs(dw)>0.05||Math.abs(dh)>0.05)
-      html+=`<div class="row"><span>サイズ差</span><span class="delta">${dw>=0?'+':''}${dw.toFixed(1)} / ${dh>=0?'+':''}${dh.toFixed(1)} mm</span></div>`;
-    else
-      html+=`<div class="row"><span>サイズ差</span><span>同一</span></div>`;
+    if(Math.abs(dw)>0.05||Math.abs(dh)>0.05){
+      const aSize=`${(S.aPtW*PT2MM).toFixed(1)}×${(S.aPtH*PT2MM).toFixed(1)}`;
+      const bSize=`${(S.bPtW*PT2MM).toFixed(1)}×${(S.bPtH*PT2MM).toFixed(1)}`;
+      html+=`<div class="row" title="A ${aSize}mm → B ${bSize}mm"><span class="warn">サイズ差</span><span class="delta">${dw>=0?'+':''}${dw.toFixed(1)} / ${dh>=0?'+':''}${dh.toFixed(1)} mm</span></div>`;
+    }
   }
   if((S.docA&&!getA(S.page))||(S.docB&&!getB(S.page))){
     const miss = !getA(S.page) ? "A（対応ページ無し）" : "B";
@@ -1863,6 +1892,7 @@ function updatePanel(){
     html+=`<div class="row"><span>違いの内訳</span><span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${parts.join("")}</span></div>`;
   }
   sm.innerHTML=html;
+  sm.style.display = html ? "block" : "none";   // 表示する内容が無ければ枠ごと隠す
   // リスト
   const list=$("#reglist");
   if(!S.aData||!S.bData){
@@ -1886,7 +1916,9 @@ function updatePanel(){
         <span class="kind" style="color:${k.color}"><i class="kdot" style="background:${k.color}"></i>${k.label}</span>
         ${detailHtml}
         <span class="pos">B基準 ${cx}, ${cy} mm</span>
-        <span class="sz">／ ${wmm}×${hmm}mm</span></span>
+        <span class="sz">／ ${wmm}×${hmm}mm</span>
+        <span class="issfbrow"><button class="issfb" title="この検出は誤検知（出すぎ）だと報告する"
+          onclick="event.stopPropagation();fbFromRegion(${S.page}, ${i})">👎 誤検知?</button></span></span>
       <span class="sev" style="background:${k.color}"></span>`;
     el.title=k.detail||k.label;
     el.onclick=()=>focusRegion(i);
@@ -2624,17 +2656,76 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     return {a,b,pg};
   }
 
-  function openModal(){
+  function openModal(pre){
+    pre = pre || {};
     const f=curFiles();
     $$("#fbFiles").value = `A: ${f.a}  /  B: ${f.b}`;
     $$("#fbFilesHint").textContent = `表示ページ: ${f.pg}`;
+    $$("#fbKind").value = pre.kind || "";
+    $$("#fbComment").value = pre.comment || "";
     $$("#fbReporter").value = reporterStore(true);
     $$("#fbNote").style.display="none";
     $$("#fbSend").disabled=false;
     $$("#fbSend").textContent="送信する";
+    setVerdict(pre.verdict || "");
     modal.classList.add("show");
   }
   function closeModal(){ modal.classList.remove("show"); }
+
+  /* ===== 改善1〜4：送信の共通化・インライン誘導・誤検知ラベル・誘導アニメ ===== */
+  async function postFeedback(payload){
+    await fetch(FEEDBACK_ENDPOINT,{method:"POST",mode:"no-cors",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});
+  }
+  function basePayload(extra){
+    const f=curFiles();
+    return Object.assign({
+      verdict:"", kind:"", fileA:f.a, fileB:f.b, page:f.pg, comment:"",
+      reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent
+    }, extra||{});
+  }
+  function renderInline(state){
+    const el=$$("#fbInline"); if(!el) return;
+    if(state==="thanks"){ el.innerHTML='<span class="done">✓ ありがとうございます！</span>'; return; }
+    el.innerHTML='<span class="q">検出結果は？</span><span class="sp"></span>'+
+      '<button id="fbInY">👍 正しい</button><button id="fbInN">👎 気になる</button>';
+    $$("#fbInY").onclick=fbInlineGood; $$("#fbInN").onclick=fbInlineBad;
+  }
+  async function fbInlineGood(){
+    if(!FEEDBACK_ENDPOINT){ renderInline("thanks"); return; }
+    try{ await postFeedback(basePayload({verdict:"correct"})); }catch(e){}
+    renderInline("thanks"); markUsed();
+  }
+  function fbInlineBad(){ openModal({verdict:"false_positive"}); }
+
+  // 改善2：region から誤検知報告（kind を自動セット）
+  function fbFromRegion(page, idx){
+    const st=(typeof S!=="undefined")?S:{};
+    const rg=(st.regions&&st.regions[idx])?st.regions[idx]:null;
+    const kind=(rg&&rg.cls&&rg.cls.label)?rg.cls.label:"";
+    openModal({ verdict:"false_positive", kind,
+      comment:"［該当検出: "+kind+" / p"+page+"］" });
+  }
+
+  // 改善4：使用後は光らせない
+  function markUsed(){
+    try{ localStorage.setItem("pdfdiff-fb-used","1"); }catch(e){}
+    const b=$$("#fbOpen"); if(b) b.classList.remove("invite");
+  }
+
+  // 結果描画の最後に呼ぶ（改善1・3・4）
+  function fbAfterResults(){
+    renderInline(); const inl=$$("#fbInline"); if(inl) inl.style.display="flex";
+    let used=false, hinted=false;
+    try{ used=!!localStorage.getItem("pdfdiff-fb-used"); hinted=!!localStorage.getItem("pdfdiff-fb-hint-seen"); }catch(e){}
+    if(!used){ const b=$$("#fbOpen"); if(b){ b.classList.remove("invite"); void b.offsetWidth; b.classList.add("invite"); } }
+    if(!hinted){ const h=$$("#fbHint"); if(h){ h.style.display="block";
+      try{ localStorage.setItem("pdfdiff-fb-hint-seen","1"); }catch(e){}
+      setTimeout(()=>{ h.style.display="none"; },8000); } }
+  }
+  // 他スクリプト（メイン）から呼べるよう公開
+  window.fbAfterResults=fbAfterResults;
+  window.fbFromRegion=fbFromRegion;
 
   function setVerdict(v){
     verdict=v;
@@ -2672,7 +2763,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
         body:JSON.stringify(payload)
       });
       showNote("送信しました。ありがとうございます！", true);
-      $$("#fbComment").value=""; setVerdict("");
+      $$("#fbComment").value=""; setVerdict(""); markUsed();
       setTimeout(closeModal, 1100);
     }catch(err){
       showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
@@ -2680,7 +2771,8 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     }
   }
 
-  $$("#fbOpen").addEventListener("click", openModal);
+  $$("#fbOpen").addEventListener("click", ()=>{ const h=$$("#fbHint"); if(h) h.style.display="none"; openModal(); });
+  $$("#fbHintX").addEventListener("click", ()=>{ const h=$$("#fbHint"); if(h) h.style.display="none"; });
   $$("#fbCancel").addEventListener("click", closeModal);
   modal.addEventListener("click", e=>{ if(e.target===modal) closeModal(); });
   document.addEventListener("keydown", e=>{ if(e.key==="Escape" && modal.classList.contains("show")) closeModal(); });
