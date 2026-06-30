@@ -287,7 +287,11 @@ function renderDetail(i){
       </button>
     </div>`;
   d.querySelector('.open').onclick=()=>openUrl(t.url);
-  if(hasMan) d.querySelector('.man').onclick=()=>window.open(t.manual,'_blank','noopener');
+  if(hasMan) d.querySelector('.man').onclick=()=>{
+    const w=Math.min(720, (screen.availWidth||900)), h=Math.min(760, (screen.availHeight||800));
+    const l=Math.max(0,((screen.availWidth||w)-w)/2), tp=Math.max(0,((screen.availHeight||h)-h)/2);
+    window.open(t.manual,'_blank','noopener,noreferrer,width='+w+',height='+h+',left='+l+',top='+tp);
+  };
 }
 
 function showDetail(i){ shown=i; markShown(); renderDetail(i); }
