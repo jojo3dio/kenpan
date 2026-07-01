@@ -154,11 +154,34 @@
   .grp.minor{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 8%,var(--panel))}
   .grp.minor .cnt{color:var(--warn)}
   .tile{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;
-    cursor:pointer;user-select:none;transition:.12s}
+    cursor:pointer;user-select:none;
+    transition:transform .12s,box-shadow .12s,filter .12s,border-color .12s,background .12s}
   .tile:hover{border-color:var(--amber)}
-  .tile .n{font-family:var(--mono);font-size:24px;line-height:1;color:var(--ink)}
+  /* 数字＋ヒントを横並びにし、ヒントは数字の右の余白へ（高さは数字行に固定＝タイルの大きさは不変） */
+  .tile .nrow{display:flex;align-items:center;gap:6px;height:24px}
+  .tile .n{font-family:var(--mono);font-size:24px;line-height:1;color:var(--ink);flex:0 0 auto}
+  .tile .cap{display:none;flex:1 1 auto;min-width:0;text-align:right;
+    font-size:9px;font-weight:700;line-height:1.2;color:var(--ink-faint);
+    max-height:24px;overflow:hidden}
   .tile .l{font-size:11px;color:var(--ink-dim);margin-top:5px}
   .tile.ng .n{color:var(--red)} .tile.ok .n{color:var(--ok)}
+  /* 押せるボタン表示（件数>0の種別だけ） */
+  .tile.act{border-width:1.5px}
+  .tile.act .cap{display:block}
+  .tile.act:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(60,45,20,.16);filter:brightness(1.02)}
+  .tile.act:active{transform:translateY(0)}
+  .tile.act-pos{border-color:var(--red);background:color-mix(in srgb,var(--red) 9%,var(--panel))}
+  .tile.act-pos:hover{border-color:var(--red)}
+  .tile.act-pos .n,.tile.act-pos .cap{color:var(--red)}
+  .tile.act-pair{border-color:var(--pair);background:color-mix(in srgb,var(--pair) 9%,var(--panel))}
+  .tile.act-pair:hover{border-color:var(--pair)}
+  .tile.act-pair .n,.tile.act-pair .cap{color:var(--pair)}
+  .tile.act-warn{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,var(--panel))}
+  .tile.act-warn:hover{border-color:var(--warn)}
+  .tile.act-warn .n,.tile.act-warn .cap{color:var(--warn)}
+  /* 0件は淡色で「押せない」と分かるように（サイズは変えない） */
+  .tile.zero{opacity:.5;cursor:default}
+  .tile.zero:hover{border-color:var(--line);transform:none;box-shadow:none;filter:none}
 
   .ovwrap{border:1px solid var(--line);border-radius:6px;background:var(--ovbg);
     padding:8px;margin-bottom:6px;display:flex;justify-content:center}
@@ -286,9 +309,9 @@
     <div class="panel-top">
       <p class="eyebrow">判定サマリー</p>
       <div class="tiles tiles3">
-        <div class="tile" id="tilePos" title="クリックで位置NGのページを順に表示"><div class="n">—</div><div class="l">位置NG</div></div>
-        <div class="tile" id="tilePair" title="クリックで表裏NGのページを順に表示"><div class="n">—</div><div class="l">表裏NG</div></div>
-        <div class="tile" id="tileWarn" title="クリックで要確認のページを順に表示"><div class="n">—</div><div class="l">要確認</div></div>
+        <div class="tile" id="tilePos" title="クリックで位置NGのページを順に表示"><div class="nrow"><div class="n">—</div><div class="cap">クリックで<br>順に表示</div></div><div class="l">位置NG</div></div>
+        <div class="tile" id="tilePair" title="クリックで表裏NGのページを順に表示"><div class="nrow"><div class="n">—</div><div class="cap">クリックで<br>順に表示</div></div><div class="l">表裏NG</div></div>
+        <div class="tile" id="tileWarn" title="クリックで要確認のページを順に表示"><div class="nrow"><div class="n">—</div><div class="cap">クリックで<br>順に表示</div></div><div class="l">要確認</div></div>
       </div>
       <button class="bigtoggle" id="exclBtn" type="button" aria-pressed="false" style="display:none">
         <span class="sw"></span>
@@ -679,9 +702,9 @@ function renderPanel(){
   const ng=records.filter(r=>r.status==="NG").length;
   const warn=records.filter(r=>r.status==="WARN").length;
   const pairng=analysis.pairs.filter(p=>p.status==="NG").length;
-  const tp=$("tilePos"); tp.querySelector(".n").textContent=ng; tp.className="tile"+(ng?" ng":" ok");
-  const tw=$("tileWarn"); tw.querySelector(".n").textContent=warn; tw.className="tile"+(warn?" warn":"");
-  const tpr=$("tilePair"); tpr.querySelector(".n").textContent=pairng; tpr.className="tile"+(pairng?" ng":" ok");
+  const tp=$("tilePos"); tp.querySelector(".n").textContent=ng; tp.className="tile"+(ng?" act act-pos":" zero");
+  const tw=$("tileWarn"); tw.querySelector(".n").textContent=warn; tw.className="tile"+(warn?" act act-warn":" zero");
+  const tpr=$("tilePair"); tpr.querySelector(".n").textContent=pairng; tpr.className="tile"+(pairng?" act act-pair":" zero");
 
   // デザイングループ一覧
   const cl=$("clusters");

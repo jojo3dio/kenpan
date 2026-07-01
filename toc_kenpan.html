@@ -17,6 +17,7 @@
   --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
   --amber:#d97706; --amber-bg:#fdecd9;
   --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --check:#2563cc; --check-bg:#e6eefa;
   --ok:#2e7d46; --ok-bg:#e7f2ea;
   --stage:#ffffff; --shadow:0 1px 4px rgba(60,45,20,.10);
   --hl-fill:rgba(185,121,26,.16); --hl-stroke:rgba(200,54,42,.85);
@@ -29,6 +30,7 @@
   --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
   --amber:#f2a23c; --amber-bg:#3a2a12;
   --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --check:#5b9bf0; --check-bg:#16233a;
   --ok:#4fae6e; --ok-bg:#15301f;
   --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
   --hl-fill:rgba(232,163,61,.20); --hl-stroke:rgba(229,96,79,.9);
@@ -191,10 +193,52 @@ header .sp{flex:1}
 .badge{font-family:var(--mono);font-size:10px;font-weight:600;border-radius:4px;
        padding:2px 7px;color:#fff;white-space:nowrap}
 .b-err{background:var(--err)}.b-warn{background:var(--warn)}
-.b-ok{background:var(--ok)}.b-info{background:var(--ink-faint)}
+.b-ok{background:var(--ok)}.b-info{background:var(--ink-faint)}.b-check{background:var(--check)}
 .issue.info{border-left-color:var(--ink-faint);opacity:.85}
+.issue.check{border-left-color:var(--check);background:var(--check-bg)}
+.issue.check:hover{filter:brightness(.98)}
 .issue .loc{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim)}
 .issue .msg{font-size:12.5px;line-height:1.55}
+/* サマリーカードを「押せるボタン」らしく（件数>0の種別のみ） */
+.card.act{cursor:pointer;border-width:1.5px;
+  transition:transform .12s,box-shadow .12s,filter .12s}
+.card.act .cap{font-size:10px;font-weight:700;margin-top:3px;padding-top:3px;
+  border-top:1px dashed;white-space:nowrap}
+.card.act:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(60,45,20,.16);filter:brightness(1.02)}
+.card.act:active{transform:translateY(0)}
+.card.act-error{border-color:var(--err);background:var(--err-bg)}
+.card.act-error .cap{color:var(--err)}
+.card.act-warning{border-color:var(--warn);background:var(--warn-bg)}
+.card.act-warning .cap{color:var(--warn)}
+.card.act-check{border-color:var(--check);background:var(--check-bg)}
+.card.act-check .cap{color:var(--check)}
+.card.zero{opacity:.5}
+.listhint{font-size:11px;color:var(--ink-dim);padding-left:8px;margin:3px 0 2px;
+  display:flex;align-items:center;gap:5px}
+.listhint::before{content:"👆";font-size:11px}
+/* 対応表・ページマップ 固定バー */
+.panelbar{flex:0 0 auto;display:flex;gap:8px;padding-top:8px;margin-top:2px;
+  border-top:1px solid var(--line)}
+.pbtn{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:8px;padding:8px 10px;cursor:pointer;font-family:var(--ui);font-size:12px;
+  font-weight:700;transition:.12s;box-shadow:var(--shadow)}
+.pbtn:hover{border-color:var(--amber);color:var(--amber)}
+.pbtn.on{border-color:var(--amber);color:var(--amber);background:var(--amber-bg)}
+/* フローティングパネル（対応表 / ページマップ） */
+.fpanel{position:fixed;top:120px;right:34px;z-index:600;width:min(400px,92vw);
+  max-height:66vh;display:none;flex-direction:column;background:var(--panel);
+  border:1px solid var(--line);border-radius:11px;box-shadow:0 12px 40px rgba(0,0,0,.32);
+  overflow:hidden}
+.fpanel.show{display:flex}
+.fphead{flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;
+  padding:9px 12px;background:var(--panel2);border-bottom:1px solid var(--line);user-select:none}
+.fphead .fptitle{font-size:12.5px;font-weight:700;color:var(--ink-dim)}
+.fphead .fpsp{flex:1}
+.fpclose{background:transparent;border:0;color:var(--ink-dim);cursor:pointer;
+  font-size:15px;line-height:1;padding:2px 6px;border-radius:6px}
+.fpclose:hover{color:var(--err);background:var(--err-bg)}
+.fpbody{flex:1 1 auto;overflow:auto;padding:10px 12px;min-height:0}
+.fphint{font-size:10.5px;color:var(--ink-faint);padding:0 12px 8px}
 details{background:var(--panel);border:1px solid var(--line);border-radius:8px;
         padding:8px 12px;box-shadow:var(--shadow)}
 details summary{cursor:pointer;font-size:12.5px;font-weight:700;
@@ -294,20 +338,16 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
         <div class="fbinline" id="fbInline" style="display:none"></div>
         <div class="cards" id="cards" style="margin-top:10px"></div>
         <div class="sec" style="margin-top:12px">検出された問題</div>
+        <div class="listhint">各項目をクリックすると該当ページへ移動します（↑↓キーでも巡回）</div>
       </div>
       <div class="scrollarea">
         <div id="issueList"></div>
-        <details id="tocDetails">
-          <summary>目次 ⇔ 本文見出し 対応表 <span id="tocCount"></span></summary>
-          <div class="inner tblwrap"><table id="tocTable"></table></div>
-        </details>
-        <details>
-          <summary>ページマップ</summary>
-          <div class="inner">
-            <div class="legend">赤=エラー / 黄=警告 / 「·」=ノンブル非表示。クリックで表示。</div>
-            <div id="pagemap"></div>
-          </div>
-        </details>
+      </div>
+      <div class="panelbar">
+        <button class="pbtn" id="pbToc" onclick="togglePanel('fpToc')"
+                title="目次と本文見出しの対応表を別窓で開く">▤ 目次⇔本文 対応表</button>
+        <button class="pbtn" id="pbMap" onclick="togglePanel('fpMap')"
+                title="ページマップを別窓で開く">▦ ページマップ</button>
       </div>
     </div>
     <div class="right">
@@ -327,6 +367,26 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
         <div id="cvwrap"><canvas id="pgcanvas"></canvas></div>
       </div>
     </div>
+  </div>
+
+  <!-- フローティングパネル: 対応表 / ページマップ（固定・ドラッグ移動可・行クリックで本体プレビュー連動） -->
+  <div class="fpanel" id="fpToc">
+    <div class="fphead" data-panel="fpToc">
+      <span class="fptitle">目次 ⇔ 本文見出し 対応表 <span id="tocCount"></span></span>
+      <span class="fpsp"></span>
+      <button class="fpclose" title="閉じる" onclick="closePanel('fpToc')">✕</button>
+    </div>
+    <div class="fphint">行をクリックすると本体プレビューが該当ページへ移動します。</div>
+    <div class="fpbody tblwrap"><table id="tocTable"></table></div>
+  </div>
+  <div class="fpanel" id="fpMap">
+    <div class="fphead" data-panel="fpMap">
+      <span class="fptitle">ページマップ</span>
+      <span class="fpsp"></span>
+      <button class="fpclose" title="閉じる" onclick="closePanel('fpMap')">✕</button>
+    </div>
+    <div class="fphint">赤=エラー / 黄=警告 / 「·」=ノンブル非表示。マスをクリックで該当ページへ移動します。</div>
+    <div class="fpbody"><div id="pagemap"></div></div>
   </div>
 
   <footer>toc-kenpan — single-file, local processing, offline after first CDN load</footer>
@@ -2284,6 +2344,8 @@ $("themeBtn").addEventListener("click", () => {
 // ---- リセット
 $("resetBtn").addEventListener("click", () => {
   pdfDoc = null; rawData = null; result = null; fileName = "";
+  navItems = []; selNav = -1;
+  closePanel("fpToc"); closePanel("fpMap");
   $("results").classList.remove("show");
   $("banner").style.display = "none";
   $("drop").style.display = "block";
@@ -2293,7 +2355,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "063008";
+document.getElementById("buildId").textContent = "070101";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -2780,14 +2842,16 @@ function render() {
   const needCheck = result.toc_entries.filter(
     e => !(e.similarity !== undefined && e.similarity >= 0.999)).length;
   const mkCard = ([k, v, sev]) => {
-    const clk = (sev === "error" || sev === "warning")
-        ? ` style="cursor:pointer" title="${k}を順に表示" onclick="cycleIssue('${sev}')"`
-      : (sev === "check")
-        ? ` style="cursor:pointer" title="対応表の要確認を表示" onclick="openTocTable()"` : "";
+    const isSev = (sev === "error" || sev === "warning" || sev === "check");
+    const active = isSev && v > 0;                 // 件数>0 のときだけ押せる
+    const cls = active ? ` act act-${sev}` : (isSev ? " zero" : "");
+    const attrs = active
+      ? ` title="${k}をクリックで順に確認（押すたびに次の該当ページへ移動）" onclick="cycleType('${sev}')"` : "";
     const vc = (sev === "error" && s.errors) ? "color:var(--err)"
              : (sev === "warning" && s.warnings) ? "color:var(--warn)"
-             : (sev === "check" && needCheck) ? "color:var(--warn)" : "";
-    return `<div class="card"${clk}><div class="v" style="${vc}">${v}</div><div class="k">${k}</div></div>`;
+             : (sev === "check" && needCheck) ? "color:var(--check)" : "";
+    const cap = active ? `<div class="cap">▶ クリックで順に表示</div>` : "";
+    return `<div class="card${cls}"${attrs}><div class="v" style="${vc}">${v}</div><div class="k">${k}</div>${cap}</div>`;
   };
   const row1 = [
     ["総ページ数", result.pages.length, null],
@@ -2804,22 +2868,35 @@ function render() {
     `<div class="cardrow r4">${row1.map(mkCard).join("")}</div>` +
     `<div class="cardrow r3">${row2.map(mkCard).join("")}</div>`;
 
+  // ---- 統合リスト navItems: エラー→警告→参考→要確認 の順に巡回可能に
+  navItems = buildNavItems();
   const L = $("issueList");
-  if (!result.issues.length) {
+  if (!navItems.length) {
     L.innerHTML = `<div class="issue okmsg">
       <div class="top"><span class="badge b-ok">OK</span></div>
       <div class="msg">すべての照合に成功しました。右のビューアでページを確認できます。</div></div>`;
   } else {
-    const sevName = { error: "エラー", warning: "警告", info: "参考" };
-    const sevCls = { error: "", warning: " warn", info: " info" };
-    const sevBadge = { error: "b-err", warning: "b-warn", info: "b-info" };
-    L.innerHTML = result.issues.map((iss, i) => {
-      const sv = iss.severity;
-      return `<div class="issue${sevCls[sv] || ""}" id="iss${i}" onclick="selectIssue(${i})">
-        <div class="top"><span class="badge ${sevBadge[sv]}">${sevName[sv]} ${iss.id}</span>
-        <span class="loc">${pageLabel(iss.page_index)}</span>
-        <button class="issfb" title="この検出は誤検知（出すぎ）だと報告する" onclick="event.stopPropagation();fbFromIssue(${i})">👎 誤検知?</button></div>
-        <div class="msg">${esc(iss.msg)}</div></div>`;
+    const sevName = { error: "エラー", warning: "警告", info: "参考", check: "要確認" };
+    const sevCls = { error: "", warning: " warn", info: " info", check: " check" };
+    const sevBadge = { error: "b-err", warning: "b-warn", info: "b-info", check: "b-check" };
+    L.innerHTML = navItems.map((n, k) => {
+      if (n.type === "issue") {
+        const iss = result.issues[n.issueIndex], sv = iss.severity;
+        return `<div class="issue${sevCls[sv] || ""}" id="nav${k}" onclick="selectNav(${k})" title="クリックで該当ページへ移動">
+          <div class="top"><span class="badge ${sevBadge[sv]}">${sevName[sv]} ${iss.id}</span>
+          <span class="loc">${pageLabel(iss.page_index)}</span>
+          <button class="issfb" title="この検出は誤検知（出すぎ）だと報告する" onclick="event.stopPropagation();fbFromIssue(${n.issueIndex})">👎 誤検知?</button></div>
+          <div class="msg">${esc(iss.msg)}</div></div>`;
+      }
+      // 要確認（対応表で類似度<1 の目次項目）
+      const loc = (n.page_index != null) ? pageLabel(n.page_index)
+                : `目次記載ノンブル ${n.nombre}（本文で見出し未検出）`;
+      const simTxt = (n.similarity === undefined) ? "本文に対応見出しなし"
+                   : `類似度 ${n.similarity}`;
+      return `<div class="issue check" id="nav${k}" onclick="selectNav(${k})" title="クリックで該当ページへ移動">
+        <div class="top"><span class="badge b-check">要確認</span>
+        <span class="loc">${loc}</span></div>
+        <div class="msg">目次「${esc(n.title)}」⇔ 本文「${esc(n.matched || "—")}」（${simTxt}）。目次と本文の見出しが一致するか確認してください。</div></div>`;
     }).join("");
   }
 
@@ -2855,7 +2932,8 @@ function render() {
   }).join("");
   markMapSelection(viewPage);
 
-  if (result.issues.length) selectIssue(0); else gotoPage(0);
+  cycleState.error = cycleState.warning = cycleState.check = -1;
+  if (navItems.length) selectNav(0); else gotoPage(0);
 }
 
 // 対応表の行クリック → そのページのプレビューへ
@@ -2915,13 +2993,47 @@ async function openTocPreview() {
   }
 }
 
-// 要確認カード → 対応表を開いて表示
-function openTocTable() {
-  const d = $("tocDetails");
-  if (!d) return;
-  d.open = true;
-  d.scrollIntoView({ block: "start", behavior: "smooth" });
+// ---- フローティングパネル（対応表 / ページマップ）の開閉・ドラッグ
+const PANEL_BTN = { fpToc: "pbToc", fpMap: "pbMap" };
+function togglePanel(id) {
+  const p = $(id); if (!p) return;
+  const show = !p.classList.contains("show");
+  p.classList.toggle("show", show);
+  const btn = $(PANEL_BTN[id]); if (btn) btn.classList.toggle("on", show);
+  if (show && !p.dataset.placed) placePanel(p);   // 初回のみ既定位置に配置
 }
+function closePanel(id) {
+  const p = $(id); if (p) p.classList.remove("show");
+  const btn = $(PANEL_BTN[id]); if (btn) btn.classList.remove("on");
+}
+// 2枚同時に開いても重ならないよう軽くずらす
+function placePanel(p) {
+  const others = document.querySelectorAll(".fpanel[data-placed]").length;
+  p.style.top = (120 + others * 26) + "px";
+  p.style.right = (34 + others * 26) + "px";
+  p.dataset.placed = "1";
+}
+// ヘッダをドラッグして移動
+(function () {
+  let drag = null;
+  document.addEventListener("mousedown", (e) => {
+    const head = e.target.closest(".fphead"); if (!head) return;
+    if (e.target.closest(".fpclose")) return;
+    const p = document.getElementById(head.dataset.panel); if (!p) return;
+    const r = p.getBoundingClientRect();
+    // right指定を left指定へ切り替えてから移動
+    p.style.left = r.left + "px"; p.style.top = r.top + "px"; p.style.right = "auto";
+    drag = { p, dx: e.clientX - r.left, dy: e.clientY - r.top };
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const maxX = window.innerWidth - 60, maxY = window.innerHeight - 40;
+    drag.p.style.left = Math.max(0, Math.min(maxX, e.clientX - drag.dx)) + "px";
+    drag.p.style.top = Math.max(0, Math.min(maxY, e.clientY - drag.dy)) + "px";
+  });
+  window.addEventListener("mouseup", () => { drag = null; });
+})();
 
 // ページマップで現在表示中ページを強調
 function markMapSelection(idx) {
@@ -2941,11 +3053,44 @@ function pageLabel(idx) {
                            : `物理 ${idx + 1}（ノンブル非表示）`;
 }
 
-let selIssue = -1;
-function selectIssue(i) {
-  selIssue = i;
+// ---- 統合ナビゲーション（エラー / 警告 / 参考 / 要確認 を1本のリストで巡回）
+// navItems: {type:"issue", issueIndex, page_index} または
+//           {type:"check", entryIndex, page_index, nombre, title, matched, similarity}
+let navItems = [];
+let selNav = -1;
+const cycleState = { error: -1, warning: -1, check: -1 };
+
+function buildNavItems() {
+  const sevRank = { error: 0, warning: 1, info: 2 };
+  const items = [];
+  (result.issues || []).forEach((iss, i) =>
+    items.push({ type: "issue", issueIndex: i, severity: iss.severity,
+                 page_index: iss.page_index }));
+  (result.toc_entries || []).forEach((e, i) => {
+    if (e.similarity !== undefined && e.similarity >= 0.999) return;  // 一致済みは対象外
+    items.push({ type: "check", entryIndex: i,
+      page_index: (e.matched_page_index != null) ? e.matched_page_index : null,
+      nombre: e.page, title: e.title,
+      matched: e.matched_heading, similarity: e.similarity });
+  });
+  // エラー→警告→参考→要確認、同種内は該当ページ順
+  items.sort((a, b) => {
+    const ra = a.type === "issue" ? sevRank[a.severity] : 3;
+    const rb = b.type === "issue" ? sevRank[b.severity] : 3;
+    if (ra !== rb) return ra - rb;
+    const pa = a.page_index == null ? 1e9 : a.page_index;
+    const pb = b.page_index == null ? 1e9 : b.page_index;
+    return pa - pb;
+  });
+  return items;
+}
+
+function selectNav(k) {
+  const n = navItems[k];
+  if (!n) return;
+  selNav = k;
   document.querySelectorAll(".issue").forEach(el => el.classList.remove("sel"));
-  const el = $("iss" + i);
+  const el = $("nav" + k);
   if (el) {
     el.classList.add("sel");
     // 指摘リスト内だけをスクロール（サマリーや左カラム全体は動かさない）
@@ -2954,20 +3099,26 @@ function selectIssue(i) {
     if (r.top < br.top) box.scrollTop -= (br.top - r.top) + 6;
     else if (r.bottom > br.bottom) box.scrollTop += (r.bottom - br.bottom) + 6;
   }
-  const iss = result.issues[i];
-  viewRects = iss.rects || [];
-  gotoPage(iss.page_index, true);
+  if (n.type === "issue") {
+    const iss = result.issues[n.issueIndex];
+    viewRects = iss.rects || [];
+    gotoPage(iss.page_index, true);
+  } else {
+    // 要確認: 該当ページへ移動（矩形ハイライトは持たないためページのみ）
+    if (n.page_index != null) gotoPage(n.page_index);
+    else if (n.nombre != null) jumpToNombre(String(n.nombre));
+  }
 }
 
-// 種別（error/warning）ごとに該当指摘を順に巡回。
-// 同種を一巡したら、もう一方の種別も含めた全指摘へと続けて巡る。
-const cycleState = { error: -1, warning: -1 };
-function cycleIssue(sev) {
-  const list = result.issues.map((x, n) => n)
-    .filter(n => result.issues[n].severity === sev);
+// 種別（error / warning / check）ごとに、その種別の項目だけを順に巡回
+function cycleType(type) {
+  const list = navItems.map((n, k) => ({ n, k })).filter(x =>
+    type === "check" ? x.n.type === "check"
+                     : (x.n.type === "issue" && x.n.severity === type)
+  ).map(x => x.k);
   if (!list.length) return;
-  cycleState[sev] = (cycleState[sev] + 1) % list.length;
-  selectIssue(list[cycleState[sev]]);
+  cycleState[type] = (cycleState[type] + 1) % list.length;
+  selectNav(list[cycleState[type]]);
 }
 
 // 指摘リストのキーボード送り（↑↓）も可能に
@@ -3005,12 +3156,12 @@ function jumpToNombre(token) {
 function fitView() { zoom = 1; renderPage(); }
 
 window.addEventListener("keydown", (e) => {
-  if (!result || !result.issues.length) return;
+  if (!result || !navItems.length) return;
   if (e.target && e.target.tagName === "INPUT") return;  // 入力中は無効
   if (e.key === "ArrowDown" || e.key === "j") {
-    selectIssue((selIssue + 1) % result.issues.length); e.preventDefault();
+    selectNav((selNav + 1) % navItems.length); e.preventDefault();
   } else if (e.key === "ArrowUp" || e.key === "k") {
-    selectIssue((selIssue - 1 + result.issues.length) % result.issues.length);
+    selectNav((selNav - 1 + navItems.length) % navItems.length);
     e.preventDefault();
   }
 });
