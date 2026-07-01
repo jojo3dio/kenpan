@@ -13,27 +13,27 @@
 <style>
 /* ---------- light (default / 紙色・白寄り) ---------- */
 :root{
-  --bg:#fdf4e8; --panel:#ffffff; --panel2:#f1ece1; --line:#ddd5c4;
-  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
-  --amber:#d97706; --amber-bg:#fdecd9;
+  --bg:#ffffff; --panel:#ffffff; --panel2:#f4eef1; --line:#e6dde2;
+  --ink:#2a2228; --ink-dim:#6d6169; --ink-faint:#9a8f95;
+  --amber:#d94f95; --amber-bg:#fbe7f1;
   --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
   --check:#2563cc; --check-bg:#e6eefa;
   --ok:#2e7d46; --ok-bg:#e7f2ea;
-  --stage:#ffffff; --shadow:0 1px 4px rgba(60,45,20,.10);
-  --hl-fill:rgba(185,121,26,.16); --hl-stroke:rgba(200,54,42,.85);
+  --stage:#fbf1f6; --shadow:0 1px 4px rgba(90,40,70,.10);
+  --hl-fill:rgba(217,79,149,.16); --hl-stroke:rgba(200,54,42,.85);
   --mono:'JetBrains Mono',ui-monospace,monospace;
   --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
 }
 /* ---------- dark (下版チェッカー系) ---------- */
 [data-theme="dark"]{
-  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
-  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
-  --amber:#f2a23c; --amber-bg:#3a2a12;
+  --bg:#141014; --panel:#1d181c; --panel2:#272029; --line:#3a323a;
+  --ink:#ece5ea; --ink-dim:#a3969f; --ink-faint:#7a6f77;
+  --amber:#ec7cb3; --amber-bg:#3a1a2c;
   --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
   --check:#5b9bf0; --check-bg:#16233a;
   --ok:#4fae6e; --ok-bg:#15301f;
-  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
-  --hl-fill:rgba(232,163,61,.20); --hl-stroke:rgba(229,96,79,.9);
+  --stage:#191016; --shadow:0 2px 10px rgba(0,0,0,.5);
+  --hl-fill:rgba(236,124,179,.20); --hl-stroke:rgba(229,96,79,.9);
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -42,9 +42,9 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 .app{display:flex;flex-direction:column;min-height:100%}
 
 /* ---- header: 左色バーのブランドマーク ---- */
-header{display:flex;align-items:center;gap:12px;padding:12px 20px;
+header{display:flex;align-items:center;gap:12px;padding:12px 22px;
        border-bottom:1px solid var(--line);background:var(--panel);
-       position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+       position:sticky;top:0;z-index:20}
 .brand{display:flex;gap:2px;height:26px}
 .brand i{width:6px;border-radius:2px}
 .brand .c{background:#00AEEF}.brand .m{background:#EC008C}
@@ -63,12 +63,12 @@ header .sp{flex:1}
 .fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--ui);font-size:12.5px;font-weight:700;
   color:#fff;background:var(--amber);border:1px solid var(--amber);border-radius:8px;
   padding:6px 14px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em;
-  box-shadow:0 0 0 0 rgba(217,119,6,.5)}
+  box-shadow:0 0 0 0 rgba(217,79,149,.5)}
 .fbbtn.invite{animation:fbpulse 2.2s ease-out 3}
-.fbbtn:hover{filter:brightness(1.06);transform:translateY(-1px);animation:none;box-shadow:0 5px 16px rgba(217,119,6,.45)}
+.fbbtn:hover{filter:brightness(1.06);transform:translateY(-1px);animation:none;box-shadow:0 5px 16px rgba(217,79,149,.45)}
 .fbbtn:active{transform:translateY(0)}
 .fbbtn svg{width:15px;height:15px}
-@keyframes fbpulse{0%{box-shadow:0 0 0 0 rgba(217,119,6,.5)}70%{box-shadow:0 0 0 9px rgba(217,119,6,0)}100%{box-shadow:0 0 0 0 rgba(217,119,6,0)}}
+@keyframes fbpulse{0%{box-shadow:0 0 0 0 rgba(217,79,149,.5)}70%{box-shadow:0 0 0 9px rgba(217,79,149,0)}100%{box-shadow:0 0 0 0 rgba(217,79,149,0)}}
 @media (prefers-reduced-motion:reduce){.fbbtn{animation:none}}
 .fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
   background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
@@ -138,8 +138,11 @@ header .sp{flex:1}
 #drop .pick{display:inline-block;background:var(--amber);color:#fff;
       border-radius:7px;padding:8px 22px;font-weight:700}
 
-#opts{display:flex;gap:16px;align-items:center;margin:12px 0;flex-wrap:wrap;
-      color:var(--ink-dim);font-size:12px}
+/* 操作行：ヘッダ直下に密着した全幅ツールバー（プレビュー以外は白ベース） */
+#opts{display:flex;gap:14px;align-items:center;margin:0;flex-wrap:wrap;
+      color:var(--ink-dim);font-size:12px;background:var(--panel);
+      border-bottom:1px solid var(--line);padding:8px 22px;
+      box-shadow:var(--shadow)}
 #opts input[type=text]{background:var(--panel);border:1px solid var(--line);
       color:var(--ink);border-radius:6px;padding:5px 9px;width:120px;
       font-family:var(--mono)}
@@ -151,19 +154,24 @@ header .sp{flex:1}
         margin:10px 0;white-space:pre-wrap}
 #status .on{color:var(--amber)}
 
-/* ---- results: 全画面2カラム（左=サマリー+指摘 / 右=プレビュー常時表示） ---- */
+/* ---- results: 全画面2カラム（左=プレビュー・薄い地色 / 右=結果・白ベース）---- */
+/* 他ツール（下版PDF差分チェッカー等）と配置・配色を統一 */
 #results{display:none;gap:14px;align-items:stretch;
          height:calc(100vh - 168px);min-height:460px}
 #results.show{display:flex}
-.left{width:500px;min-width:400px;display:flex;
-      flex-direction:column;gap:10px;padding-right:6px;overflow:hidden}
+/* 右カラム＝結果（サマリー＋指摘）。白パネルにまとめる */
+.left{order:2;width:480px;min-width:390px;display:flex;
+      flex-direction:column;gap:10px;overflow:hidden;
+      background:var(--panel);border:1px solid var(--line);
+      border-radius:10px;padding:12px;box-shadow:var(--shadow)}
 .left .fixed{flex:0 0 auto}
-/* バナー・カード以下（問題一覧＋対応表＋ページマップ）を1つのスクロール領域に */
+/* バナー・カード以下（問題一覧）を1つのスクロール領域に */
 .scrollarea{flex:1 1 auto;overflow-y:auto;min-height:0;
             display:flex;flex-direction:column;gap:10px;padding-right:4px}
 #issueList{display:flex;flex-direction:column;gap:8px}
 .scrollarea details{flex:0 0 auto}
-.right{flex:1;display:flex;min-width:0}
+/* 左カラム＝プレビュー（薄い地色の作業面） */
+.right{order:1;flex:1;display:flex;min-width:0}
 .banner{border-radius:9px;padding:10px 16px;font-size:16px;font-weight:700;
         border:1px solid}
 .banner.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
@@ -225,7 +233,7 @@ header .sp{flex:1}
 .pbtn:hover{border-color:var(--amber);color:var(--amber)}
 .pbtn.on{border-color:var(--amber);color:var(--amber);background:var(--amber-bg)}
 /* フローティングパネル（対応表 / ページマップ） */
-.fpanel{position:fixed;top:120px;right:34px;z-index:600;width:min(400px,92vw);
+.fpanel{position:fixed;top:120px;left:34px;z-index:600;width:min(400px,92vw);
   max-height:66vh;display:none;flex-direction:column;background:var(--panel);
   border:1px solid var(--line);border-radius:11px;box-shadow:0 12px 40px rgba(0,0,0,.32);
   overflow:hidden}
@@ -245,12 +253,12 @@ details summary{cursor:pointer;font-size:12.5px;font-weight:700;
                 color:var(--ink-dim)}
 details summary:hover{color:var(--amber)}
 details .inner{margin-top:8px}
-#viewer{flex:1;background:var(--panel);border:1px solid var(--line);
+#viewer{flex:1;background:var(--stage);border:1px solid var(--line);
         border-radius:10px;padding:10px;display:flex;flex-direction:column;
         box-shadow:var(--shadow);min-width:0}
 #viewer .bar{display:flex;gap:8px;justify-content:center;align-items:center;
         margin-bottom:8px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
-#viewer .bar button{background:var(--panel2);border:1px solid var(--line);
+#viewer .bar button{background:var(--panel);border:1px solid var(--line);
         color:var(--ink);border-radius:5px;padding:3px 12px;cursor:pointer}
 #viewer .bar button:hover{border-color:var(--amber)}
 #viewer .bar input{background:var(--panel);border:1px solid var(--line);
@@ -304,6 +312,18 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     <span>フィードバック</span>
   </button>
 </header>
+<div id="opts">
+  <label>目次ページ（任意・物理番号カンマ区切り）
+    <input type="text" id="tocPages" placeholder="自動検出"></label>
+  <button class="hbtn" id="tocPreviewBtn" onclick="openTocPreview()" disabled
+          title="検出された目次ページだけを別ウィンドウでプレビュー">目次ページを表示</button>
+  <label>見出しサイズ差 <input type="text" id="hdelta" value="0.6" style="width:52px"></label>
+  <label>類似度しきい値 <input type="text" id="fuzzy" value="0.60" style="width:52px"></label>
+  <label>トンボ余白 <input type="text" id="tombo" value="0" style="width:46px"> mm</label>
+  <button id="rerun" disabled>再解析</button>
+  <button class="hbtn" id="htmlReportBtn" onclick="exportHTML()"
+          style="margin-left:auto">HTMLレポート</button>
+</div>
 <div class="fbhintbubble" id="fbHint" style="display:none">変だと思ったら、ここで教えてください<b id="fbHintX">✕</b></div>
 <div class="wrap">
 
@@ -315,19 +335,6 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     <span style="font-size:11px">横組み・通しノンブルの組版済みPDF対応／データはブラウザ外に送信されません</span>
   </div>
   <input type="file" id="file" accept="application/pdf" style="display:none">
-
-  <div id="opts">
-    <label>目次ページ（任意・物理番号カンマ区切り）
-      <input type="text" id="tocPages" placeholder="自動検出"></label>
-    <button class="hbtn" id="tocPreviewBtn" onclick="openTocPreview()" disabled
-            title="検出された目次ページだけを別ウィンドウでプレビュー">目次ページを表示</button>
-    <label>見出しサイズ差 <input type="text" id="hdelta" value="0.6" style="width:52px"></label>
-    <label>類似度しきい値 <input type="text" id="fuzzy" value="0.60" style="width:52px"></label>
-    <label>トンボ余白 <input type="text" id="tombo" value="0" style="width:46px"> mm</label>
-    <button id="rerun" disabled>再解析</button>
-    <button class="hbtn" id="htmlReportBtn" onclick="exportHTML()"
-            style="margin-left:auto">HTMLレポート</button>
-  </div>
 
   <div id="status">解析エンジン（Pyodide）を準備中…</div>
 
@@ -2355,7 +2362,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "070101";
+document.getElementById("buildId").textContent = "070102";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -3010,7 +3017,8 @@ function closePanel(id) {
 function placePanel(p) {
   const others = document.querySelectorAll(".fpanel[data-placed]").length;
   p.style.top = (120 + others * 26) + "px";
-  p.style.right = (34 + others * 26) + "px";
+  p.style.left = (34 + others * 26) + "px";
+  p.style.right = "auto";
   p.dataset.placed = "1";
 }
 // ヘッダをドラッグして移動
