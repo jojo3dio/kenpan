@@ -802,10 +802,16 @@ async function getTextItems(doc, pageNum, scale){
     for(const it of tc.items){
       if(!it.str || !it.str.trim()) continue;
       const tx=pdfjsLib.Util.transform(vp.transform, it.transform);
-      const h=Math.hypot(tx[2],tx[3])||Math.abs(tx[3])||10;
-      const w=(it.width||0)*scale;
-      const x=tx[4];
-      const y=tx[5]-h*0.85;          // ベースライン→上端の近似
+      const fsz=Math.hypot(tx[2],tx[3])||Math.abs(tx[3])||10;   // 文字サイズ
+      let x, y, w, h;
+      if(it.dir==="ttb"){              // 縦書き：tx4=水平中心・tx5≈先頭字の上端。下方向に文字数ぶん伸びる
+        const n=[...it.str].length||1;
+        w=fsz; h=Math.max(fsz, n*fsz);
+        x=tx[4]-fsz/2; y=tx[5];
+      }else{                            // 横書き：tx4=左端・tx5=ベースライン
+        w=(it.width||0)*scale; h=fsz;
+        x=tx[4]; y=tx[5]-fsz*0.85;      // ベースライン→上端の近似
+      }
       out.push({str:it.str, x, y, w:Math.max(w,1), h:Math.max(h,1)});
     }
     // 同一文字が同じ位置に二重描画されているテキストを除去（ノンブル「2」→「22」化を防ぐ）
@@ -1585,10 +1591,14 @@ function buildLines(items){
   const lines=[];
   if(vertical){
     // 列でまとめる（右→左、列内は上→下）
+    // 列許容は文字幅中央値ベースに固定する。横書き混在の広いアイテム(著作権表記等・最大数百px)で
+    // cur.w0 が膨らむと全列が1〜2列に潰れ、本文の位置変更が検出できなくなるため。
+    // さらに列内の大きな縦空き(段落境界)では列を区切り、A/Bで同じ列キーが揃うようにする。
     const its=items.slice().sort((a,b)=> (b.x+b.w/2)-(a.x+a.w/2) || (a.y-b.y));
+    const colGroupTol=Math.max(colTol, mw*0.6);
     for(const it of its){
       const cx=it.x+it.w/2; let cur=lines[lines.length-1];
-      if(cur && Math.abs(cx-cur.cx) <= Math.max(colTol, Math.max(cur.w0,it.w)*0.6)){
+      if(cur && Math.abs(cx-cur.cx) <= colGroupTol && it.y >= cur.y0 && (it.y-cur.y1) <= Math.max(mh,it.h)*1.8){
         cur.its.push(it);
         cur.x0=Math.min(cur.x0,it.x); cur.y0=Math.min(cur.y0,it.y);
         cur.x1=Math.max(cur.x1,it.x+it.w); cur.y1=Math.max(cur.y1,it.y+it.h);
