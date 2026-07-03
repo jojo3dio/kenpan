@@ -1454,6 +1454,34 @@ const KIND={
   changed:{color:"var(--amber)",hex:"#e0a23a",short:"変更"},
 };
 function mkCls(key, label, detail){ return Object.assign({key,label,detail:detail||""}, KIND[key]); }
+
+/* ============ 補助メタデータ：外字・異体字セレクタ等の文字コード可視化 ============ */
+// 私用領域(PUA)・標準異体字セレクタ(VS1-16)・IVS(VS17-256)は見た目上ほぼ判別不能／不可視な
+// ことが多く、テキスト内容としては「差分あり」でも表示上「同じ文字に見える」ことがある。
+// 検出ロジック（何が差分か・閾値）には一切手を加えず、表示文字列にコードポイントを付記するだけの
+// 追記的な機能。既存の判定結果（cls.key等）は変更しない。
+function isSpecialCP(cp){
+  return (cp>=0xE000 && cp<=0xF8FF)      // 私用領域(PUA) BMP：外字の定番
+      || (cp>=0xF0000 && cp<=0xFFFFD)    // 私用領域 補助面A
+      || (cp>=0x100000 && cp<=0x10FFFD)  // 私用領域 補助面B
+      || (cp>=0xFE00 && cp<=0xFE0F)      // 標準異体字セレクタ VS1-16
+      || (cp>=0xE0100 && cp<=0xE01EF);   // 異体字セレクタ補助 IVS（VS17-256）
+}
+function cpHex(cp){ return "U+"+cp.toString(16).toUpperCase().padStart(4,"0"); }
+// 文字列中の特殊コードポイントに [U+xxxx] を付記する。該当が無ければ元の文字列をそのまま返す。
+function annotateCodepoints(str){
+  if(!str) return str||"";
+  let out="", any=false;
+  for(const ch of [...str]){
+    const cp=ch.codePointAt(0);
+    if(isSpecialCP(cp)){
+      any=true;
+      const isVS=(cp>=0xFE00&&cp<=0xFE0F)||(cp>=0xE0100&&cp<=0xE01EF);
+      out += isVS ? `[IVS:${cpHex(cp)}]` : (ch+`[${cpHex(cp)}]`);
+    } else out+=ch;
+  }
+  return any?out:str;
+}
 function rgbLum(r,g,b){return r*0.299+g*0.587+b*0.114;}
 function rgb2hue(r,g,b){
   r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
@@ -1518,20 +1546,23 @@ function classifyRegion(rg){
   const aStr=regionText(S.aText, rg.x-p.ax-padT, rg.y-p.ay-padT, rg.w+padT*2, rg.h+padT*2);
   const bStr=regionText(S.bText, rg.x-p.bx-padT, rg.y-p.by-padT, rg.w+padT*2, rg.h+padT*2);
   if(aStr||bStr){
-    if(aStr&&bStr&&aStr!==bStr) return mkCls("text","文字が変わっています",`「${aStr}」→「${bStr}」`);
+    if(aStr&&bStr&&aStr!==bStr) return mkCls("text","文字が変わっています",`「${annotateCodepoints(aStr)}」→「${annotateCodepoints(bStr)}」`);
     if(aStr&&!bStr){
       // 下版(B)にインクがあれば“削除”でなく“内容変化”（テキスト→アウトライン/画像）
       if(darkFracCommon(S.bData.data,S.bW,S.bH,p.bx,p.by, rg.x,rg.y,rg.x+rg.w,rg.y+rg.h)>0.012)
-        return mkCls("text","内容が変わっています",`「${aStr}」→ 下版は画像/アウトライン（文字データ無し）`);
-      return mkCls("removed","文字が削除されています",`「${aStr}」`);
+        return mkCls("text","内容が変わっています",`「${annotateCodepoints(aStr)}」→ 下版は画像/アウトライン（文字データ無し）`);
+      return mkCls("removed","文字が削除されています",`「${annotateCodepoints(aStr)}」`);
     }
     if(bStr&&!aStr){
       if(darkFracCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay, rg.x,rg.y,rg.x+rg.w,rg.y+rg.h)>0.012)
-        return mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${bStr}」`);
-      return mkCls("added","文字が追加されています",`「${bStr}」`);
+        return mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${annotateCodepoints(bStr)}」`);
+      return mkCls("added","文字が追加されています",`「${annotateCodepoints(bStr)}」`);
     }
-    // aStr===bStr（同じ文字）の場合は色/装飾変更の可能性 → 下の画素解析へ続行
+    // aStr===bStr（同じ文字コード）の場合は色/装飾変更の可能性 → 下の画素解析へ続行
+    // （文字コードは同じでも字形/フォントだけ変わるケース＝画素解析側の結果に注記を付ける）
   }
+  const sameTextSameCode = !!(aStr && bStr && aStr===bStr);
+  const finish = cls => { if(sameTextSameCode && cls) cls.detail = (cls.detail?cls.detail+"　":"") + "※文字コードは同一（字形/フォントの違いの可能性）"; return cls; };
 
   // --- (2) 画素解析 ---
   const step=Math.max(1,Math.floor(Math.max(x1-x0,y1-y0)/140));
@@ -1553,22 +1584,22 @@ function classifyRegion(rg){
       if(satA>40&&satB>40){ colorful++; sHue+=hueDiffDeg(ar,ag,ab,br,bg,bb); }
     }
   }
-  if(n===0) return mkCls("changed","内容が変わっています");
+  if(n===0) return finish(mkCls("changed","内容が変わっています"));
   const dLum=(sLb-sLa)/n, fa=aDark/n, fb=bDark/n, cf=colorful/n;
   const avgHue=colorful? sHue/colorful : 0;
 
   // (2a) 構造（エッジ）が一致＝同じ図版で色味だけ変化（写真の色補正など）
   const es=edgeSimilarity(p,x0,y0,x1,y1);
   if(es.iou>0.45 && es.edgeDensity>4){
-    if(avgHue>18) return mkCls("color","色が変わっています",`同じ図版で色味が変化（色相差 約${Math.round(avgHue)}°・補正の可能性）`);
-    return mkCls("color","色・明るさが変わっています",`同じ図版で明るさ/色調が変化（補正の可能性）`);
+    if(avgHue>18) return finish(mkCls("color","色が変わっています",`同じ図版で色味が変化（色相差 約${Math.round(avgHue)}°・補正の可能性）`));
+    return finish(mkCls("color","色・明るさが変わっています",`同じ図版で明るさ/色調が変化（補正の可能性）`));
   }
   // (2b) 平坦領域で色相がはっきり違う（ベタ色の色変更）
-  if(cf>0.3 && avgHue>25 && Math.abs(dLum)<60) return mkCls("color","色が変わっています",`色相が約${Math.round(avgHue)}°変化`);
+  if(cf>0.3 && avgHue>25 && Math.abs(dLum)<60) return finish(mkCls("color","色が変わっています",`色相が約${Math.round(avgHue)}°変化`));
   // (2c) 明るさで増減を推定
-  if(dLum>22 && fa>fb*1.6) return mkCls("removed","要素が消えています");
-  if(dLum<-22 && fb>fa*1.6) return mkCls("added","要素が増えています");
-  return mkCls("changed","内容が変わっています");
+  if(dLum>22 && fa>fb*1.6) return finish(mkCls("removed","要素が消えています"));
+  if(dLum<-22 && fb>fa*1.6) return finish(mkCls("added","要素が増えています"));
+  return finish(mkCls("changed","内容が変わっています"));
 }
 
 /* ============ テキストの行グループ差分（位置変更/文字変更/追加削除） ============ */
@@ -1708,13 +1739,20 @@ function diffFracCommon(p,X0,Y0,X1,Y1){
   const aD=S.aData&&S.aData.data, bD=S.bData&&S.bData.data;
   if(!aD||!bD) return 1;
   const th=S.thresh;
-  const x0=Math.max(X0,p.ax,p.bx), y0=Math.max(Y0,p.ay,p.by);
-  const x1=Math.min(X1,p.ax+p.aw,p.bx+p.bw), y1=Math.min(Y1,p.ay+p.ah,p.by+p.bh);
+  // 座標を整数化（floor/ceil）してからインデックス計算する。小数のまま使うと
+  // (y*幅+x) の行/列がずれて全く違う画素を読んでしまい、実差分を0と誤判定する
+  // （darkFracCommon/inkBBoxCommonは元から整数化済みで問題なし＝本関数だけの漏れ）。
+  const x0=Math.floor(Math.max(X0,p.ax,p.bx)), y0=Math.floor(Math.max(Y0,p.ay,p.by));
+  const x1=Math.ceil(Math.min(X1,p.ax+p.aw,p.bx+p.bw)), y1=Math.ceil(Math.min(Y1,p.ay+p.ah,p.by+p.bh));
   if(x1<=x0||y1<=y0) return 1;
   const step=Math.max(1,Math.floor(Math.max(x1-x0,y1-y0)/80));
   let diff=0,tot=0;
   for(let y=y0;y<y1;y+=step)for(let x=x0;x<x1;x+=step){
-    const ai=((y-p.ay)*S.aW+(x-p.ax))<<2, bi=((y-p.by)*S.bW+(x-p.bx))<<2;
+    // p.ax/ay/bx/byはオフセット調整（自動位置合わせ等）で小数になり得るため、
+    // ローカル座標もここで個別にfloorしてから配列インデックス化する。
+    const ayl=Math.floor(y-p.ay), axl=Math.floor(x-p.ax), byl=Math.floor(y-p.by), bxl=Math.floor(x-p.bx);
+    if(ayl<0||axl<0||byl<0||bxl<0||ayl>=S.aH||axl>=S.aW||byl>=S.bH||bxl>=S.bW) continue;
+    const ai=(ayl*S.aW+axl)<<2, bi=(byl*S.bW+bxl)<<2;
     const dd=Math.max(Math.abs(aD[ai]-bD[bi]),Math.abs(aD[ai+1]-bD[bi+1]),Math.abs(aD[ai+2]-bD[bi+2]));
     tot++; if(dd>th) diff++;
   }
@@ -1724,7 +1762,7 @@ function diffFracCommon(p,X0,Y0,X1,Y1){
 function textDiff(p){
   const aItems=S.aText, bItems=S.bText;
   if((aItems?aItems.length:0)<2 || (bItems?bItems.length:0)<2) return {findings:[],explained:[]};
-  const trunc=s=>{ s=s||""; return s.length>40?s.slice(0,40)+"…":s; };
+  const trunc=s=>{ s=annotateCodepoints(s||""); return s.length>60?s.slice(0,60)+"…":s; };
   const findings=[], explained=[], bBoxes=[];
   // 行ボックス（画素差分の抑制用・共通座標）
   const aL=buildLines(aItems), bL=buildLines(bItems);
@@ -1850,7 +1888,7 @@ function textDiff(p){
   groups.forEach(g=>{ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
     g.items.forEach(mv=>{ const bx=mv.b.x0+p.bx,by=mv.b.y0+p.by; x0=Math.min(x0,bx);y0=Math.min(y0,by);x1=Math.max(x1,bx+mv.b.w);y1=Math.max(y1,by+mv.b.hh); });
     const dir=`${g.dxmm>=0?"右":"左"}${Math.abs(g.dxmm).toFixed(1)}mm・${g.dymm>=0?"下":"上"}${Math.abs(g.dymm).toFixed(1)}mm`;
-    const sample=(g.items[0].a.raw||"").slice(0,14);
+    const sample=annotateCodepoints((g.items[0].a.raw||"").slice(0,14));
     findings.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cls:mkCls("moved",`位置が変わっています${g.items.length>1?`（${g.items.length}行）`:""}`,`${dir} 移動（例:「${sample}…」）`)});
   });
   return {findings, explained, bBoxes};
