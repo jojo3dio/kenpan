@@ -2362,7 +2362,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "070102";
+document.getElementById("buildId").textContent = "070314";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -3185,7 +3185,13 @@ async function renderPage(anchor) {
   if (!pdfDoc || !result) return;
   const box = $("cvwrap");
   const tok = ++renderToken;
-  const page = curPageObj || await pdfDoc.getPage(viewPage + 1);
+  const targetPage = viewPage;  // このrenderPage呼び出しが描くべきページ番号を固定
+  // pdfDoc.getPage() はネットワーク越しフォント取得等でページごとに解決の速さが
+  // ばらつく。await の間に別の指摘クリック等で新しいrenderPageが走ると、
+  // 後から解決した“古い”呼び出しがcanvasを上書きしてしまうため、
+  // await直後に必ずtok(renderToken)を確認し、古ければcanvasに一切触れず中断する。
+  const page = curPageObj || await pdfDoc.getPage(targetPage + 1);
+  if (tok !== renderToken) return;  // 待っている間に新しいページ移動が発生＝この結果は破棄
   curPageObj = page;
   const v1 = page.getViewport({ scale: 1 });
   fitScale = Math.min(
@@ -3213,7 +3219,7 @@ async function renderPage(anchor) {
     box.scrollLeft = anchor.relX * cv.width - anchor.offX;
     box.scrollTop = anchor.relY * cv.height - anchor.offY;
   }
-  $("pginfo").textContent = pageLabel(viewPage) +
+  $("pginfo").textContent = pageLabel(targetPage) +
     (zoom > 1.01 ? ` ｜ ${Math.round(zoom * 100)}%` : "");
 }
 
