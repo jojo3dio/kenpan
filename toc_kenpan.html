@@ -404,7 +404,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※PDFの中身はアップロードされません。送信されるのは下記の入力内容だけです。</p>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体はアップロードされません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -1228,6 +1228,7 @@ def check_nombre_sequence(pages):
                 issues.append({
                     "id": "NOM-1", "severity": "error",
                     "page_index": pi.index,
+                    "expected": None, "actual": disp,
                     "msg": f"{label} {disp} が重複しています"
                            f"（物理 {seen[pi.nombre]+1} ページ目と"
                            f" {pi.index+1} ページ目）。"})
@@ -1237,6 +1238,7 @@ def check_nombre_sequence(pages):
                 issues.append({
                     "id": "NOM-2", "severity": "error",
                     "page_index": pi.index,
+                    "expected": str(expected), "actual": disp,
                     "msg": f"{label} {disp} は通し位置と一致しません"
                            f"（この物理ページの期待値は {expected} です）。"})
     return issues
@@ -1293,6 +1295,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-1", "severity": "error",
                 "page_index": ent["toc_page_index"],
+                "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」の記載ノンブル {ent['page']} に"
                        f"対応するページが見つかりません。"})
             continue
@@ -1323,6 +1326,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                 issues.append({
                     "id": "TOC-1", "severity": "error",
                     "page_index": gbest[1],
+                    "expected": ent["title"], "actual": gbest[2],
                     "msg": f"目次項目「{ent['title']}」の記載ノンブルは {ent['page']} "
                            f"ですが、対応する見出し「{gbest[2]}」は"
                            f"ノンブル {actual_nombre} のページにあります"
@@ -1340,6 +1344,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-1", "severity": "error",
                 "page_index": idx,
+                "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」（記載ノンブル {ent['page']}）の"
                        f"ページに見出しが見つかりません。"})
             continue
@@ -1354,6 +1359,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                 issues.append({
                     "id": "TOC-1", "severity": "error",
                     "page_index": j,
+                    "expected": ent["title"], "actual": htext,
                     "msg": f"目次項目「{ent['title']}」の記載ノンブルは {ent['page']} ですが、"
                            f"見出しの実際の位置はノンブル {ent['page'] + delta} の"
                            f"ページです（{delta:+d} ページずれ）。"})
@@ -1363,6 +1369,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-2", "severity": "error",
                 "page_index": j,
+                "expected": ent["title"], "actual": htext,
                 "msg": f"目次項目「{ent['title']}」と本文見出し「{htext}」が"
                        f"一致しません（類似度 {ratio:.2f}）。"
                        f"誤植の可能性があります{loc}。"})
@@ -1373,6 +1380,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-2", "severity": "error",
                 "page_index": idx,
+                "expected": ent["title"], "actual": htext,
                 "msg": f"目次項目「{ent['title']}」（記載ノンブル {ent['page']}）の"
                        f"ページに対応する見出しがありません"
                        f"（最も近い見出し:「{htext}」類似度 {ratio:.2f}）。"
@@ -1408,6 +1416,7 @@ def check_headings_in_toc(toc_entries, pages, matched_headings,
             issues.append({
                 "id": "TOC-3", "severity": "info",
                 "page_index": pi.index,
+                "expected": None, "actual": htext,
                 "msg": f"本文見出し「{htext}」（物理 {pi.index+1} ページ目"
                        f"{'' if pi.nombre is None else f' / ノンブル {pi.nombre}'}）が"
                        f"目次に見つかりません（最大類似度 {best:.2f}）。"})
@@ -1507,6 +1516,7 @@ def check_hashira(pages, toc_entries, fuzzy_threshold=0.60):
             issues.append({
                 "id": "HSR-1", "severity": "error",
                 "page_index": pi.index,
+                "expected": cur, "actual": pi.hashira,
                 "msg": f"柱「{pi.hashira}」は別の章のものです"
                        f"（このページの章は「{cur}」）。"
                        f"前章の柱が残っている可能性があります。"})
@@ -1514,6 +1524,7 @@ def check_hashira(pages, toc_entries, fuzzy_threshold=0.60):
             issues.append({
                 "id": "HSR-1", "severity": "error",
                 "page_index": pi.index,
+                "expected": cur, "actual": pi.hashira,
                 "msg": f"柱「{pi.hashira}」と章見出し「{cur}」が一致しません"
                        f"（類似度 {r:.2f}）。誤植の可能性があります。"})
         # 上記いずれにも当たらない（どの章とも全く対応しない）場合は、
@@ -1641,6 +1652,7 @@ def check_captions(cap_entries, raw, pages, nmap, main_offset,
                 "id": "TOC-4", "severity": "error",
                 "page_index": idx if idx is not None
                               else ent["toc_page_index"],
+                "expected": ent["title"], "actual": None,
                 "msg": f"図表目次「{ent['title']}」（記載ノンブル {ent['page']}）に"
                        f"対応するキャプションが本文に見つかりません。"})
             continue
@@ -1661,6 +1673,7 @@ def check_captions(cap_entries, raw, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-4", "severity": "error", "page_index": pidx,
                 "rects": rects,
+                "expected": ent["title"], "actual": text,
                 "msg": f"図表目次「{ent['title']}」と本文キャプション"
                        f"「{text}」が一致しません（類似度 {r:.2f}）。"
                        f"誤植の可能性があります{loc}。"})
@@ -1668,6 +1681,7 @@ def check_captions(cap_entries, raw, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-4", "severity": "error", "page_index": pidx,
                 "rects": rects,
+                "expected": ent["title"], "actual": text,
                 "msg": f"図表目次「{ent['title']}」の記載ノンブルは"
                        f" {ent['page']} ですが、キャプションの実際の位置は"
                        f"ノンブル {actual} のページです。"})
@@ -1675,6 +1689,7 @@ def check_captions(cap_entries, raw, pages, nmap, main_offset,
             issues.append({
                 "id": "TOC-4", "severity": "error",
                 "page_index": idx if idx is not None else pidx,
+                "expected": ent["title"], "actual": text,
                 "msg": f"図表目次「{ent['title']}」（記載ノンブル {ent['page']}）の"
                        f"ページに対応するキャプションがありません"
                        f"（最も近い候補:「{text}」類似度 {r:.2f}）。"})
@@ -2008,6 +2023,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
                         issues.append({
                             "id": "TOC-1", "severity": "error",
                             "page_index": real_idx,
+                            "expected": str(ent["page"]), "actual": str(real_nb),
                             "msg": f"目次の「{ent['title']}」は記載ノンブル "
                                    f"{ent['page']} ですが、実際の扉は"
                                    f"ノンブル {real_nb}（物理 {real_idx+1} "
@@ -2018,6 +2034,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
                 issues.append({
                     "id": "TOC-1", "severity": "error",
                     "page_index": best[1] if best else 0,
+                    "expected": ent["title"], "actual": (best[2] if best else None),
                     "msg": f"目次の{kind}「{ent['title']}」に対応する"
                            f"{tobira}が本文に見つかりません"
                            f"（最も近い: {best[2] if best else '—'}）。"})
@@ -2030,6 +2047,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
             issues.append({
                 "id": "TOC-1", "severity": "error",
                 "page_index": ent["toc_page_index"],
+                "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」の記載ノンブル "
                        f"{ent['page']} に対応するページがありません。"})
             continue
@@ -2069,6 +2087,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
         if best is None:
             issues.append({
                 "id": "TOC-1", "severity": "error", "page_index": idx,
+                "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」（ノンブル {ent['page']}）の"
                        f"ページに対応する見出し・柱が見つかりません。"})
             continue
@@ -2087,6 +2106,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
         else:
             issues.append({
                 "id": "TOC-2", "severity": "error", "page_index": idx,
+                "expected": ent["title"], "actual": text,
                 "msg": f"目次項目「{ent['title']}」（ノンブル {ent['page']}）に"
                        f"対応する章見出しがありません"
                        f"（最も近い:「{text}」類似度 {r:.2f}）。"})
@@ -2173,6 +2193,7 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
                 issues.append({
                     "id": "HSR-1", "severity": "error",
                     "page_index": pi.index,
+                    "expected": cur, "actual": part,
                     "msg": f"柱の部名「{part}」がこのページの属する部"
                            f"「{cur}」と一致しません。前の部の柱が"
                            f"残っている可能性があります。"})
@@ -2191,6 +2212,7 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
                     issues.append({
                         "id": "HSR-2", "severity": "error",
                         "page_index": pi.index,
+                        "expected": cur, "actual": part,
                         "msg": f"柱「{part}」が目次の章タイトル"
                                f"「{cur}」と一致しません（類似度 {r:.2f}）。"
                                f"誤植の可能性があります。"})
@@ -2198,6 +2220,7 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
                     issues.append({
                         "id": "HSR-2", "severity": "error",
                         "page_index": pi.index,
+                        "expected": cur, "actual": part,
                         "msg": f"柱「{part}」がこのページの属する章"
                                f"「{cur}」と対応しません（類似度 {r:.2f}）。"})
     return issues
@@ -2329,7 +2352,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 // 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
 // デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
 const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-const FB_APP_VERSION = "v1.9";
+const FB_APP_VERSION = "v2.0";
 
 let pyodide = null, pyReady = null;
 let pdfDoc = null, rawData = null, result = null, fileName = "";
@@ -2362,12 +2385,36 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "070314";
+document.getElementById("buildId").textContent = "070617";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
   const modal = $("fbModal");
   let fbVerdict = "";
+  let fbIssueIndex = null;  // 指摘一覧から開いた場合のresult.issuesインデックス（自動添付用）
+
+  // 指摘の該当箇所をcanvasから自動クロップしてbase64 PNG化する
+  // （exportHTML()のクロップ処理と同じ方式。人手のスクリーンショットは不要）
+  async function captureIssueThumb(iss){
+    try{
+      if(!pdfDoc || !iss || !(iss.rects && iss.rects.length)) return "";
+      const page = await pdfDoc.getPage(iss.page_index + 1);
+      const scale = 1.6;
+      const vp = page.getViewport({ scale });
+      const off = document.createElement("canvas");
+      off.width = vp.width; off.height = vp.height;
+      await page.render({ canvasContext: off.getContext("2d"), viewport: vp }).promise;
+      const pad = 24;
+      const [rx0, ry0, rx1, ry1] = iss.rects[0].map(v => v * scale);
+      const x0 = Math.max(0, rx0 - pad), y0 = Math.max(0, ry0 - pad);
+      const x1 = Math.min(off.width, rx1 + pad), y1 = Math.min(off.height, ry1 + pad);
+      const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(off, x0, y0, w, h, 0, 0, w, h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
 
   function reporterStore(get, val){
     try{ if(get) return localStorage.getItem("toc-kenpan-reporter") || "";
@@ -2402,6 +2449,7 @@ document.getElementById("buildId").textContent = "070314";
   }
   function openModal(pre){
     pre = pre || {};
+    fbIssueIndex = (pre.issueIndex != null) ? pre.issueIndex : null;
     $("fbFile").value = fileName || "（未読込）";
     $("fbFileHint").textContent = "表示ページ: " + (curPage() || "—");
     $("fbPage").value = pre.page || curPage();
@@ -2428,7 +2476,9 @@ document.getElementById("buildId").textContent = "070314";
       tool: "toc_kenpan", verdict: "", category: "",
       file: fileName || "", page: curPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
-      userAgent: navigator.userAgent
+      userAgent: navigator.userAgent,
+      // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要）
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: ""
     }, extra || {});
   }
 
@@ -2440,15 +2490,27 @@ document.getElementById("buildId").textContent = "070314";
     }
     const reporter = $("fbReporter").value.trim();
     reporterStore(false, reporter);
-    const payload = basePayload({
+    const extra = {
       verdict: fbVerdict,
       category: $("fbCategory").value,
       file: $("fbFile").value.trim(),
       page: $("fbPage").value.trim(),
       comment: $("fbComment").value.trim(),
       reporter
-    });
+    };
+    const iss = (fbIssueIndex != null && result && result.issues)
+      ? result.issues[fbIssueIndex] : null;
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";
+    if(iss){
+      extra.ruleId = iss.id || "";
+      extra.expected = iss.expected || "";
+      extra.actual = iss.actual || "";
+      extra.bbox = JSON.stringify(iss.rects || []);
+      btn.textContent = "画像を準備中…";
+      extra.thumb = await captureIssueThumb(iss);
+      btn.textContent = "送信中…";
+    }
+    const payload = basePayload(extra);
     try{
       await postFeedback(payload);
       showNote("送信しました。ありがとうございます！", true);
@@ -2485,7 +2547,8 @@ document.getElementById("buildId").textContent = "070314";
       verdict: "false_positive",
       category: guessCategory(iss.msg),
       page: (typeof pageLabel === "function") ? pageLabel(iss.page_index) : "",
-      comment: "［該当検出: " + iss.id + "／" + (iss.msg || "") + "］"
+      comment: "［該当検出: " + iss.id + "／" + (iss.msg || "") + "］",
+      issueIndex: i
     });
   }
 
