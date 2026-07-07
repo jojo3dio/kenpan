@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- redeploy trigger: 2026-07-03 -->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -1374,7 +1373,7 @@ function computeDiff(){
     }
     for(let k=0;k<rects.length;k++){ if(cnt[k]>=minColorCells){ const R=rects[k];
       regions.push({x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0,cells:cnt[k],pix:0,
-        cls:mkCls("color","色が変わっています","配置画像の色味・濃度が変化（写真の色補正など）")}); } }
+        cls:mkCls("color","色が変わっています","配置画像の色味・濃度が変化（写真の色補正など）","CLR-4","色味変化なし","配置画像の色味・濃度が変化")}); } }
     // 画像に属さない色セル（塗り/ベクターの色変更）は誤検出が出やすいため「高感度」時のみ連結成分で検出。
     // 標準は配置画像の矩形内だけを対象にし、テキスト周辺や整列ズレによる誤検出を原理的に出さない。
     const seen2=new Uint8Array(cols*rows), st2=new Int32Array(cols*rows);
@@ -1390,7 +1389,7 @@ function computeDiff(){
       const x0=ox0+Math.max(0,minc*cell-pad), y0=oy0+Math.max(0,minr*cell-pad);
       const x1=ox0+Math.min(ow,(maxc+1)*cell+pad), y1=oy0+Math.min(oh,(maxr+1)*cell+pad);
       regions.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cells:nn,pix:0,
-        cls:mkCls("color","色が変わっています","色味・濃度が変化（塗りの変更など）")});
+        cls:mkCls("color","色が変わっています","色味・濃度が変化（塗りの変更など）","CLR-5","色味変化なし","塗りの色味・濃度が変化")});
     }
   }
 
@@ -1425,7 +1424,7 @@ function computeDiff(){
       const x0=ox0+minc*bs*cell-2, y0=oy0+minr*bs*cell-2;
       const x1=ox0+Math.min(cols,(maxc+1)*bs)*cell+2, y1=oy0+Math.min(rows,(maxr+1)*bs)*cell+2;
       regions.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cells:0,pix:0,
-        cls:mkCls("weight","文字の太さが変わっています",`インク量が約${pct}% ${light?'減（細く・軽く）':'増（太く・重く）'}`)});
+        cls:mkCls("weight","文字の太さが変わっています",`インク量が約${pct}% ${light?'減（細く・軽く）':'増（太く・重く）'}`,"WGT-1","インク量変化なし(0%)",`インク量が約${pct}% ${light?'減':'増'}`)});
     }
   }
 
@@ -1454,7 +1453,12 @@ const KIND={
   weight: {color:"#5b9cff",    hex:"#5b9cff", short:"太さ変更"},
   changed:{color:"var(--amber)",hex:"#e0a23a",short:"変更"},
 };
-function mkCls(key, label, detail){ return Object.assign({key,label,detail:detail||""}, KIND[key]); }
+function mkCls(key, label, detail, ruleId, expected, actual){
+  // 追記的メタデータ（既存の判定ロジック・分岐条件は変更しない）：
+  // フィードバック送信時の再現性向上のため、どのルールが発火したか（ruleId）と
+  // 期待値/実際の検出値（expected/actual）を保持する。省略時はkeyをruleIdに、空文字を既定値にする。
+  return Object.assign({key,label,detail:detail||"",ruleId:ruleId||key,expected:expected||"",actual:actual||""}, KIND[key]);
+}
 
 /* ============ 補助メタデータ：外字・異体字セレクタ等の文字コード可視化 ============ */
 // 私用領域(PUA)・標準異体字セレクタ(VS1-16)・IVS(VS17-256)は見た目上ほぼ判別不能／不可視な
@@ -1534,30 +1538,30 @@ function edgeSimilarity(p, x0,y0,x1,y1){
   return {iou, edgeDensity, flatColDiff};
 }
 function classifyRegion(rg){
-  const p=S.place; if(!p||!S.aData||!S.bData) return mkCls("changed","内容が変わっています");
+  const p=S.place; if(!p||!S.aData||!S.bData) return mkCls("changed","内容が変わっています","","PIX-0");
   const aD=S.aData.data,bD=S.bData.data,aw=S.aW,bw=S.bW,th=S.thresh;
   const ox0=Math.max(p.ax,p.bx),oy0=Math.max(p.ay,p.by);
   const ox1=Math.min(p.ax+p.aw,p.bx+p.bw),oy1=Math.min(p.ay+p.ah,p.by+p.bh);
   const x0=Math.max(rg.x,ox0),y0=Math.max(rg.y,oy0);
   const x1=Math.min(rg.x+rg.w,ox1),y1=Math.min(rg.y+rg.h,oy1);
-  if(x1<=x0||y1<=y0) return mkCls("changed","内容が変わっています");
+  if(x1<=x0||y1<=y0) return mkCls("changed","内容が変わっています","","PIX-0B");
 
   // --- (1) テキストレイヤーで具体的な文字変更を取得 ---
   const padT=Math.round(S.dpi/72*3);   // 文字片の取りこぼし防止に少し広げる
   const aStr=regionText(S.aText, rg.x-p.ax-padT, rg.y-p.ay-padT, rg.w+padT*2, rg.h+padT*2);
   const bStr=regionText(S.bText, rg.x-p.bx-padT, rg.y-p.by-padT, rg.w+padT*2, rg.h+padT*2);
   if(aStr||bStr){
-    if(aStr&&bStr&&aStr!==bStr) return mkCls("text","文字が変わっています",`「${annotateCodepoints(aStr)}」→「${annotateCodepoints(bStr)}」`);
+    if(aStr&&bStr&&aStr!==bStr) return mkCls("text","文字が変わっています",`「${annotateCodepoints(aStr)}」→「${annotateCodepoints(bStr)}」`,"TXT-1",aStr,bStr);
     if(aStr&&!bStr){
       // 下版(B)にインクがあれば“削除”でなく“内容変化”（テキスト→アウトライン/画像）
       if(darkFracCommon(S.bData.data,S.bW,S.bH,p.bx,p.by, rg.x,rg.y,rg.x+rg.w,rg.y+rg.h)>0.012)
-        return mkCls("text","内容が変わっています",`「${annotateCodepoints(aStr)}」→ 下版は画像/アウトライン（文字データ無し）`);
-      return mkCls("removed","文字が削除されています",`「${annotateCodepoints(aStr)}」`);
+        return mkCls("text","内容が変わっています",`「${annotateCodepoints(aStr)}」→ 下版は画像/アウトライン（文字データ無し）`,"TXT-2",aStr,"(画像/アウトライン)");
+      return mkCls("removed","文字が削除されています",`「${annotateCodepoints(aStr)}」`,"TXT-3",aStr,"");
     }
     if(bStr&&!aStr){
       if(darkFracCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay, rg.x,rg.y,rg.x+rg.w,rg.y+rg.h)>0.012)
-        return mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${annotateCodepoints(bStr)}」`);
-      return mkCls("added","文字が追加されています",`「${annotateCodepoints(bStr)}」`);
+        return mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${annotateCodepoints(bStr)}」`,"TXT-4","(画像/アウトライン)",bStr);
+      return mkCls("added","文字が追加されています",`「${annotateCodepoints(bStr)}」`,"TXT-5","",bStr);
     }
     // aStr===bStr（同じ文字コード）の場合は色/装飾変更の可能性 → 下の画素解析へ続行
     // （文字コードは同じでも字形/フォントだけ変わるケース＝画素解析側の結果に注記を付ける）
@@ -1585,22 +1589,22 @@ function classifyRegion(rg){
       if(satA>40&&satB>40){ colorful++; sHue+=hueDiffDeg(ar,ag,ab,br,bg,bb); }
     }
   }
-  if(n===0) return finish(mkCls("changed","内容が変わっています"));
+  if(n===0) return finish(mkCls("changed","内容が変わっています","","PIX-1"));
   const dLum=(sLb-sLa)/n, fa=aDark/n, fb=bDark/n, cf=colorful/n;
   const avgHue=colorful? sHue/colorful : 0;
 
   // (2a) 構造（エッジ）が一致＝同じ図版で色味だけ変化（写真の色補正など）
   const es=edgeSimilarity(p,x0,y0,x1,y1);
   if(es.iou>0.45 && es.edgeDensity>4){
-    if(avgHue>18) return finish(mkCls("color","色が変わっています",`同じ図版で色味が変化（色相差 約${Math.round(avgHue)}°・補正の可能性）`));
-    return finish(mkCls("color","色・明るさが変わっています",`同じ図版で明るさ/色調が変化（補正の可能性）`));
+    if(avgHue>18) return finish(mkCls("color","色が変わっています",`同じ図版で色味が変化（色相差 約${Math.round(avgHue)}°・補正の可能性）`,"CLR-1","色相差 0°",`色相差 約${Math.round(avgHue)}°`));
+    return finish(mkCls("color","色・明るさが変わっています",`同じ図版で明るさ/色調が変化（補正の可能性）`,"CLR-2","輝度差 0",`輝度差 約${Math.round(dLum)}`));
   }
   // (2b) 平坦領域で色相がはっきり違う（ベタ色の色変更）
-  if(cf>0.3 && avgHue>25 && Math.abs(dLum)<60) return finish(mkCls("color","色が変わっています",`色相が約${Math.round(avgHue)}°変化`));
+  if(cf>0.3 && avgHue>25 && Math.abs(dLum)<60) return finish(mkCls("color","色が変わっています",`色相が約${Math.round(avgHue)}°変化`,"CLR-3","色相差 0°",`色相が約${Math.round(avgHue)}°変化`));
   // (2c) 明るさで増減を推定
-  if(dLum>22 && fa>fb*1.6) return finish(mkCls("removed","要素が消えています"));
-  if(dLum<-22 && fb>fa*1.6) return finish(mkCls("added","要素が増えています"));
-  return finish(mkCls("changed","内容が変わっています"));
+  if(dLum>22 && fa>fb*1.6) return finish(mkCls("removed","要素が消えています","","PIX-2","要素あり","要素なし"));
+  if(dLum<-22 && fb>fa*1.6) return finish(mkCls("added","要素が増えています","","PIX-3","要素なし","要素あり"));
+  return finish(mkCls("changed","内容が変わっています","","PIX-4"));
 }
 
 /* ============ テキストの行グループ差分（位置変更/文字変更/追加削除） ============ */
@@ -1835,9 +1839,9 @@ function textDiff(p){
     if(darkFracCommon(S.bData.data,S.bW,S.bH,p.bx,p.by,box.x-padx,box.y-padx,box.x+box.w+padx,box.y+box.h+padx)>INK){
       const bb=inkBBoxCommon(S.bData.data,S.bW,S.bH,p.bx,p.by,box.x-box.w*0.6-padx,box.y-box.h*0.6-padx,box.x+box.w*1.6+padx,box.y+box.h*1.6+padx);
       box=unionBox(box,bb);
-      findings.push(Object.assign(box,{cls:mkCls("text","内容が変わっています",`「${trunc(aStr)}」→ 下版は画像/アウトライン（文字データ無し）`)}));
+      findings.push(Object.assign(box,{cls:mkCls("text","内容が変わっています",`「${trunc(aStr)}」→ 下版は画像/アウトライン（文字データ無し）`,"TXT-6",aStr,"(画像/アウトライン)")}));
     } else {
-      findings.push(Object.assign(box,{cls:mkCls("removed","文字が削除されています",`「${trunc(aStr)}」`)}));
+      findings.push(Object.assign(box,{cls:mkCls("removed","文字が削除されています",`「${trunc(aStr)}」`,"TXT-7",aStr,"")}));
     }
   };
   const emitAdd=(chs,bStr)=>{
@@ -1847,9 +1851,9 @@ function textDiff(p){
     if(darkFracCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay,box.x-padx,box.y-padx,box.x+box.w+padx,box.y+box.h+padx)>INK){
       const ab=inkBBoxCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay,box.x-box.w*0.6-padx,box.y-box.h*0.6-padx,box.x+box.w*1.6+padx,box.y+box.h*1.6+padx);
       box=unionBox(box,ab);
-      findings.push(Object.assign(box,{cls:mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${trunc(bStr)}」`)}));
+      findings.push(Object.assign(box,{cls:mkCls("text","内容が変わっています",`入稿は画像/アウトライン →「${trunc(bStr)}」`,"TXT-8","(画像/アウトライン)",bStr)}));
     } else {
-      findings.push(Object.assign(box,{cls:mkCls("added","文字が追加されています",`「${trunc(bStr)}」`)}));
+      findings.push(Object.assign(box,{cls:mkCls("added","文字が追加されています",`「${trunc(bStr)}」`,"TXT-9","",bStr)}));
     }
   };
   for(const x of _blks){
@@ -1865,7 +1869,7 @@ function textDiff(p){
         // 画素が実際に食い違う時だけ「文字変更」。読み順のズレによる見かけ上の置換
         //（内容は同じで抽出順が違うだけ＝アウトライン化等の影響）は画素一致なので抑制。
         if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) >= DF_MIN)
-          findings.push(Object.assign(box,{cls:mkCls("text","文字が変わっています",`「${trunc(aStr)}」→「${trunc(bStr)}」`)})); }
+          findings.push(Object.assign(box,{cls:mkCls("text","文字が変わっています",`「${trunc(aStr)}」→「${trunc(bStr)}」`,"TXT-10",aStr,bStr)})); }
     }
     else if(aStr){ emitDel(blk.aChars,aStr); }
     else { emitAdd(blk.bChars,bStr); }
@@ -1890,7 +1894,7 @@ function textDiff(p){
     g.items.forEach(mv=>{ const bx=mv.b.x0+p.bx,by=mv.b.y0+p.by; x0=Math.min(x0,bx);y0=Math.min(y0,by);x1=Math.max(x1,bx+mv.b.w);y1=Math.max(y1,by+mv.b.hh); });
     const dir=`${g.dxmm>=0?"右":"左"}${Math.abs(g.dxmm).toFixed(1)}mm・${g.dymm>=0?"下":"上"}${Math.abs(g.dymm).toFixed(1)}mm`;
     const sample=annotateCodepoints((g.items[0].a.raw||"").slice(0,14));
-    findings.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cls:mkCls("moved",`位置が変わっています${g.items.length>1?`（${g.items.length}行）`:""}`,`${dir} 移動（例:「${sample}…」）`)});
+    findings.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cls:mkCls("moved",`位置が変わっています${g.items.length>1?`（${g.items.length}行）`:""}`,`${dir} 移動（例:「${sample}…」）`,"MOV-1","移動なし(0.0mm)",dir)});
   });
   return {findings, explained, bBoxes};
 }
@@ -2836,7 +2840,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※PDFの中身はアップロードされません。送信されるのは下記の入力内容だけです。</p>
+    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体は送信されません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -2897,6 +2901,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
+  let fbRegionIndex=null;   // 指摘一覧から開いた場合のS.regionsインデックス（自動添付用）。手動オープン時はnull。
 
   function reporterStore(get,val){
     try{ if(get) return localStorage.getItem("pdfdiff-reporter")||""; localStorage.setItem("pdfdiff-reporter",val); }catch(e){}
@@ -2911,8 +2916,31 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     return {a,b,pg};
   }
 
+  // 指摘の該当箇所を、既存のcanvas描画結果（S.bData＝B側の実レンダリング済みRGBA）から
+  // 自動クロップしてbase64 PNG化する（目次整合検版のcaptureIssueThumbと同じ考え方）。
+  // 人手のスクリーンショットは不要。取得できない場合は空文字を返す（送信自体は失敗させない）。
+  async function captureRegionThumb(rg){
+    try{
+      const st=(typeof S!=="undefined")?S:{};
+      if(!rg || !st.bData || !st.bW || !st.bH || !st.place) return "";
+      const p=st.place;
+      const pad=Math.max(8, Math.round((st.dpi||150)/72*8));
+      const x0=Math.max(0, Math.round(rg.x-p.bx-pad));
+      const y0=Math.max(0, Math.round(rg.y-p.by-pad));
+      const x1=Math.min(st.bW, Math.round(rg.x-p.bx+rg.w+pad));
+      const y1=Math.min(st.bH, Math.round(rg.y-p.by+rg.h+pad));
+      const w=Math.max(1,x1-x0), h=Math.max(1,y1-y0);
+      const full=document.createElement("canvas"); full.width=st.bW; full.height=st.bH;
+      full.getContext("2d").putImageData(st.bData,0,0);
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(full, x0,y0,w,h, 0,0,w,h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
   function openModal(pre){
     pre = pre || {};
+    fbRegionIndex = (pre.regionIndex != null) ? pre.regionIndex : null;
     const f=curFiles();
     $$("#fbFiles").value = `A: ${f.a}  /  B: ${f.b}`;
     $$("#fbFilesHint").textContent = `表示ページ: ${f.pg}`;
@@ -2936,7 +2964,9 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     const f=curFiles();
     return Object.assign({
       verdict:"", kind:"", fileA:f.a, fileB:f.b, page:f.pg, comment:"",
-      reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent
+      reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent,
+      // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要・手動オープン時は空のまま）
+      ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:""
     }, extra||{});
   }
   function renderInline(state){
@@ -2953,13 +2983,14 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   }
   function fbInlineBad(){ openModal({verdict:"false_positive"}); }
 
-  // 改善2：region から誤検知報告（kind を自動セット）
+  // 改善2：region から誤検知報告（kind を自動セット・regionIndexを保持して自動添付に使う）
   function fbFromRegion(page, idx){
     const st=(typeof S!=="undefined")?S:{};
     const rg=(st.regions&&st.regions[idx])?st.regions[idx]:null;
     const kind=(rg&&rg.cls&&rg.cls.label)?rg.cls.label:"";
     openModal({ verdict:"false_positive", kind,
-      comment:"［該当検出: "+kind+" / p"+page+"］" });
+      comment:"［該当検出: "+kind+" / p"+page+"］",
+      regionIndex: idx });
   }
 
   // 改善4：使用後は光らせない
@@ -3002,21 +3033,28 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       showNote("送信先が未設定です。HTML内の <code>FEEDBACK_ENDPOINT</code> にGASのURLを設定してください（別紙手順参照）。", false);
       return;
     }
-    const f=curFiles();
     const reporter=$$("#fbReporter").value.trim();
     reporterStore(false, reporter);
-    const payload={
-      verdict, kind:$$("#fbKind").value, fileA:f.a, fileB:f.b, page:f.pg,
-      comment:$$("#fbComment").value.trim(), reporter, appVersion:APP_VERSION,
-      userAgent:navigator.userAgent
+    const extra = {
+      verdict, kind:$$("#fbKind").value,
+      comment:$$("#fbComment").value.trim(), reporter
     };
+    const st=(typeof S!=="undefined")?S:{};
+    const rg=(fbRegionIndex!=null && st.regions && st.regions[fbRegionIndex]) ? st.regions[fbRegionIndex] : null;
     const btn=$$("#fbSend"); btn.disabled=true; btn.textContent="送信中…";
+    if(rg){
+      // 指摘一覧から開いた場合のみ、再現用メタデータを自動添付（社員側の操作は増やさない）
+      extra.ruleId = (rg.cls && rg.cls.ruleId) || "";
+      extra.expected = (rg.cls && rg.cls.expected) || "";
+      extra.actual = (rg.cls && rg.cls.actual) || "";
+      extra.bbox = JSON.stringify([[rg.x, rg.y, rg.x+rg.w, rg.y+rg.h]]);
+      btn.textContent="画像を準備中…";
+      extra.thumb = await captureRegionThumb(rg);
+      btn.textContent="送信中…";
+    }
+    const payload = basePayload(extra);
     try{
-      await fetch(FEEDBACK_ENDPOINT, {
-        method:"POST", mode:"no-cors",
-        headers:{"Content-Type":"text/plain;charset=utf-8"},
-        body:JSON.stringify(payload)
-      });
+      await postFeedback(payload);
       showNote("送信しました。ありがとうございます！", true);
       $$("#fbComment").value=""; setVerdict(""); markUsed();
       setTimeout(closeModal, 1100);

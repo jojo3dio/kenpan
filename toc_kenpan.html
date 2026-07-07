@@ -2385,7 +2385,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "070617";
+document.getElementById("buildId").textContent = "070717";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -2413,7 +2413,7 @@ document.getElementById("buildId").textContent = "070617";
       c.width = w; c.height = h;
       c.getContext("2d").drawImage(off, x0, y0, w, h, 0, 0, w, h);
       return c.toDataURL("image/png");
-    }catch(e){ return ""; }
+    }catch(e){ console.error("[toc-kenpan] captureIssueThumb failed:", e); return ""; }
   }
 
   function reporterStore(get, val){
