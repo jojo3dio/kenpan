@@ -404,7 +404,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体はアップロードされません。</p>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合は該当箇所の切り抜き画像を、それ以外（見逃し報告・全体の感想など）は表示中のページの画像を含みます。PDFファイル全体はアップロードされません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -2352,7 +2352,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 // 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
 // デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
 const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-const FB_APP_VERSION = "v2.0";
+const FB_APP_VERSION = "v2.1";
 
 let pyodide = null, pyReady = null;
 let pdfDoc = null, rawData = null, result = null, fileName = "";
@@ -2414,6 +2414,16 @@ document.getElementById("buildId").textContent = "070717";
       c.getContext("2d").drawImage(off, x0, y0, w, h, 0, 0, w, h);
       return c.toDataURL("image/png");
     }catch(e){ console.error("[toc-kenpan] captureIssueThumb failed:", e); return ""; }
+  }
+
+  // 特定の指摘に紐づかない送信（見逃し報告・全体の感想など）でも、
+  // 今表示している版面をそのまま添付する（既に画面に描画済みのcanvasを撮るだけ）。
+  function capturePageSnapshot(){
+    try{
+      const cv = $("pgcanvas");
+      if(!cv || !cv.width) return "";
+      return cv.toDataURL("image/png");
+    }catch(e){ console.error("[toc-kenpan] capturePageSnapshot failed:", e); return ""; }
   }
 
   function reporterStore(get, val){
@@ -2509,6 +2519,9 @@ document.getElementById("buildId").textContent = "070717";
       btn.textContent = "画像を準備中…";
       extra.thumb = await captureIssueThumb(iss);
       btn.textContent = "送信中…";
+    } else {
+      // 指摘に紐づかない送信（見逃し・全体の感想など）も、表示中のページ画像を添付する
+      extra.thumb = capturePageSnapshot();
     }
     const payload = basePayload(extra);
     try{
@@ -3424,4 +3437,3 @@ function esc(s) {
 </script>
 </body>
 </html>
-
