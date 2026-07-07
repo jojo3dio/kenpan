@@ -235,6 +235,11 @@
   }
 
   /* ---- フィードバック（目次整合検版と同形） ---- */
+  .fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:12px;font-weight:700;
+    color:#fff;background:var(--amber);border:1px solid var(--amber);border-radius:6px;
+    padding:6px 12px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em}
+  .fbbtn:hover{filter:brightness(1.08)}
+  .fbbtn svg{width:15px;height:15px}
   .fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
     background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
   .fbmodal.show{display:flex}
@@ -300,10 +305,13 @@
     <label class="field">探索幅<input id="band" type="number" step="1" min="5" value="45">mm</label>
     <label class="field" title="塗り足し（仕上がりからの外側余白）。入力すると小口・天地の数値を仕上がり基準に補正します">塗り足し<input id="bleed" type="number" step="0.5" min="0" value="0">mm</label>
     <button class="btn ghost icobtn" id="themeBtn" title="明暗を切り替え"><span id="themeIco">◐</span><span id="themeTxt">ダーク</span></button>
-    <button class="btn ghost" id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">💬 フィードバック</button>
     <button class="btn ghost" id="resetBtn" disabled>リセット</button>
     <button class="btn" id="loadBtn">PDFを開く</button>
     <input id="fileInput" type="file" accept="application/pdf" style="display:none">
+    <button class="fbbtn" id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>フィードバック</span>
+    </button>
   </div>
 </header>
 
