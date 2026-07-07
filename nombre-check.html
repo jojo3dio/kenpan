@@ -407,7 +407,7 @@
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体は送信されません。</p>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※該当箇所（または表示中のページ）の画像を含みます。PDFファイル全体は送信されません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -1379,6 +1379,16 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
     }catch(e){ return ""; }
   }
 
+  // 特定の指摘に紐づかない送信（見逃し報告・全体感想）の場合：表示中のページ全体を
+  // 既存の描画済みcanvas（#pdfcanvas）からそのままキャプチャする（再描画不要）
+  function capturePageThumb(){
+    try{
+      const cv = $("pdfcanvas");
+      if(!cv || !cv.width || !cv.height) return "";
+      return cv.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
   function reporterStore(get, val){
     try{ if(get) return localStorage.getItem("nombre-kenpan-reporter") || "";
          localStorage.setItem("nombre-kenpan-reporter", val); }catch(e){}
@@ -1458,6 +1468,11 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
       extra.bbox = JSON.stringify(iss.bbox || []);
       btn.textContent = "画像を準備中…";
       extra.thumb = await captureIssueThumb(iss);
+      btn.textContent = "送信中…";
+    }else{
+      // 特定の指摘に紐づかない送信（見逃し報告・全体感想）：表示中のページ全体を添付
+      btn.textContent = "画像を準備中…";
+      extra.thumb = capturePageThumb();
       btn.textContent = "送信中…";
     }
     const payload = basePayload(extra);
