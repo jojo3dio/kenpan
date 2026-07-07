@@ -191,6 +191,45 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .foot{padding:9px 13px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;line-height:1.6}
 a.lnk{color:var(--amber)}
 .hidden{display:none!important}
+
+/* ---- フィードバック（目次整合検版と同形） ---- */
+.fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+  background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
+.fbmodal.show{display:flex}
+.fbcard{width:min(460px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
+.fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--ink-dim);line-height:1.6}
+.fbfield{margin-bottom:13px}
+.fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-dim);margin-bottom:5px}
+.fbfield label .req{color:var(--err);margin-left:3px}
+.fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--ui);font-size:13px;color:var(--ink);
+  background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
+.fbfield textarea{min-height:64px;line-height:1.5}
+.fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:4px;word-break:break-all}
+.fbrow2{display:flex;gap:9px}
+.fbrow2 .fbfield{flex:1;margin-bottom:13px}
+.fbverdict{display:flex;gap:7px}
+.fbverdict button{flex:1;font-family:var(--ui);font-size:12px;color:var(--ink-dim);background:var(--panel2);
+  border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
+.fbverdict button:hover{border-color:var(--amber)}
+.fbverdict button.on{background:var(--amber);color:#fff;border-color:var(--amber);font-weight:700}
+.fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
+.fbactions{display:flex;gap:9px;margin-top:18px}
+.fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+.fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+.fbactions .fbcancel:hover{color:var(--ink)}
+.fbactions .fbsend{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .fbactions .fbsend{color:#1a1205}
+.fbactions .fbsend:hover{filter:brightness(1.06)}
+.fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
+.fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
+  background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+.fbnote.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.chk .issfb{margin-left:auto;background:var(--panel2);border:1px solid var(--line);
+  color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
+  border-radius:6px;padding:2px 8px;line-height:1.4;transition:.12s;white-space:nowrap;flex:0 0 auto}
+.chk .issfb:hover{color:var(--err);border-color:var(--err);background:var(--err-bg)}
 </style>
 </head>
 <body>
@@ -206,6 +245,7 @@ a.lnk{color:var(--amber)}
       <label class="opt"><input type="checkbox" id="optOcr" checked> 文字はOCRで補完</label>
       <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
       <button id="btnDbg">OCR確認</button>
+      <button id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">💬 フィードバック</button>
       <button id="btnReset" disabled>リセット</button>
       <button id="btnOpen" class="btn">PDFを選択</button>
       <input type="file" id="file" accept="application/pdf" class="hidden">
@@ -263,6 +303,64 @@ a.lnk{color:var(--amber)}
         2段目 = <span style="font-family:var(--mono)">192＋Cコード4桁＋税抜本体価格5桁＋CD</span>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ============ フィードバック機能（目次整合検版と同形） ============ -->
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体は送信されません。</p>
+
+    <div class="fbfield">
+      <label>検出結果は正しかった？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">正しい<span class="vm">妥当な検出</span></button>
+        <button type="button" data-v="false_positive">誤検知<span class="vm">出すぎ</span></button>
+        <button type="button" data-v="missed">見逃し<span class="vm">出てない</span></button>
+      </div>
+    </div>
+
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="ISBN">ISBN</option>
+          <option value="日本図書コード">日本図書コード</option>
+          <option value="Cコード">Cコード</option>
+          <option value="価格">価格</option>
+          <option value="バーコード品質">バーコード品質</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>ページ</label>
+        <input id="fbPage" type="text" placeholder="例: p1">
+      </div>
+    </div>
+
+    <div class="fbfield">
+      <label>ファイル名</label>
+      <input id="fbFile" type="text" placeholder="自動入力されます" readonly>
+      <div class="fbhint" id="fbFileHint"></div>
+    </div>
+
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：p1のISBN不一致を誤検知している など"></textarea>
+    </div>
+
+    <div class="fbfield">
+      <label>お名前・担当（任意）</label>
+      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+    </div>
+
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
   </div>
 </div>
 
@@ -363,35 +461,49 @@ def extract_price_text(text):
     return None
 def cross_check(isbn_bc,dnc_bc,ocr_text):
     rep={"items":[],"status":"OK"}
-    def add(label,ok,detail,level="NG"): rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level})
+    def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
+        rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
+                              "ruleId":rid,"expected":exp,"actual":act,"box":box})
     isbn=parse_isbn_barcode(isbn_bc) if isbn_bc else None
     dnc=parse_dnc_barcode(dnc_bc) if dnc_bc else None
     ti=extract_isbn_text(ocr_text); tc=extract_ccode_text(ocr_text); tp=extract_price_text(ocr_text)
     if isbn:
-        add("ISBNバーコード チェックデジット",isbn["cd_ok"],"OK" if isbn["cd_ok"] else "／".join(isbn["errors"]))
+        add("ISBNバーコード チェックデジット",isbn["cd_ok"],"OK" if isbn["cd_ok"] else "／".join(isbn["errors"]),
+            rid="ISBN-1", exp="有効なチェックデジット", act=("OK" if isbn["cd_ok"] else "／".join(isbn["errors"])), box="isbn")
         if ti and ti.get("isbn13"):
             same=(isbn["isbn13"]==ti["isbn13"])
             d=("　"+diff_pos(isbn["isbn13"],ti["isbn13"])) if not same else ""
-            add(lbl("ISBN バーコード↔印字",same),same,"BC:%s ／ 印字:%s%s%s"%(isbn["isbn13"],ti["isbn13"],"("+ti["note"]+")" if ti.get("note") else "",d))
+            add(lbl("ISBN バーコード↔印字",same),same,"BC:%s ／ 印字:%s%s%s"%(isbn["isbn13"],ti["isbn13"],"("+ti["note"]+")" if ti.get("note") else "",d),
+                rid="ISBN-2", exp=isbn["isbn13"], act=ti["isbn13"], box="isbn")
         else:
-            add("ISBN 印字の読取",False,"印字ISBNを読み取れませんでした",level="WARN")
+            add("ISBN 印字の読取",False,"印字ISBNを読み取れませんでした",level="WARN",
+                rid="ISBN-3", exp="印字ISBNの読取成功", act="読取失敗", box="isbn")
     else:
-        add("ISBN(1段目)の欠落",False,"1段目(ISBN)が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN")
+        add("ISBN(1段目)の欠落",False,"1段目(ISBN)が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
+            rid="ISBN-4", exp="ISBNバーコード(1段目)の検出", act="未検出", box=None)
     if dnc:
-        add("日本図書コード チェックデジット",dnc["cd_ok"],"OK" if dnc["cd_ok"] else "／".join(dnc["errors"]))
-        for w in dnc.get("warns",[]): add("日本図書コード フラッグ",True,w,level="WARN")
+        add("日本図書コード チェックデジット",dnc["cd_ok"],"OK" if dnc["cd_ok"] else "／".join(dnc["errors"]),
+            rid="ISBN-5", exp="有効なチェックデジット", act=("OK" if dnc["cd_ok"] else "／".join(dnc["errors"])), box="dnc")
+        for w in dnc.get("warns",[]):
+            add("日本図書コード フラッグ",True,w,level="WARN",
+                rid="ISBN-6", exp="現行フラッグ(192)", act=w, box="dnc")
         if tc is not None:
             cs=(dnc["ccode"]==tc); cd=("　"+diff_pos(dnc["ccode"],tc)) if not cs else ""
-            add(lbl("Cコード バーコード↔印字",cs),cs,"BC:C%s ／ 印字:C%s%s"%(dnc["ccode"],tc,cd))
+            add(lbl("Cコード バーコード↔印字",cs),cs,"BC:C%s ／ 印字:C%s%s"%(dnc["ccode"],tc,cd),
+                rid="ISBN-7", exp=dnc["ccode"], act=tc, box="dnc")
         else:
-            add("Cコード 印字の読取",False,"印字Cコードを読み取れませんでした",level="WARN")
+            add("Cコード 印字の読取",False,"印字Cコードを読み取れませんでした",level="WARN",
+                rid="ISBN-8", exp="印字Cコードの読取成功", act="読取失敗", box="dnc")
         if tp is not None:
             ps=(dnc["price"]==tp)
-            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s"%(dnc["price"],tp,"" if ps else "　金額が異なります"))
+            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s"%(dnc["price"],tp,"" if ps else "　金額が異なります"),
+                rid="ISBN-9", exp=dnc["price"], act=tp, box="dnc")
         else:
-            add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN")
+            add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN",
+                rid="ISBN-10", exp="印字価格の読取成功", act="読取失敗", box="dnc")
     else:
-        add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN")
+        add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
+            rid="ISBN-11", exp="日本図書コード(2段目)の検出", act="未検出", box=None)
     ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
     wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
     rep["status"]="NG" if ng else ("WARN" if wn else "OK")
@@ -410,6 +522,8 @@ def run_check(isbn_bc,dnc_bc,ocr_text):
 /* ---------- 状態 ---------- */
 let pdfDoc=null, pyReady=null, pages=[], selected=-1, cancelFlag=false, ocrWorker=null;
 let zoom=1, baseCssW=0, baseCssH=0;   // プレビューのズーム状態(1=フィット表示)
+let fbFileName="";   // フィードバック送信用（ファイル名の表示のみに使用）
+let fbIssues=[];     // フィードバック「誤検知?」用：直近renderResult()で構築された指摘一覧
 
 /* ---------- Pyodide 起動 ---------- */
 async function ensurePy(){
@@ -993,6 +1107,7 @@ function drawBox(g,box,cv,color,label){
 /* ---------- 結果描画 ---------- */
 function renderResult(rec){
   const el=$("#result");
+  fbIssues=[];
   const real=rec.sets.filter(s=>!s.other);
   if(!real.length){
     el.innerHTML=`<div class="tiles"><div class="tile NG"><b>!</b><span>バーコード読取不可</span></div></div>
@@ -1026,8 +1141,19 @@ function renderResult(rec){
     s.items.forEach(it=>{
       const mk=it.ok?"✓":(it.level==="WARN"?"△":"✕");
       const cls=it.ok?"OK":it.level;
+      let fbBtn="";
+      if(!it.ok){
+        const fbIdx=fbIssues.length;
+        fbIssues.push({
+          ruleId: it.ruleId||"", expected: it.expected!=null?String(it.expected):"",
+          actual: it.actual!=null?String(it.actual):"",
+          box: (it.box && s.boxes) ? s.boxes[it.box] : null,
+          page: rec.page, msg: it.label+"："+it.detail
+        });
+        fbBtn=`<button class="issfb" title="この判定は誤検知だと報告する" onclick="event.stopPropagation();fbFromIssue(${fbIdx})">👎 誤検知?</button>`;
+      }
       html+=`<div class="chk ${cls}"><span class="mark">${mk}</span>
-        <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span></div>`;
+        <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span>${fbBtn}</div>`;
     });
     // バーコード品質判定の結果(欠け・かすれ等)
     if(s.quality){
@@ -1094,6 +1220,147 @@ function extLinks(isbn){
 }
 function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 
+// ====== フィードバック（目次整合検版・下版PDF差分チェッカーと同方式） ======
+// 判定ロジック（cross_check等）は変更しない。ここは送信まわりのメタデータ収集のみ。
+(function(){
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_APP_VERSION = "v1.0";
+  const modal = $("#fbModal");
+  let fbVerdict = "";
+  let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
+
+  // 指摘の該当箇所を、すでに描画済みのプレビューcanvasから直接クロップしてbase64 PNG化する
+  // （再レンダリング不要・座標系のズレが出ない。人手のスクリーンショットは不要）
+  async function captureIssueThumb(iss){
+    try{
+      if(!iss || !iss.box) return "";
+      const cv=$("#pageCanvas"); if(!cv || !cv.width) return "";
+      const b=iss.box;
+      const padX=cv.width*0.012, padY=cv.height*0.012;
+      const x0=Math.max(0, b.x*cv.width - padX), y0=Math.max(0, b.y*cv.height - padY);
+      const x1=Math.min(cv.width, (b.x+b.w)*cv.width + padX), y1=Math.min(cv.height, (b.y+b.h)*cv.height + padY);
+      const w=Math.max(1, Math.round(x1-x0)), h=Math.max(1, Math.round(y1-y0));
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(cv, x0, y0, w, h, 0, 0, w, h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  function reporterStore(get, val){
+    try{ if(get) return localStorage.getItem("isbn-kenpan-reporter") || "";
+         localStorage.setItem("isbn-kenpan-reporter", val); }catch(e){}
+    return "";
+  }
+  function fbCurPage(){ return (selected>=0 && pages[selected]) ? ("p"+pages[selected].page) : ""; }
+  function setVerdict(v){
+    fbVerdict = v;
+    document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  }
+  function showNote(msg, ok){
+    const n = $("#fbNote");
+    n.style.display = "block";
+    n.className = "fbnote" + (ok ? " ok" : "");
+    n.innerHTML = msg;
+  }
+  function markUsed(){ try{ localStorage.setItem("isbn-fb-used", "1"); }catch(e){} }
+  function guessCategory(ruleId){
+    if(!ruleId) return "";
+    if(/^ISBN-[1-4]$/.test(ruleId)) return "ISBN";
+    if(ruleId==="ISBN-5"||ruleId==="ISBN-6"||ruleId==="ISBN-11") return "日本図書コード";
+    if(ruleId==="ISBN-7"||ruleId==="ISBN-8") return "Cコード";
+    if(ruleId==="ISBN-9"||ruleId==="ISBN-10") return "価格";
+    return "その他";
+  }
+  function openModal(pre){
+    pre = pre || {};
+    fbIssueIndex = (pre.issueIndex != null) ? pre.issueIndex : null;
+    $("#fbFile").value = fbFileName || "（未読込）";
+    $("#fbFileHint").textContent = "表示ページ: " + (fbCurPage() || "—");
+    $("#fbPage").value = pre.page || fbCurPage();
+    $("#fbCategory").value = pre.category || "";
+    $("#fbComment").value = pre.comment || "";
+    $("#fbReporter").value = reporterStore(true);
+    $("#fbNote").style.display = "none";
+    $("#fbSend").disabled = false; $("#fbSend").textContent = "送信する";
+    setVerdict(pre.verdict || "");
+    modal.classList.add("show");
+  }
+  function closeModal(){ modal.classList.remove("show"); }
+
+  async function postFeedback(payload){
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+  }
+  function basePayload(extra){
+    return Object.assign({
+      tool: "isbn_kenpan", verdict: "", category: "",
+      file: fbFileName || "", page: fbCurPage(), comment: "",
+      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      userAgent: navigator.userAgent,
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: ""
+    }, extra || {});
+  }
+
+  async function send(){
+    if(!fbVerdict){ showNote("「検出結果は正しかった？」を選択してください。", false); return; }
+    const reporter = $("#fbReporter").value.trim();
+    reporterStore(false, reporter);
+    const extra = {
+      verdict: fbVerdict,
+      category: $("#fbCategory").value,
+      file: $("#fbFile").value.trim(),
+      page: $("#fbPage").value.trim(),
+      comment: $("#fbComment").value.trim(),
+      reporter
+    };
+    const iss = (fbIssueIndex != null && fbIssues[fbIssueIndex]) ? fbIssues[fbIssueIndex] : null;
+    const btn = $("#fbSend"); btn.disabled = true; btn.textContent = "送信中…";
+    if(iss){
+      extra.ruleId = iss.ruleId || "";
+      extra.expected = iss.expected || "";
+      extra.actual = iss.actual || "";
+      extra.bbox = JSON.stringify(iss.box ? [[iss.box.x, iss.box.y, iss.box.x+iss.box.w, iss.box.y+iss.box.h]] : []);
+      btn.textContent = "画像を準備中…";
+      extra.thumb = await captureIssueThumb(iss);
+      btn.textContent = "送信中…";
+    }
+    const payload = basePayload(extra);
+    try{
+      await postFeedback(payload);
+      showNote("送信しました。ありがとうございます！", true);
+      $("#fbComment").value = ""; setVerdict(""); markUsed();
+      setTimeout(closeModal, 1100);
+    }catch(err){
+      showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
+      btn.disabled = false; btn.textContent = "送信する";
+    }
+  }
+
+  function fbFromIssue(i){
+    const iss = fbIssues[i];
+    if(!iss){ openModal({ verdict: "false_positive" }); return; }
+    openModal({
+      verdict: "false_positive",
+      category: guessCategory(iss.ruleId),
+      page: "p"+iss.page,
+      comment: "［該当検出: " + (iss.ruleId || "") + "／" + (iss.msg || "") + "］",
+      issueIndex: i
+    });
+  }
+
+  $("#fbOpen").addEventListener("click", () => openModal());
+  $("#fbCancel").addEventListener("click", closeModal);
+  modal.addEventListener("click", e => { if(e.target === modal) closeModal(); });
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && modal.classList.contains("show")) closeModal(); });
+  document.querySelectorAll("#fbVerdict button").forEach(b => b.addEventListener("click", () => setVerdict(b.dataset.v)));
+  $("#fbSend").addEventListener("click", send);
+
+  window.fbFromIssue = fbFromIssue;
+})();
+
 /* ---------- バナー ---------- */
 function showBanner(show,text,pct){
   const b=$("#banner"); b.classList.toggle('show',show);
@@ -1105,13 +1372,14 @@ function showBanner(show,text,pct){
 async function loadFile(file){
   if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
   $("#btnReset").disabled=false;
+  fbFileName=file.name||"";
   const buf=await file.arrayBuffer();
   pdfDoc=await pdfjsLib.getDocument({data:buf,
     cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
   await runAll();
 }
 function resetAll(){
-  pdfDoc=null; pages=[]; selected=-1; cancelFlag=true;
+  pdfDoc=null; pages=[]; selected=-1; cancelFlag=true; fbFileName=""; fbIssues=[];
   $("#viewer").classList.add('hidden'); $("#drop").classList.remove('hidden');
   $("#zoomctl").classList.add('hidden'); var _pb=$("#previewbar"); if(_pb){_pb.classList.add('hidden'); _pb.innerHTML='';} $(".main").classList.remove('single');
   zoom=1;

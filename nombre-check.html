@@ -233,6 +233,44 @@
     .panel{border:0;overflow:visible;display:block}
     .panel-top{border:0}.panel-scroll{overflow:visible}
   }
+
+  /* ---- フィードバック（目次整合検版と同形） ---- */
+  .fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+    background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
+  .fbmodal.show{display:flex}
+  .fbcard{width:min(460px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
+  .fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--ink-dim);line-height:1.6}
+  .fbfield{margin-bottom:13px}
+  .fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-dim);margin-bottom:5px}
+  .fbfield label .req{color:var(--red);margin-left:3px}
+  .fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--ui);font-size:13px;color:var(--ink);
+    background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
+  .fbfield textarea{min-height:64px;line-height:1.5}
+  .fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:4px;word-break:break-all}
+  .fbrow2{display:flex;gap:9px}
+  .fbrow2 .fbfield{flex:1;margin-bottom:13px}
+  .fbverdict{display:flex;gap:7px}
+  .fbverdict button{flex:1;font-family:var(--ui);font-size:12px;color:var(--ink-dim);background:var(--panel2);
+    border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
+  .fbverdict button:hover{border-color:var(--amber)}
+  .fbverdict button.on{background:var(--amber);color:#fff;border-color:var(--amber);font-weight:700}
+  .fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
+  .fbactions{display:flex;gap:9px;margin-top:18px}
+  .fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+  .fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+  .fbactions .fbcancel:hover{color:var(--ink)}
+  .fbactions .fbsend{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+  .fbactions .fbsend:hover{filter:brightness(1.06)}
+  .fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
+  .fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
+    background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber)}
+  .fbnote.ok{background:color-mix(in srgb,var(--ok) 14%,var(--panel));color:var(--ok);border-color:var(--ok)}
+  .findings .issfb{margin-left:6px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
+    border-radius:6px;padding:1px 7px;line-height:1.5;transition:.12s;white-space:nowrap}
+  .findings .issfb:hover{color:var(--red);border-color:var(--red);background:color-mix(in srgb,var(--red) 12%,var(--panel))}
 </style>
 </head>
 <body>
@@ -262,6 +300,7 @@
     <label class="field">探索幅<input id="band" type="number" step="1" min="5" value="45">mm</label>
     <label class="field" title="塗り足し（仕上がりからの外側余白）。入力すると小口・天地の数値を仕上がり基準に補正します">塗り足し<input id="bleed" type="number" step="0.5" min="0" value="0">mm</label>
     <button class="btn ghost icobtn" id="themeBtn" title="明暗を切り替え"><span id="themeIco">◐</span><span id="themeTxt">ダーク</span></button>
+    <button class="btn ghost" id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">💬 フィードバック</button>
     <button class="btn ghost" id="resetBtn" disabled>リセット</button>
     <button class="btn" id="loadBtn">PDFを開く</button>
     <input id="fileInput" type="file" accept="application/pdf" style="display:none">
@@ -356,6 +395,63 @@
 
 <div class="progress" id="progress">解析中 …</div>
 
+<!-- ============ フィードバック機能（目次整合検版と同形） ============ -->
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体は送信されません。</p>
+
+    <div class="fbfield">
+      <label>検出結果は正しかった？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">正しい<span class="vm">妥当な検出</span></button>
+        <button type="button" data-v="false_positive">誤検知<span class="vm">出すぎ</span></button>
+        <button type="button" data-v="missed">見逃し<span class="vm">出てない</span></button>
+      </div>
+    </div>
+
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="位置">位置</option>
+          <option value="表裏">表裏</option>
+          <option value="書体・Q数">書体・Q数</option>
+          <option value="未検出">未検出</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>ページ</label>
+        <input id="fbPage" type="text" placeholder="例: p.25">
+      </div>
+    </div>
+
+    <div class="fbfield">
+      <label>ファイル名</label>
+      <input id="fbFile" type="text" placeholder="自動入力されます" readonly>
+      <div class="fbhint" id="fbFileHint"></div>
+    </div>
+
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：p.12の位置ズレを誤検知している／p.30のノンブル未検出を見逃している など"></textarea>
+    </div>
+
+    <div class="fbfield">
+      <label>お名前・担当（任意）</label>
+      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+    </div>
+
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
+  </div>
+</div>
+
 <script>
 "use strict";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -378,6 +474,7 @@ let pdf=null, fileName="";
 let pageMeta=[], overrides=[], records=[], analysis=null;
 let cur=0, curViewport=null, curScale=1, zoom=1, ghostImg=null;
 let ocrByPage=[], ocrRunning=false, ocrCancel=false;
+let fbIssues=[];  // フィードバック「誤検知?」用：直近renderPanel()で構築された指摘一覧
 
 // ---- detection ----
 function romanVal(t){ const M={i:1,v:5,x:10,l:50,c:100,d:500,m:1000}; let n=0,prev=0;
@@ -541,6 +638,14 @@ function median(arr){ const a=[...arr].sort((x,y)=>x-y),n=a.length; if(!n) retur
 function vDisp(r){ return r.pos.zone==="top"
   ? {l:"天", v:round2(r.pos.page_h_mm - r.pos.vertical_mm)} : {l:"地", v:r.pos.vertical_mm}; }
 
+// フィードバック用：候補ノンブルのPDF原点座標（左下原点・pt）からおおよそのbboxを作る
+// （判定ロジックには一切使わない。誤検知報告の再現用サムネイル切り出しにのみ使用）
+function candBBox(cand, size){
+  if(!cand || cand.xabs==null || cand.yabs==null) return [];
+  const hw=Math.max(20,(size||10)*3), hh=Math.max(10,(size||10)*1.4);
+  return [round2(cand.xabs-hw), round2(cand.yabs-hh), round2(cand.xabs+hw), round2(cand.yabs+hh)];
+}
+
 function recompute(){
   const auto=chooseSequence();
   records=pageMeta.map((meta,i)=>{
@@ -581,17 +686,28 @@ function analyze(recs, tol){
 
   const jpz={top:"天",bottom:"地"};
   recs.forEach(r=>{
-    r.flags=[]; r.notes=[]; r.warn=false;
+    r.flags=[]; r.notes=[]; r.warn=false; r.issueMeta=[];
     if(r.excluded){ r.status="—"; return; }
-    if(!r.detected){ r.flags.push("ノンブル未検出（要目視確認）"); r.status="NG"; return; }
+    if(!r.detected){
+      r.flags.push("ノンブル未検出（要目視確認）");
+      r.issueMeta.push({ruleId:"NOM-1", expected:"ノンブル検出", actual:"未検出", bbox:[], page:r.page});
+      r.status="NG"; return;
+    }
     const c=r._c, dx=Math.abs(r.pos.outer_mm-c.cx), dv=Math.abs(r.pos.vertical_mm-c.cy);
     if(c.major){
-      if(dx>tol) r.flags.push(`同一デザイン内で${mlabel}位置がズレ（グループ基準${c.cx}mm／当該${r.pos.outer_mm}mm／差${round2(dx)}mm）`);
-      if(dv>tol) r.flags.push(`同一デザイン内で天地位置がズレ（グループ基準${c.cy}mm／当該${r.pos.vertical_mm}mm／差${round2(dv)}mm）`);
+      if(dx>tol){
+        r.flags.push(`同一デザイン内で${mlabel}位置がズレ（グループ基準${c.cx}mm／当該${r.pos.outer_mm}mm／差${round2(dx)}mm）`);
+        r.issueMeta.push({ruleId:"NOM-2", expected:String(c.cx), actual:String(r.pos.outer_mm), bbox:candBBox(r.cand,r.size), page:r.page});
+      }
+      if(dv>tol){
+        r.flags.push(`同一デザイン内で天地位置がズレ（グループ基準${c.cy}mm／当該${r.pos.vertical_mm}mm／差${round2(dv)}mm）`);
+        r.issueMeta.push({ruleId:"NOM-3", expected:String(c.cy), actual:String(r.pos.vertical_mm), bbox:candBBox(r.cand,r.size), page:r.page});
+      }
       r.status=r.flags.length?"NG":"OK";
     }else{
       r.warn=true; r.status="WARN";
       r.flags.push(`他ページと異なる配置（${jpz[r.pos.zone]}・${mlabel}${r.pos.outer_mm}mm／地${r.pos.vertical_mm}mm、同配置${c.count}p）。章替わりのデザイン変更か、要確認`);
+      r.issueMeta.push({ruleId:"NOM-4", expected:"主要デザイングループへの一致", actual:`zone=${r.pos.zone}/outer=${r.pos.outer_mm}/vertical=${r.pos.vertical_mm}`, bbox:candBBox(r.cand,r.size), page:r.page});
     }
   });
 
@@ -606,6 +722,7 @@ function analyze(recs, tol){
       if(r.font!==p.font) diffs.push("書体");
       if(Math.abs((r.size||0)-(p.size||0))>0.3) diffs.push(`Q数（前後${p.size!=null?p.size+"pt":"?"}／当該${r.size!=null?r.size+"pt":"?"}）`);
       r.flags.push(`このページだけ${diffs.join("・")}が前後と異なります`);
+      r.issueMeta.push({ruleId:"NOM-5", expected:`${p.font||""}/${p.size!=null?p.size+"pt":""}`, actual:`${r.font||""}/${r.size!=null?r.size+"pt":""}`, bbox:candBBox(r.cand,r.size), page:r.page});
       r.status="NG"; r.fontOutlier=true;
     }else if(p && !sameFS(r,p)){
       r.notes.push(`書体/サイズが前の検出ページと変化（参考：${r.size!=null?r.size+"pt":""}）`);
@@ -621,7 +738,7 @@ function analyze(recs, tol){
   const pairs=[]; const pairNGpages=new Set();
   for(let i=0;i<recs.length;i+=2){
     const f=recs[i], b=recs[i+1]||null;
-    const rec={front:f.page, back:b?b.page:null, flags:[], status:"OK", metric:mlabel};
+    const rec={front:f.page, back:b?b.page:null, flags:[], issueMeta:[], status:"OK", metric:mlabel};
     if(!b){ rec.status="—"; rec.flags.push("対となる裏ページがありません"); pairs.push(rec); continue; }
     if(f.excluded||b.excluded){ rec.status="—"; rec.flags.push("白ページ等のため対象外"); pairs.push(rec); continue; }
     if(!(f.detected&&b.detected)){ rec.status="—"; rec.flags.push("表または裏が未検出のため照合不可"); pairs.push(rec); continue; }
@@ -630,8 +747,14 @@ function analyze(recs, tol){
     if((dO>tol||dV>tol) && base){
       const fo=f.pos.outer_mm-base.cx, bo=b.pos.outer_mm-base.cx, fv=f.pos.vertical_mm-base.cy, bv=b.pos.vertical_mm-base.cy;
       rec.devFO=round2(fo); rec.devBO=round2(bo); rec.devFV=round2(fv); rec.devBV=round2(bv); rec.baseId=base.id;
-      if(dO>tol) rec.flags.push(`表裏で${mlabel}位置が不一致：表${sgn(fo)}mm／裏${sgn(bo)}mm（基準G${base.id}=${base.cx}mm、表裏差${round2(dO)}mm）`);
-      if(dV>tol) rec.flags.push(`表裏で天地位置が不一致：表${sgn(fv)}mm／裏${sgn(bv)}mm（基準G${base.id}、表裏差${round2(dV)}mm）`);
+      if(dO>tol){
+        rec.flags.push(`表裏で${mlabel}位置が不一致：表${sgn(fo)}mm／裏${sgn(bo)}mm（基準G${base.id}=${base.cx}mm、表裏差${round2(dO)}mm）`);
+        rec.issueMeta.push({ruleId:"NOM-6", expected:String(base.cx), actual:`表${f.pos.outer_mm}/裏${b.pos.outer_mm}`, bbox:candBBox(f.cand||b.cand, f.cand?f.size:b.size), page:f.page});
+      }
+      if(dV>tol){
+        rec.flags.push(`表裏で天地位置が不一致：表${sgn(fv)}mm／裏${sgn(bv)}mm（基準G${base.id}、表裏差${round2(dV)}mm）`);
+        rec.issueMeta.push({ruleId:"NOM-7", expected:String(base.cy), actual:`表${f.pos.vertical_mm}/裏${b.pos.vertical_mm}`, bbox:candBBox(f.cand||b.cand, f.cand?f.size:b.size), page:f.page});
+      }
     }
     rec.status=rec.flags.length?"NG":"OK";
     if(rec.status==="NG"){ pairNGpages.add(f.page); pairNGpages.add(b.page); }
@@ -729,15 +852,30 @@ function renderPanel(){
       `<tr><td>p.${p.front}${p.back?(" / p."+p.back):""}</td>${cells}<td class="st ${stc}">${p.status}</td></tr>`);
   });
 
-  const fd=$("findings"); fd.innerHTML=""; const items=[];
+  const fd=$("findings"); fd.innerHTML=""; const items=[]; fbIssues=[];
   records.forEach(r=>{
     const lines=(r.flags||[]).concat(r.notes||[]);
-    if(lines.length) items.push({p:`p.${r.page}`, kind:(r.status==="WARN"||!r.detected)?"warn":"ng", lines});
+    if(lines.length){
+      const flagCount=(r.flags||[]).length;
+      const idxs=lines.map((_,li)=> li<flagCount
+        ? (fbIssues.push(Object.assign({msg:lines[li]}, r.issueMeta[li]))-1)
+        : -1);
+      items.push({p:`p.${r.page}`, kind:(r.status==="WARN"||!r.detected)?"warn":"ng", lines, idxs});
+    }
   });
-  analysis.pairs.filter(p=>p.status==="NG").forEach(p=>items.push({p:`p.${p.front}（表）× p.${p.back}（裏）`, kind:"ng", lines:p.flags}));
+  analysis.pairs.filter(p=>p.status==="NG").forEach(p=>{
+    const idxs=p.flags.map((_,li)=> fbIssues.push(Object.assign({msg:p.flags[li]}, p.issueMeta[li]))-1);
+    items.push({p:`p.${p.front}（表）× p.${p.back}（裏）`, kind:"ng", lines:p.flags, idxs});
+  });
   if(!items.length){ fd.innerHTML=`<div class="none">指摘はありません。</div>`; }
   items.forEach(it=>fd.insertAdjacentHTML("beforeend",
-    `<div class="f${it.kind==="warn"?" warn":""}"><span class="p">${esc(it.p)}</span><br>${it.lines.map(l=>"・"+esc(l)).join("<br>")}</div>`));
+    `<div class="f${it.kind==="warn"?" warn":""}"><span class="p">${esc(it.p)}</span><br>${
+      it.lines.map((l,li)=>{
+        const idx=it.idxs[li];
+        const btn=(idx!=null&&idx>=0)?` <button class="issfb" title="この検出は誤検知だと報告する" onclick="event.stopPropagation();fbFromIssue(${idx})">👎 誤検知?</button>`:"";
+        return "・"+esc(l)+btn;
+      }).join("<br>")
+    }</div>`));
 }
 
 // ---- viewer ----
@@ -1199,6 +1337,154 @@ const drop=$("drop");
 ["dragleave","drop"].forEach(ev=>window.addEventListener(ev,e=>{ e.preventDefault();
   if(e.type==="drop" || e.relatedTarget===null) drop.classList.remove("drag"); }));
 window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.type==="application/pdf") loadFile(f); });
+
+// ====== フィードバック（目次整合検版・下版PDF差分チェッカーと同方式） ======
+// 判定ロジック（analyze()等）は変更しない。ここは送信まわりのメタデータ収集のみ。
+(function(){
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_APP_VERSION = "v1.0";
+  const modal = $("fbModal");
+  let fbVerdict = "";
+  let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
+
+  // 指摘の該当箇所をcanvasから自動クロップしてbase64 PNG化する（人手のスクリーンショットは不要）
+  async function captureIssueThumb(iss){
+    try{
+      if(!pdf || !iss || !(iss.bbox && iss.bbox.length)) return "";
+      const page = await pdf.getPage(iss.page);
+      const scale = 2.2;
+      const vp = page.getViewport({ scale });
+      const off = document.createElement("canvas");
+      off.width = vp.width; off.height = vp.height;
+      await page.render({ canvasContext: off.getContext("2d"), viewport: vp }).promise;
+      const [x0p, y0p, x1p, y1p] = iss.bbox;   // PDFネイティブ座標（左下原点・pt）
+      const p0 = vp.convertToViewportPoint(x0p, y0p), p1 = vp.convertToViewportPoint(x1p, y1p);
+      const xs=[p0[0],p1[0]], ys=[p0[1],p1[1]];
+      const pad = 18;
+      const x0 = Math.max(0, Math.min(...xs) - pad), y0 = Math.max(0, Math.min(...ys) - pad);
+      const x1 = Math.min(off.width, Math.max(...xs) + pad), y1 = Math.min(off.height, Math.max(...ys) + pad);
+      const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(off, x0, y0, w, h, 0, 0, w, h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  function reporterStore(get, val){
+    try{ if(get) return localStorage.getItem("nombre-kenpan-reporter") || "";
+         localStorage.setItem("nombre-kenpan-reporter", val); }catch(e){}
+    return "";
+  }
+  function fbCurPage(){ return pdf ? ("p."+(cur+1)) : ""; }
+  function setVerdict(v){
+    fbVerdict = v;
+    document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  }
+  function showNote(msg, ok){
+    const n = $("fbNote");
+    n.style.display = "block";
+    n.className = "fbnote" + (ok ? " ok" : "");
+    n.innerHTML = msg;
+  }
+  function markUsed(){ try{ localStorage.setItem("nombre-fb-used", "1"); }catch(e){} }
+  function guessCategory(ruleId){
+    if(!ruleId) return "";
+    if(ruleId==="NOM-1") return "未検出";
+    if(ruleId==="NOM-2"||ruleId==="NOM-3"||ruleId==="NOM-4") return "位置";
+    if(ruleId==="NOM-5") return "書体・Q数";
+    if(ruleId==="NOM-6"||ruleId==="NOM-7") return "表裏";
+    return "その他";
+  }
+  function openModal(pre){
+    pre = pre || {};
+    fbIssueIndex = (pre.issueIndex != null) ? pre.issueIndex : null;
+    $("fbFile").value = fileName || "（未読込）";
+    $("fbFileHint").textContent = "表示ページ: " + (fbCurPage() || "—");
+    $("fbPage").value = pre.page || fbCurPage();
+    $("fbCategory").value = pre.category || "";
+    $("fbComment").value = pre.comment || "";
+    $("fbReporter").value = reporterStore(true);
+    $("fbNote").style.display = "none";
+    $("fbSend").disabled = false; $("fbSend").textContent = "送信する";
+    setVerdict(pre.verdict || "");
+    modal.classList.add("show");
+  }
+  function closeModal(){ modal.classList.remove("show"); }
+
+  async function postFeedback(payload){
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+  }
+  function basePayload(extra){
+    return Object.assign({
+      tool: "nombre_kenpan", verdict: "", category: "",
+      file: fileName || "", page: fbCurPage(), comment: "",
+      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      userAgent: navigator.userAgent,
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: ""
+    }, extra || {});
+  }
+
+  async function send(){
+    if(!fbVerdict){ showNote("「検出結果は正しかった？」を選択してください。", false); return; }
+    const reporter = $("fbReporter").value.trim();
+    reporterStore(false, reporter);
+    const extra = {
+      verdict: fbVerdict,
+      category: $("fbCategory").value,
+      file: $("fbFile").value.trim(),
+      page: $("fbPage").value.trim(),
+      comment: $("fbComment").value.trim(),
+      reporter
+    };
+    const iss = (fbIssueIndex != null && fbIssues[fbIssueIndex]) ? fbIssues[fbIssueIndex] : null;
+    const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";
+    if(iss){
+      extra.ruleId = iss.ruleId || "";
+      extra.expected = iss.expected || "";
+      extra.actual = iss.actual || "";
+      extra.bbox = JSON.stringify(iss.bbox || []);
+      btn.textContent = "画像を準備中…";
+      extra.thumb = await captureIssueThumb(iss);
+      btn.textContent = "送信中…";
+    }
+    const payload = basePayload(extra);
+    try{
+      await postFeedback(payload);
+      showNote("送信しました。ありがとうございます！", true);
+      $("fbComment").value = ""; setVerdict(""); markUsed();
+      setTimeout(closeModal, 1100);
+    }catch(err){
+      showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
+      btn.disabled = false; btn.textContent = "送信する";
+    }
+  }
+
+  function fbFromIssue(i){
+    const iss = fbIssues[i];
+    if(!iss){ openModal({ verdict: "false_positive" }); return; }
+    openModal({
+      verdict: "false_positive",
+      category: guessCategory(iss.ruleId),
+      page: "p."+iss.page,
+      comment: "［該当検出: " + (iss.ruleId || "") + "／" + (iss.msg || "") + "］",
+      issueIndex: i
+    });
+  }
+
+  $("fbOpen").addEventListener("click", () => openModal());
+  $("fbCancel").addEventListener("click", closeModal);
+  modal.addEventListener("click", e => { if(e.target === modal) closeModal(); });
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && modal.classList.contains("show")) closeModal(); });
+  document.querySelectorAll("#fbVerdict button").forEach(b => b.addEventListener("click", () => setVerdict(b.dataset.v)));
+  $("fbSend").addEventListener("click", send);
+
+  window.fbFromIssue = fbFromIssue;
+})();
 </script>
 </body>
 </html>
