@@ -2840,7 +2840,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧から送信した場合、該当箇所を切り抜いた画像（該当ページの一部分）を含みます。PDFファイル全体は送信されません。</p>
+    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧からの場合は該当箇所の切り抜き画像、それ以外は表示中ページの画像を含みます。PDFファイル全体は送信されません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -2934,6 +2934,19 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       full.getContext("2d").putImageData(st.bData,0,0);
       const c=document.createElement("canvas"); c.width=w; c.height=h;
       c.getContext("2d").drawImage(full, x0,y0,w,h, 0,0,w,h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  // 特定の指摘に紐づかない送信（見逃し報告・全体の感想など、手動で#fbOpenを押した場合）は、
+  // 該当箇所を特定できないため、代わりに表示中のページ全体（S.bData）をそのままキャプチャする。
+  // これも人手のスクリーンショットは不要。取得できない場合は空文字を返す（送信自体は失敗させない）。
+  async function captureFullPageThumb(){
+    try{
+      const st=(typeof S!=="undefined")?S:{};
+      if(!st.bData || !st.bW || !st.bH) return "";
+      const c=document.createElement("canvas"); c.width=st.bW; c.height=st.bH;
+      c.getContext("2d").putImageData(st.bData,0,0);
       return c.toDataURL("image/png");
     }catch(e){ return ""; }
   }
@@ -3042,16 +3055,20 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     const st=(typeof S!=="undefined")?S:{};
     const rg=(fbRegionIndex!=null && st.regions && st.regions[fbRegionIndex]) ? st.regions[fbRegionIndex] : null;
     const btn=$$("#fbSend"); btn.disabled=true; btn.textContent="送信中…";
+    btn.textContent="画像を準備中…";
     if(rg){
       // 指摘一覧から開いた場合のみ、再現用メタデータを自動添付（社員側の操作は増やさない）
       extra.ruleId = (rg.cls && rg.cls.ruleId) || "";
       extra.expected = (rg.cls && rg.cls.expected) || "";
       extra.actual = (rg.cls && rg.cls.actual) || "";
       extra.bbox = JSON.stringify([[rg.x, rg.y, rg.x+rg.w, rg.y+rg.h]]);
-      btn.textContent="画像を準備中…";
       extra.thumb = await captureRegionThumb(rg);
-      btn.textContent="送信中…";
+    }else{
+      // 特定の指摘に紐づかない送信（見逃し報告・全体の感想など）は表示中ページ全体を添付する。
+      // ruleId/expected/actual/bboxは空のまま（社員側の操作は増やさない）。
+      extra.thumb = await captureFullPageThumb();
     }
+    btn.textContent="送信中…";
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);
