@@ -2832,8 +2832,11 @@ async function loadPDF(file) {
     }
     const wmode = vCount > hCount ? 1 : 0;
     rawData.push({ h: H, w: vp.width, lines: items, wmode: wmode });
-    // テキストがほぼ無く、ページに画像があれば OCR 対象（スキャン頁）
-    if (textLen < OCR.TEXT_THRESHOLD && await pageHasImage(page))
+    // テキストがほぼ無ければ OCR 対象（スキャン頁 or アウトライン化されたページ）
+    // ※以前は「画像貼込みページ」限定だったが、ノンブル等の文字がアウトライン化(パス化)
+    //   されているだけで埋め込みラスター画像を持たないページ（地色/イラストがベクター
+    //   描画のみ等）はここに引っかからず検出漏れになっていたため、テキスト量のみで判定。
+    if (textLen < OCR.TEXT_THRESHOLD)
       scanPages.push(p);
     if (p % 10 === 0 || p === N) status(`テキスト抽出中… ${p} / ${N} ページ`, true);
   }

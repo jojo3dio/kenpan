@@ -216,6 +216,16 @@
   .ocrbar .ocrico{color:var(--amber)}
   .ocrbar #ocrmsg{flex:1 1 auto}
   .ocrbar .btn{flex:0 0 auto}
+  .pageAlert{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+    display:none;align-items:center;gap:10px;max-width:min(94%,540px);
+    padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.5;color:var(--ink);
+    background:color-mix(in srgb,var(--amber) 16%,var(--panel));
+    border:1px solid color-mix(in srgb,var(--amber) 50%,var(--line));
+    box-shadow:var(--shadow);z-index:20}
+  .pageAlert.show{display:flex}
+  .pageAlert .ico{color:var(--amber);flex:0 0 auto;font-size:15px}
+  .pageAlert .msg{flex:1 1 auto}
+  .pageAlert .btn{flex:0 0 auto;white-space:nowrap}
   .progress{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 82%,transparent);
     display:none;align-items:center;justify-content:center;color:var(--ink);
     font-family:var(--mono);font-size:13px;letter-spacing:.06em;z-index:50}
@@ -336,6 +346,11 @@
       <div class="stage" id="stage" style="display:none">
         <canvas id="pdfcanvas"></canvas>
         <canvas id="overlay"></canvas>
+      </div>
+      <div class="pageAlert" id="pageAlert">
+        <span class="ico">⚠</span>
+        <span class="msg" id="pageAlertMsg">このページは文字が読み取れません（アウトライン化された文字、またはスキャン画像の可能性）。OCRでノンブルを検出しますか？</span>
+        <button class="btn" id="pageAlertBtn">OCRで検出</button>
       </div>
     </div>
     <div class="vbar" id="vbar" style="display:none">
@@ -546,8 +561,12 @@ async function extract(){
     if(ocr) for(const c of ocr){ const cyb=c.yabs-view[1];
       const inBottom=(cyb>=edge && cyb<=b), inTop=(cyb<=ph-edge && cyb>=ph-b);
       if(inBottom||inTop) cands.push(c); }
-    // 「テキストがほぼ無い」かつ「実際に大きな画像が貼ってある」ページだけスキャン扱い
-    const isImage = (textLen<3) && (ocr?true:await pageHasLargeImage(page));
+    // 「テキストがほぼ無い」ページはスキャン扱い（OCR対象）
+    // ※以前は「実際に大きな画像が貼ってある」ことも必須だったが、ノンブル等の文字が
+    //   アウトライン化(パス化)されているだけで埋め込みラスター画像を持たないページ
+    //   （地色・イラストがベクター描画のみ等）はここに引っかからず検出漏れになって
+    //   いたため、テキスト量のみで判定するように変更。
+    const isImage = (textLen<3);
     pageMeta.push({view, pw, ph, cands, textLen, isImage});
     $("progress").textContent=`解析中 … ${i}/${pdf.numPages}`;
   }
@@ -560,38 +579,122 @@ async function getOcrWorker(){
   if(ocrWorker) return ocrWorker;
   if(typeof Tesseract==="undefined") throw new Error("OCRエンジンを読み込めませんでした（ネットワークを確認してください）");
   const w=await Tesseract.createWorker("eng");
-  await w.setParameters({ tessedit_char_whitelist:OCR_WHITELIST, tessedit_pageseg_mode:"11", preserve_interword_spaces:"0" });
+  // タイトに切り出した1語相当の画像を渡す前提なのでPSM=8（単一語）
+  await w.setParameters({ tessedit_char_whitelist:OCR_WHITELIST, tessedit_pageseg_mode:"8", preserve_interword_spaces:"0" });
   ocrWorker=w; return w;
 }
-// 1ページの天地マージン帯をOCRしてノンブル候補を返す
+// 天地の帯を、さらに小口側の左右コーナーへ絞り込み、インク画素(黒文字)だけを検出して
+// ①まず「行」を y方向で分離し、外側の端に最も近い行だけを対象にする（本文の他の行や
+//   柱を巻き込まないようにするため）②その行の中で x方向にクラスタ分割し、地色・柱の
+//   文字と分けて数字クラスタだけをタイトに切り出してOCRする。
+function ctxOf(cv){ const g=cv.getContext("2d"); g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high"; return g; }
+function inkRuns(hasInk, length, gapMax){
+  const spans=[]; let start=-1, gap=0;
+  for(let i=0;i<length;i++){
+    if(hasInk(i)){ if(start<0) start=i; gap=0; }
+    else if(start>=0){ gap++; if(gap>gapMax){ spans.push([start,i-gap]); start=-1; gap=0; } }
+  }
+  if(start>=0) spans.push([start,length-1]);
+  return spans;
+}
+function findRowBands(data, w, h, inkThresh){
+  const rowHas=new Uint8Array(h);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const idx=(y*w+x)*4;
+      const lum=0.299*data[idx]+0.587*data[idx+1]+0.114*data[idx+2];
+      if(lum<inkThresh){ rowHas[y]=1; break; }
+    }
+  }
+  return inkRuns(y=>!!rowHas[y], h, 4); // 4px以上の空白行が続いたら別の行とみなす
+}
+function findColClusters(data, w, h, inkThresh){
+  const colHas=new Uint8Array(w);
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++){
+      const idx=(y*w+x)*4;
+      const lum=0.299*data[idx]+0.587*data[idx+1]+0.114*data[idx+2];
+      if(lum<inkThresh){ colHas[x]=1; break; }
+    }
+  }
+  // 14px程度の空白なら同じ数字(例:「10」「41」)の文字間とみなして繋げ、
+  // 柱の文字列とノンブルの間（全角スペース相当・数十px）は別クラスタとして切り離す
+  const spans=inkRuns(x=>!!colHas[x], w, 14);
+  const clusters=[];
+  for(const [x0,x1] of spans){
+    if((x1-x0+1)>w*0.9) continue; // 行の大半を覆う巨大クラスタ(柱の連続文字)は除外
+    let y0=h,y1=-1;
+    for(let x=x0;x<=x1;x++) for(let y=0;y<h;y++){
+      const idx=(y*w+x)*4;
+      const lum=0.299*data[idx]+0.587*data[idx+1]+0.114*data[idx+2];
+      if(lum<inkThresh){ if(y<y0)y0=y; if(y>y1)y1=y; }
+    }
+    if(y1>y0) clusters.push({x0,y0,x1,y1});
+  }
+  return clusters.slice(0,8); // 念のため上限（本文が広く写り込んだ場合の暴走防止）
+}
+// 1ページの天地×左右4隅をOCRしてノンブル候補を返す
 async function ocrPage(i, worker){
   const page=await pdf.getPage(i);
   const S=3; // ≈216dpi（活字が読める程度）
   const vpt=page.getViewport({scale:S});
   const full=document.createElement("canvas"); full.width=Math.ceil(vpt.width); full.height=Math.ceil(vpt.height);
-  await page.render({canvasContext:full.getContext("2d"), viewport:vpt}).promise;
+  const fctx=ctxOf(full);
+  await page.render({canvasContext:fctx, viewport:vpt}).promise;
   const bandMM=Math.max(45,(parseFloat($("band").value)||45)+6);
   const bandPx=Math.min(full.height/2, Math.round(bandMM/25.4*72*S));
+  const cornerPx=Math.min(full.width, Math.max(120, Math.round(full.width*0.34)));
+  const INK=150, PAD=6, UP=6;
   const out=[];
-  for(const zone of ["top","bottom"]){
-    const sy=zone==="top"?0:full.height-bandPx;
-    const strip=document.createElement("canvas"); strip.width=full.width; strip.height=bandPx;
-    strip.getContext("2d").drawImage(full,0,sy,full.width,bandPx,0,0,full.width,bandPx);
-    let data; try{ data=(await worker.recognize(strip, {}, { blocks:true })).data; }catch(e){ continue; }
-    const words=[];
-    (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>(l.words||[]).forEach(w=>words.push(w)))));
-    if(!words.length && data.words) words.push(...data.words);
-    for(const wd of words){
-      const raw=(wd.text||"").trim(); if(!raw) continue;
-      if((wd.confidence||0)<35) continue;
-      const f=parseFolio(raw)||leadingFolio(raw); if(!f) continue;
-      const bb=wd.bbox||wd; const bx=((bb.x0+bb.x1)/2), by=((bb.y0+bb.y1)/2)+sy;
-      const [Xp,Yp]=vpt.convertToPdfPoint(bx,by);
-      const hpt=Math.abs(bb.y1-bb.y0)/S;
-      out.push({value:f.value, system:f.system, raw:f.raw, xabs:Xp, yabs:Yp, font:"OCR", size:round2(hpt), ocr:true, conf:Math.round(wd.confidence)});
+  for(const vzone of ["top","bottom"]){
+    const sy=vzone==="top"?0:full.height-bandPx;
+    for(const hzone of ["left","right"]){
+      const sx=hzone==="left"?0:full.width-cornerPx;
+      let cornerData; try{ cornerData=fctx.getImageData(sx,sy,cornerPx,bandPx).data; }catch(e){ continue; }
+      let bands; try{ bands=findRowBands(cornerData, cornerPx, bandPx, INK); }catch(e){ continue; }
+      if(!bands.length) continue;
+      // 端(天/地)に最も近い行から順に、最大2行まで試す
+      const ordered = vzone==="top" ? bands : bands.slice().reverse();
+      for(const [ry0,ry1] of ordered.slice(0,2)){
+        const py0=Math.max(0,ry0-PAD), py1=Math.min(bandPx,ry1+1+PAD), lh=py1-py0;
+        let lineData; try{ lineData=fctx.getImageData(sx,sy+py0,cornerPx,lh).data; }catch(e){ continue; }
+        const clusters=findColClusters(lineData, cornerPx, lh, INK);
+        let hitInLine=false;
+        for(const c of clusters){
+          const px0=Math.max(0,c.x0-PAD), px1=Math.min(cornerPx,c.x1+1+PAD);
+          const qy0=Math.max(0,c.y0-PAD), qy1=Math.min(lh,c.y1+1+PAD);
+          const pw=px1-px0, ph=qy1-qy0;
+          if(pw<3||ph<3) continue;
+          const crop=document.createElement("canvas"); crop.width=pw*UP; crop.height=ph*UP;
+          ctxOf(crop).drawImage(full, sx+px0, sy+py0+qy0, pw, ph, 0, 0, pw*UP, ph*UP);
+          let data; try{ data=(await worker.recognize(crop, {}, { blocks:true })).data; }catch(e){ continue; }
+          const words=[];
+          (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>(l.words||[]).forEach(w=>words.push(w)))));
+          if(!words.length && data.words) words.push(...data.words);
+          for(const wd of words){
+            const raw=(wd.text||"").trim(); if(!raw) continue;
+            if((wd.confidence||0)<35) continue;
+            const f=parseFolio(raw)||leadingFolio(raw); if(!f) continue;
+            const bb=wd.bbox||wd;
+            const bx=sx+px0+((bb.x0+bb.x1)/2)/UP, by=sy+py0+qy0+((bb.y0+bb.y1)/2)/UP;
+            const [Xp,Yp]=vpt.convertToPdfPoint(bx,by);
+            const hpt=Math.abs(bb.y1-bb.y0)/UP/S;
+            out.push({value:f.value, system:f.system, raw:f.raw, xabs:Xp, yabs:Yp, font:"OCR", size:round2(hpt), ocr:true, conf:Math.round(wd.confidence)});
+            hitInLine=true;
+          }
+        }
+        if(hitInLine) break; // この隅では確定。内側の行までは見ない
+      }
     }
   }
-  return out;
+  // ほぼ同一座標に複数ヒットした場合は信頼度の高い方を残す
+  const dedup=[];
+  for(const c of out){
+    const hit=dedup.find(o=>Math.abs(o.xabs-c.xabs)<4 && Math.abs(o.yabs-c.yabs)<4);
+    if(!hit) dedup.push(c);
+    else if((c.conf||0)>(hit.conf||0)) Object.assign(hit,c);
+  }
+  return dedup;
 }
 async function ocrPass(){
   if(!pdf||ocrRunning) return;
@@ -927,6 +1030,37 @@ async function showPage(resetView=true){
   $("exclBtn").setAttribute("aria-pressed", String(!!(overrides[cur]&&overrides[cur].type==="none")));
   renderOverlay(); renderPageList(); scrollListToCurrent();
   if(!zooming) buildPartnerGhost(records[cur]);
+  updatePageAlert();
+}
+
+// 現在ページが「文字が読み取れない(アウトライン/スキャン)」かつ未OCR・未検出なら
+// プレビュー上にOCR案内を表示する。既にOCR済み、除外設定済み、検出済みなら出さない。
+function updatePageAlert(){
+  const el=$("pageAlert"); if(!pdf||!pageMeta[cur]){ el.classList.remove("show"); return; }
+  const meta=pageMeta[cur], r=records[cur];
+  const needsOcr = meta.isImage && !ocrByPage[cur] && !(r&&r.excluded) && !(r&&r.detected);
+  el.classList.toggle("show", !!needsOcr);
+  if(needsOcr){
+    $("pageAlertMsg").textContent="このページは文字が読み取れません（アウトライン化された文字、またはスキャン画像の可能性）。OCRでノンブルを検出しますか？";
+    $("pageAlertBtn").disabled=false; $("pageAlertBtn").textContent="OCRで検出";
+  }
+}
+// このページだけをOCRする（プレビュー上のアラートから呼ばれる）
+async function ocrCurrentPage(){
+  if(!pdf) return;
+  const idx=cur;
+  $("pageAlertBtn").disabled=true; $("pageAlertBtn").textContent="解析中…";
+  $("pageAlertMsg").textContent="OCR解析中…（初回はエンジン取得に時間がかかります）";
+  try{
+    const worker=await getOcrWorker();
+    ocrByPage[idx]=await ocrPage(idx+1, worker);
+  }catch(e){
+    $("pageAlertMsg").textContent="OCRに失敗しました: "+e.message;
+    $("pageAlertBtn").disabled=false; $("pageAlertBtn").textContent="OCRで検出";
+    return;
+  }
+  await extract(); recompute();
+  if(cur===idx) await showPage(false); else updatePageAlert();
 }
 
 function renderOverlay(){
@@ -1273,6 +1407,7 @@ $("drop").onclick=()=>$("fileInput").click();
 $("fileInput").onchange=e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); };
 $("resetBtn").onclick=reset;
 $("ocrBtn").onclick=()=>{ if(ocrRunning){ ocrCancel=true; } else { ocrPass(); } };
+$("pageAlertBtn").onclick=()=>ocrCurrentPage();
 $("themeBtn").onclick=()=>applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");
 $("prev").onclick=()=>{ if(cur>0){cur--; showPage();} };
 $("next").onclick=()=>{ if(pdf&&cur<pdf.numPages-1){cur++; showPage();} };
