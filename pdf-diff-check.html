@@ -1671,6 +1671,17 @@ function rectOverlap(r,e){
   const x0=Math.max(r.x,e.x),y0=Math.max(r.y,e.y),x1=Math.min(r.x+r.w,e.x+e.w),y1=Math.min(r.y+r.h,e.y+e.h);
   return (x1>x0&&y1>y0)?(x1-x0)*(y1-y0):0;
 }
+// 全角(和文)判定：CJK漢字・かな/カナ・全角記号など。半角(英数字等)との幅比は概ね2:1として扱う。
+// orderedCharsで「1ラン内の文字ごとの位置」を推定する際、全角/半角混在ランの幅配分に使う。
+function isFullwidthCh(ch){
+  const cp=ch.codePointAt(0);
+  return (cp>=0x3000 && cp<=0x30FF)    // CJK記号/約物・ひらがな・カタカナ
+      || (cp>=0x3400 && cp<=0x4DBF)    // CJK統合漢字拡張A
+      || (cp>=0x4E00 && cp<=0x9FFF)    // CJK統合漢字
+      || (cp>=0xF900 && cp<=0xFAFF)    // CJK互換漢字
+      || (cp>=0xFF00 && cp<=0xFF60)    // 全角形（全角英数・記号）
+      || (cp>=0xFFE0 && cp<=0xFFE6);   // 全角記号
+}
 // 戻り値: {findings:[region風], explained:[共通座標bbox]}
 // テキスト片を読み順（行クラスタ→左→右、行は上→下）で1文字ずつに展開（空白は除外）
 function orderedChars(items){
@@ -1681,9 +1692,22 @@ function orderedChars(items){
   const out=[];
   for(const it of its){
     const s=it.str, n=s.length;
+    // 1ラン内の文字位置は「文字数で均等割り」ではなく、全角=2/半角=1の重み配分で推定する。
+    // 例："高辺斉広 12pt"のような和文＋ノンブル等が1ランで返るケースで均等割りすると、
+    // 全角文字の実描画幅を過小評価し、ラン末尾側の全角文字（この例では「広」）の推定枠が
+    // 実際の字形より手前で終わってしまい、差分ボックスがその文字を含まずに描かれる
+    // （＝見た目上「その文字の変更を拾っていない」ように見える）不具合があった。
+    // 判定ロジック・検出閾値は変更せず、文字ごとのx/w推定精度のみを上げる。
+    const weights=[]; let totalW=0;
+    for(let k=0;k<n;k++){ const w=isFullwidthCh(s[k])?2:1; weights.push(w); totalW+=w; }
+    let acc=0;
     for(let k=0;k<n;k++){
-      const ch=s[k]; if(!ch.trim()) continue;
-      out.push({ch, x:it.x+(n>1?it.w*k/n:0), y:it.y, w:Math.max(1,it.w/Math.max(1,n)), h:it.h});
+      const ch=s[k]; const wt=weights[k];
+      const cx=it.x+(totalW>0? it.w*acc/totalW : 0);
+      const cw=totalW>0? it.w*wt/totalW : it.w;
+      acc+=wt;
+      if(!ch.trim()) continue;
+      out.push({ch, x:cx, y:it.y, w:Math.max(1,cw), h:it.h});
     }
   }
   return out;
