@@ -171,7 +171,7 @@ header .sp{flex:1}
 #issueList{display:flex;flex-direction:column;gap:8px}
 .scrollarea details{flex:0 0 auto}
 /* 左カラム＝プレビュー（薄い地色の作業面） */
-.right{order:1;flex:1;display:flex;min-width:0}
+.right{order:1;flex:1;display:flex;min-width:0;min-height:0;overflow:hidden}
 .banner{border-radius:9px;padding:10px 16px;font-size:16px;font-weight:700;
         border:1px solid}
 .banner.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
@@ -255,7 +255,7 @@ details summary:hover{color:var(--amber)}
 details .inner{margin-top:8px}
 #viewer{flex:1;background:var(--stage);border:1px solid var(--line);
         border-radius:10px;padding:10px;display:flex;flex-direction:column;
-        box-shadow:var(--shadow);min-width:0}
+        box-shadow:var(--shadow);min-width:0;min-height:0;overflow:hidden}
 #viewer .bar{display:flex;gap:8px;justify-content:center;align-items:center;
         margin-bottom:8px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
 #viewer .bar button{background:var(--panel);border:1px solid var(--line);
@@ -612,13 +612,20 @@ def page_trim(r):
 
 
 SLUG_RE = re.compile(
-    r"(\.indd\b|\.ai\b|\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2})")
+    r"(\.indd\b|\.ai\b|\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}"
+    r"|[０-９0-9]{4}年[０-９0-9]{1,2}月[０-９0-9]{1,2}日"
+    r"|午[前後][０-９0-9]{1,2}時[０-９0-9]{1,2}分"
+    r"|版面|本文書体|［出力］|\[出力\]"
+    r"|[０-９0-9]+[QqＱｑ]$|[０-９0-9]+[HhＨｈ]$"
+    r"|[０-９0-9]+[WwＷｗ]\s*[×xX]\s*[０-９0-9]+[LlＬｌ]$)")
 
 
 def in_trim(ln, trim):
     """行中心がトリム内か（トンボ・スラグの除外）。
-    InDesign等が書き出すドキュメント情報（ファイル名.indd・日時）は
-    トリム情報の有無にかかわらず常に除外する。"""
+    InDesign等が書き出すドキュメント情報（ファイル名.indd・日時）や、
+    印刷所が版面外に付す検版用の作業注記（版面サイズ・書体・出力日時など）は、
+    トリム情報の有無にかかわらず常に除外する（トンボ余白が未設定の場合に
+    foot_pct を広げて再試行すると、これらの注記が柱として誤検出されうる）。"""
     if SLUG_RE.search(ln["text"]):
         return False
     tx0, ty0, tx1, ty1 = trim
@@ -637,6 +644,16 @@ def assemble_lines(raw, tol=2.0, gap_factor=0.45):
     y近接（±tol）でグループ化し、x順に連結。アイテム間の水平ギャップが
     gap_factor×フォントサイズ を超える場合のみ空白を挿入する。
     pymupdf のように行粒度で抽出できる場合は不要。
+
+    過去に「横組み主体ページに混在する縦組み列見出し」を先に結合する処理を
+    ここに追加したことがあったが、狭い（1〜2文字幅）断片が同じx位置に
+    複数行分並ぶ横組み文書（目次のページ番号列・括弧の閉じ記号列など）でも
+    誤って結合してしまう副作用が実害として出た（ページ番号「58」「60」が
+    「5860」に、閉じ括弧「」」が別の行の文字と結合するなど）。
+    誤爆を安全に避けきれる判定基準が見つからなかったため撤回している。
+    横組み文書に縦組み見出しが混在するケースは、まず is_vertical() が
+    文書全体を正しく縦組みと判定できているかを確認すること
+    （字形フォールバック判定を参照）。
     """
     def key(it):
         # ベースラインがあればそれを優先（サイズ混在行でも安定）
@@ -740,11 +757,23 @@ def assemble_vertical(raw, tol=3.0):
 
 
 def is_vertical(raw):
-    """ページ群が縦組み主体かを推定（wmodeフラグ優先、無ければ字形で推定）"""
+    """ページ群が縦組み主体かを推定（wmodeフラグと字形の両方を見る）。
+
+    抽出器が返す wmode は、1〜2文字ずつ個別の描画命令に分割された版面
+    （字送り調整の強い縦組み本文など）では過小カウントされることがある
+    （各断片が短すぎて抽出器側の縦組み判定の閾値=nchar>=2に届かないため。
+    実例: pdf.js 抽出で本文が縦組みの本なのに、断片分割のせいで
+    ページ単位の wmode 多数決が横組み側に振れ、目次・柱・ノンブルの
+    検出が総崩れになったケースがあった）。
+    そのため wmode 多数決だけを信じず、断片の形状によるフォールバック
+    判定（1〜2文字かつ縦長=tall／8文字以上かつ横長=wide の出現数比較）を
+    常に併用し、どちらかが縦組みを強く示せば縦組みと判定する。
+    """
     vflag = [r.get("wmode") for r in raw if r.get("wmode") is not None]
-    if vflag:
-        return sum(1 for v in vflag if v == 1) > len(vflag) / 2
-    # フォールバック: 本文ページ群で「縦に積まれた短い断片」が支配的かを見る。
+    wmode_vertical = bool(vflag) and \
+        sum(1 for v in vflag if v == 1) > len(vflag) / 2
+
+    # 本文ページ群で「縦に積まれた短い断片」が支配的かを見る。
     # 縦組みでは同一xに多数の断片が縦に連なり、断片自体は1〜数文字で縦長。
     tall = wide = 0
     for r in raw[5:35]:
@@ -759,7 +788,8 @@ def is_vertical(raw):
                 tall += 1
             elif len(t) >= 8 and wd > ht * 2:
                 wide += 1
-    return tall > wide * 1.5 and tall > 20
+    shape_vertical = tall > wide * 1.5 and tall > 20
+    return wmode_vertical or shape_vertical
 
 
 def detect_vertical_headings(content_lines, body_size, heading_delta,
@@ -1281,6 +1311,8 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                     ent["matched_page_index"] = j
                     ent["matched_heading"] = clean_text(ln["text"])
                     ent["similarity"] = 1.0
+                    ent["matched_rect"] = [ln["x0"], ln["y0"],
+                                           ln["x1"], ln["y1"]]
                     matched_headings.add((j, ent["matched_heading"]))
                     return True
         return False
@@ -1301,7 +1333,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             continue
 
         # 当該ページ近傍の見出しと照合（改ページ位置の揺れを許容）
-        best = None  # (ratio, page_index, heading_text, delta)
+        best = None  # (ratio, page_index, heading_text, delta, bbox)
         for delta in (0, 1, -1, 2, -2):
             j = idx + delta
             if not (0 <= j < len(pages)):
@@ -1309,7 +1341,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
             for hd in pages[j].headings:
                 r = match_ratio(title_n, normalize(hd["text"]))
                 if best is None or r > best[0]:
-                    best = (r, j, hd["text"], delta)
+                    best = (r, j, hd["text"], delta, hd.get("bbox"))
 
         # 近傍で一致が取れない場合は全ページから探索（大きなページずれの特定）
         if best is None or best[0] < fuzzy_threshold:
@@ -1318,7 +1350,7 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                 for hd in pg.headings:
                     r = match_ratio(title_n, normalize(hd["text"]))
                     if gbest is None or r > gbest[0]:
-                        gbest = (r, j, hd["text"], j - idx)
+                        gbest = (r, j, hd["text"], j - idx, hd.get("bbox"))
             if gbest and gbest[0] >= 0.97:
                 actual_nombre = pages[gbest[1]].nombre
                 if actual_nombre is None and main_offset is not None:
@@ -1334,6 +1366,8 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                 ent["matched_page_index"] = gbest[1]
                 ent["matched_heading"] = gbest[2]
                 ent["similarity"] = round(gbest[0], 3)
+                if gbest[4]:
+                    ent["matched_rect"] = gbest[4]
                 matched_headings.add((gbest[1], gbest[2]))
                 continue
 
@@ -1349,10 +1383,12 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
                        f"ページに見出しが見つかりません。"})
             continue
 
-        ratio, j, htext, delta = best
+        ratio, j, htext, delta, hbbox = best
         ent["matched_page_index"] = j
         ent["matched_heading"] = htext
         ent["similarity"] = round(ratio, 3)
+        if hbbox:
+            ent["matched_rect"] = hbbox
 
         if ratio >= 0.999:
             if abs(delta) >= 2:
@@ -1661,6 +1697,7 @@ def check_captions(cap_entries, raw, pages, nmap, main_offset,
         ent["matched_page_index"] = pidx
         ent["matched_heading"] = text
         ent["similarity"] = round(r, 3)
+        ent["matched_rect"] = bbox
         rects = [[bbox[0] - 8, bbox[1] - 8, bbox[2] + 8, bbox[3] + 8]]
 
         page_ok = idx is not None and abs(pidx - idx) <= 1
@@ -1708,13 +1745,23 @@ def chapter_level_size(toc_entries, pages):
     return best
 
 
-VERT_PART_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}部$")
+# 部・章番号の数字クラス（算用数字・全角数字・漢数字に加え、部番号でよく
+# 使われるローマ数字 Ⅰ〜Ⅹ（U+2160-2169）・ⅰ〜ⅹ（U+2170-2179）も含める。
+# ローマ数字が抜けていると「第Ⅰ部制度・政治から見た天皇制」のような版面で
+# 部見出しと認識できず、柱検査等で章と誤認されるバグがあった。
+_VERT_NUM_CLS = "0-9０-９一二三四五六七八九十百Ⅰ-Ⅹⅰ-ⅹ"
+VERT_PART_RE = re.compile(r"^第[" + _VERT_NUM_CLS + r"]{1,3}部$")
+# 「第N部」に続けて部タイトルが直結する版面（例「第Ⅰ部制度・政治から見た
+# 天皇制」）も部見出しと確実に判定するための前方一致（VERT_PART_REは完全
+# 一致のみのため、部タイトルが小さい級数で組まれている（章タイトルの
+# サブタイトル等の方が大きい）と部と認識できず、章と誤認されていた）。
+VERT_PART_PREFIX_RE = re.compile(r"^第[" + _VERT_NUM_CLS + r"]{1,3}部")
 # 目次ページ検出用の見出し語（部/編/章）。タイトル連結（例「第１章土俵の…」）も
 # 拾えるよう前方一致（$ なし）。VERT_PART_RE は他処理の挙動維持のため変更しない。
-VERT_TOC_HEAD_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[部編章]")
+VERT_TOC_HEAD_RE = re.compile(r"^第[" + _VERT_NUM_CLS + r"]{1,3}[部編章]")
 # 「第N章/編」見出し（部以外＝章・節構造）。柱＝章タイトルの版面で使う。
-VERT_CHAP_HEAD_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[編章]")
-_HEAD_PREFIX_RE = re.compile(r"^第[0-9０-９一二三四五六七八九十百]{1,3}[部編章]\s*")
+VERT_CHAP_HEAD_RE = re.compile(r"^第[" + _VERT_NUM_CLS + r"]{1,3}[編章]")
+_HEAD_PREFIX_RE = re.compile(r"^第[" + _VERT_NUM_CLS + r"]{1,3}[部編章]\s*")
 
 
 def is_chapter_head(title):
@@ -1762,8 +1809,8 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
         for c in cols:
             ct = clean_text(c["text"]).strip()
             cx = (c["x0"] + c["x1"]) / 2
-            if VERT_PART_RE.match(ct) or (c.get("vsize", c["size"]) >= 11.0
-                                          and "部" in ct):
+            if VERT_PART_RE.match(ct) or VERT_PART_PREFIX_RE.match(ct) \
+                    or (c.get("vsize", c["size"]) >= 11.0 and "部" in ct):
                 part_cols.append((cx, c))
             elif re.fullmatch(r"\d{1,4}", ct):
                 num_only.append((cx, int(ct), c))
@@ -1807,7 +1854,9 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
             title = clean_toc_title(title)
             if not title:
                 continue
-            is_part = bool(VERT_PART_RE.match(title)) or col["vsize"] >= 11.0
+            is_part = bool(VERT_PART_RE.match(title)) \
+                or bool(VERT_PART_PREFIX_RE.match(title)) \
+                or col["vsize"] >= 11.0
             entries.append({"title": title, "page": num,
                             "toc_page_index": pidx,
                             "level": 0 if is_part else 1,
@@ -1818,12 +1867,100 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
     return entries
 
 
-def extract_roles_vertical(raw, debug=False):
+def _merge_horizontal_runs(items, tol=2.0, gap_factor=0.6):
+    """同一ベースライン（y近接）にある断片を、間隔が狭ければ横組みの
+    1行として結合する。
+
+    縦組み本でも柱・ノンブルは下部帯で横組み配置のことが多く（例:
+    「第Ⅰ部　制度・政治から見た天皇制」を横に並べて書く）、pymupdf は
+    このような隣接語をあらかじめ1つのspanに結合して返すが、pdf.js は
+    単語ごとに別アイテムのまま返す。これをそのまま assemble_vertical
+    （縦の列アセンブル）に渡すと語ごとに別々の列として分離され、
+    本来1つの柱テキストが2つの断片として二重に柱チェックされてしまう
+    （実例: 「第Ⅰ部」と「制度・政治から見た天皇制」が別々に
+    HSR-2判定され、該当ページ数分だけ指摘が二重になった）。
+    ここで同一y・近接x の断片を先に結合してから列アセンブルに渡すことで、
+    抽出器の違いによる差を吸収する。真に縦積みの断片（yが大きく異なる）
+    はここでは変化せず、後続の assemble_vertical にそのまま委ねる。
+
+    ノンブル（ページ番号）の断片は柱と同じ行に並ぶことがあるが、これを
+    柱の語と結合すると数字が柱テキストに埋もれてノンブルとして
+    認識できなくなる（実例: 「第Ⅰ部 制度・政治から見た天皇制 12」に
+    結合され、末尾の12がノンブルとして分離抽出できなくなった）。
+    ノンブルらしい断片（parse_pageno が数値を返すもの）は行内結合の
+    対象から外し、常に単独の断片として残す。
+    """
+    if not items:
+        return []
+    key = lambda it: it.get("baseline", it["y0"])
+    ordered = sorted(items, key=key)
+    rows, cur, cur_y = [], [], None
+    for it in ordered:
+        if cur_y is None or abs(key(it) - cur_y) <= tol:
+            cur.append(it)
+            cur_y = key(it) if cur_y is None else cur_y
+        else:
+            rows.append(cur)
+            cur, cur_y = [it], key(it)
+    if cur:
+        rows.append(cur)
+
+    def _is_bare_num(it):
+        t = (it.get("text") or "").strip()
+        return bool(t) and parse_pageno(t) is not None
+
+    out = []
+    for row in rows:
+        nums = [it for it in row if _is_bare_num(it)]
+        row = [it for it in row if not _is_bare_num(it)]
+        out.extend(nums)
+        if len(row) <= 1:
+            out.extend(row)
+            continue
+        row.sort(key=lambda l: l["x0"])
+        runs, run = [], [row[0]]
+        for prev, it in zip(row, row[1:]):
+            gap = it["x0"] - prev["x1"]
+            if gap > max(3.0 * max(prev["size"], it["size"]), 20.0):
+                runs.append(run)
+                run = [it]
+            else:
+                run.append(it)
+        runs.append(run)
+        for run in runs:
+            if len(run) == 1:
+                out.append(run[0])
+                continue
+            text = run[0]["text"]
+            for prev, it in zip(run, run[1:]):
+                gap = it["x0"] - prev["x1"]
+                sep = " " if gap > gap_factor * max(prev["size"],
+                                                     it["size"]) else ""
+                text += sep + it["text"]
+            out.append({"text": text,
+                        "size": max(it["size"] for it in run),
+                        "x0": min(it["x0"] for it in run),
+                        "y0": min(it["y0"] for it in run),
+                        "x1": max(it["x1"] for it in run),
+                        "y1": max(it["y1"] for it in run)})
+    return out
+
+
+def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0):
     """縦組みページからノンブル・柱・部/章見出しを抽出。
 
     ノンブル: 下端の小級数の算用数字（左右どちらの隅でも可）。
     柱      : ノンブルと同じ下端帯にある、数字でない小級数テキスト。
     見出し  : 版面上部に右寄せで現れる大きめの縦連結テキスト（部・章扉）。
+
+    foot_pct: 下端帯とみなすy位置（トリム高に対する比率、既定0.90）。
+    pdf.js抽出はPDFのTrimBoxを取得できないため、トンボ付きPDFで
+    トリムが未設定（版面全体=trim）だと、この比率基準では柱・ノンブルが
+    版面より下に外れてしまうことがある。extract_roles_vertical_auto は
+    この値を段階的に下げて再試行する。
+    foot_top_pct: 下端帯の下側の境界（既定1.0=ページ最下端まで）。
+    帯を広げて再試行する際、印刷所の検版用スラグ（版面外の作業注記）まで
+    帯に含めてしまわないよう、re-try時のみ少し手前で区切るために使う。
     """
     pages = []
     sizes = Counter()
@@ -1854,9 +1991,11 @@ def extract_roles_vertical(raw, debug=False):
     # 地（下端帯）の柱候補数
     def _foot_hashira_hits(r, trim, th):
         fl = [l for l in r["lines"] if in_trim(l, trim)
-              and l["y0"] >= trim[1] + th * 0.90]
+              and trim[1] + th * foot_pct <= l["y0"]
+              <= trim[1] + th * foot_top_pct]
         cols = assemble_vertical([{"h": r["h"], "w": r["w"],
-                                   "lines": fl}])[0]["lines"]
+                                   "lines": _merge_horizontal_runs(fl)}]
+                                  )[0]["lines"]
         return sum(1 for c in cols if clean_text(c["text"])
                    and parse_pageno(clean_text(c["text"])) is None
                    and c["size"] <= body_size + 0.5)
@@ -1894,9 +2033,11 @@ def extract_roles_vertical(raw, debug=False):
         ty1, th = trim[3], trim[3] - trim[1]
         # 下端帯（縦組みノンブルは地）。柱は1〜数文字が縦に並ぶため列に組む。
         foot_lines = [l for l in r["lines"] if in_trim(l, trim)
-                      and l["y0"] >= trim[1] + th * 0.90]
+                      and trim[1] + th * foot_pct <= l["y0"]
+                      <= trim[1] + th * foot_top_pct]
         foot_cols = assemble_vertical([{"h": r["h"], "w": r["w"],
-                                        "lines": foot_lines}])[0]["lines"]
+                                        "lines": _merge_horizontal_runs(
+                                            foot_lines)}])[0]["lines"]
         for col in foot_cols:
             t = clean_text(col["text"])
             if not t:
@@ -1938,6 +2079,42 @@ def extract_roles_vertical(raw, debug=False):
     return pages, body_size
 
 
+def extract_roles_vertical_auto(raw, debug=False):
+    """extract_roles_vertical のノンブル抽出帯を自動調整して実行する。
+
+    pdf.js抽出はPDFのTrimBoxを読めない（ブラウザの「トンボ余白」欄を
+    ユーザーが手入力する必要があるが、多くの利用者には現実的ではない）。
+    トンボ付きPDFでトリム未設定だと、下端帯が版面の柱・ノンブルより下に
+    外れ、ノンブルが1件も検出できなくなることがある
+    （実例: 天地約13mmのトンボがあるPDFで、既定の90%基準では帯が
+    版面外に外れ、全ページでノンブル未検出になった）。
+    foot_pct=0.90（トリムが正しく取れている通常ケース）から始め、
+    ノンブル検出率が極端に低い場合のみ帯を段階的に広げて再試行し、
+    最も検出できた設定を採用する。通常ケースでは1回目（0.90）で
+    十分な検出率に達するため、挙動は変わらない。
+    """
+    best = None
+    for pct in (0.90, 0.85, 0.80, 0.75, 0.70, 0.65):
+        # 既定(0.90)以外への再試行時は、版面下端帯の探索を0.965までに区切り、
+        # 印刷所のスラグ（版面外の作業注記）が版面の外に付く典型的な位置
+        # （版面外に近いほぼ最下端）を帯に含めないようにする。
+        top_pct = 1.0 if pct >= 0.90 else 0.965
+        pages, body_size = extract_roles_vertical(raw, debug=False,
+                                                   foot_pct=pct,
+                                                   foot_top_pct=top_pct)
+        n = len(pages)
+        cov = (sum(1 for p in pages if p.nombre is not None) / n) if n else 0.0
+        if best is None or cov > best[0] + 0.02:
+            best = (cov, pages, body_size, pct)
+        if cov >= 0.5:
+            break
+    cov, pages, body_size, pct = best
+    if debug:
+        print(f"[vAUTO] foot_pct={pct} nombre_coverage={cov:.2f}",
+              file=sys.stderr)
+    return pages, body_size
+
+
 def find_toc_pages_vertical(raw, pages):
     """縦組み目次ページ検出: 『第N部/編/章』見出しがあり、章ノンブルが並ぶページ。
     見出しがタイトルと連結している版面（例「第１章土俵の…」）にも対応。"""
@@ -1949,8 +2126,18 @@ def find_toc_pages_vertical(raw, pages):
                                              if in_trim(l, trim)]}])[0]["lines"]
         parts = sum(1 for c in cols
                     if VERT_TOC_HEAD_RE.match(clean_text(c["text"]).strip()))
-        nums = sum(1 for c in cols
-                   if re.search(r"\d{1,4}\s*$", clean_text(c["text"])))
+        # 末尾が1〜4桁の数字であるだけでなく、その手前にタイトルらしい
+        # 文字列（2文字以上）が伴う列だけを目次の「章ノンブル」候補として
+        # 数える。図表の軸目盛りやデータ表（例: 1,10,20,30,40…のような
+        # 裸の数字だけの列が並ぶ）が章扉ページに載っていると、タイトルを
+        # 伴わない裸数字列が複数拾われ、章見出しと組み合わさって誤って
+        # 目次ページと判定されることがあった
+        # （実例: pdf.js経路でグラフ入りの章扉ページを目次ページと誤認）。
+        def _has_titled_num(c):
+            t = clean_text(c["text"])
+            m = re.search(r"\d{1,4}\s*$", t)
+            return bool(m) and len(t[:m.start()].strip()) >= 2
+        nums = sum(1 for c in cols if _has_titled_num(c))
         if parts >= 1 and nums >= 3:
             cand.append(pidx)
     return cand
@@ -1968,45 +2155,123 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
     matched = set()
     part_titles = {normalize(e["title"]) for e in toc_entries
                    if e.get("level") == 0}
-    # 文書が章・節構造（level0に『第N章/編』を含む）なら、章タイトルが複数列に割れた
-    # 続き行（接頭辞なし level0）も章見出しとして緩く照合する。部/章本では False。
-    doc_chapter_style = any(e.get("level") == 0 and is_chapter_head(e["title"])
-                            for e in toc_entries)
+    # 文書が章・節構造（『第N章/編』見出しを含む）なら、章タイトルが複数列に
+    # 割れた続き行も章見出しとして緩く照合する。判定はlevel（部/章と誤って
+    # 混同されうる vsize 由来のため不安定）ではなく、タイトル自体の
+    # パターンで行う（部/章本では第N章に一致する行が無いため False）。
+    doc_chapter_style = any(is_chapter_head(e["title"]) for e in toc_entries)
 
     def find_idx(n):
         return physical_index_for_nombre(n, nmap, main_offset, len(pages))
 
+    prev_page_hint = None
     for ent in toc_entries:
         title_n = normalize(ent["title"])
         lvl = ent.get("level", 1)
+        page_hint = ent.get("page") if ent.get("page") is not None \
+            else prev_page_hint
+        if ent.get("page") is not None:
+            prev_page_hint = ent["page"]
 
         if lvl == 0:
             # 部見出し: 全ページの見出しから一致を探す。
             # 「第N章…」形式（章・節構造で柱＝章タイトル）の版面では、扉の大見出しが
             # 複数列に分割・重複することがあるため、接頭辞を外して柱・連結見出しとも
             # 照合し、しきい値も緩める（部『第N部』は従来どおり完全一致のみ）。
-            chapter_style = doc_chapter_style or is_chapter_head(ent["title"])
+            # 「第N部」の文字パターンにも合致せず、記載ノンブルも持たない
+            # level0見出しは、大級数（vsize>=11.0）判定だけで部見出し扱いに
+            # なった章のサブタイトル・装飾見出しである可能性が高い
+            # （実例:「家門永続資金の下賜と華族令の改正を素材として」）。
+            # このような行に部扉との完全一致を要求すると、章扉ページに
+            # 実在するのに「部扉が見つからない」という誤検知になるため、
+            # 章見出しと同様に緩く照合する。
+            looks_like_part = bool(VERT_PART_RE.match(ent["title"].strip())) \
+                or bool(VERT_PART_PREFIX_RE.match(ent["title"].strip()))
+            chapter_style = doc_chapter_style or is_chapter_head(ent["title"]) \
+                or (not looks_like_part and ent.get("page") is None)
             tgt = normalize(strip_head_prefix(ent["title"])) if chapter_style \
                 else title_n
-            best = None
-            for p in pages:
-                cand_texts = [hd["text"] for hd in p.headings]
+            accept = fuzzy_threshold if chapter_style else 0.999
+
+            def _cand_texts(p):
+                cts = [(hd["text"], hd.get("bbox")) for hd in p.headings]
                 if chapter_style:
                     if p.headings:
-                        cand_texts.append("".join(h["text"] for h in p.headings))
+                        jb = None
+                        for h in p.headings:
+                            b = h.get("bbox")
+                            if not b:
+                                continue
+                            jb = b if jb is None else [
+                                min(jb[0], b[0]), min(jb[1], b[1]),
+                                max(jb[2], b[2]), max(jb[3], b[3])]
+                        cts.append(
+                            ("".join(h["text"] for h in p.headings), jb))
                     if p.hashira:
-                        cand_texts += p.hashira.split(" / ")
-                for ct in cand_texts:
-                    cb = normalize(strip_head_prefix(ct)) if chapter_style \
-                        else normalize(ct)
-                    r = match_ratio(tgt, cb)
-                    if best is None or r > best[0]:
-                        best = (r, p.index, ct)
-            accept = fuzzy_threshold if chapter_style else 0.999
+                        cts += [(part, p.hashira_bbox)
+                                for part in p.hashira.split(" / ")]
+                return cts
+
+            def _best_in(page_list):
+                b = None
+                for p in page_list:
+                    for ct, cbbox in _cand_texts(p):
+                        cb = normalize(strip_head_prefix(ct)) if chapter_style \
+                            else normalize(ct)
+                        r = match_ratio(tgt, cb)
+                        if b is None or r > b[0]:
+                            b = (r, p.index, ct, cbbox)
+                return b
+
+            def _best_raw(idxs):
+                b = None
+                for j in idxs:
+                    if not (0 <= j < len(raw)):
+                        continue
+                    trim = page_trim(raw[j])
+                    cols = assemble_vertical(
+                        [{"h": raw[j]["h"], "w": raw[j]["w"],
+                          "lines": [l for l in raw[j]["lines"]
+                                    if in_trim(l, trim)]}])[0]["lines"]
+                    for c in cols:
+                        ct = clean_text(c["text"])
+                        cb = normalize(strip_head_prefix(ct))
+                        r = match_ratio(tgt, cb)
+                        if b is None or r > b[0]:
+                            b = (r, j, ct,
+                                 [c["x0"], c["y0"], c["x1"], c["y1"]])
+                return b
+
+            best = None
+            # 章（chapter_style）は、まず目次の記載ノンブル近傍に絞って探す。
+            # デザインによっては章タイトルとサブタイトル行が同一ページに
+            # 並び、サブタイトルは「見出し」（版面上部の大きめ縦連結テキスト）
+            # の条件に合わず抽出されない、柱も部名のまま変わらない、
+            # ということがある。この場合サブタイトル行は本文中では
+            # 章扉の通常テキストとして存在するだけなので、生テキスト行も
+            # 候補に含めて記載ページ付近から探す（全ページ探索だと
+            # 無関係ページの見出しを拾ったり、真に対応箇所が無いと
+            # 誤判定したりしやすいため）。
+            if chapter_style and page_hint is not None:
+                aidx = find_idx(page_hint)
+                if aidx is not None:
+                    window = [j for j in (aidx, aidx + 1, aidx - 1, aidx + 2)
+                              if 0 <= j < len(pages)]
+                    for cand in (_best_in([pages[j] for j in window]),
+                                 _best_raw(window)):
+                        if cand and (best is None or cand[0] > best[0]):
+                            best = cand
+
+            if best is None or best[0] < accept:
+                gbest = _best_in(pages)
+                if gbest and (best is None or gbest[0] > best[0]):
+                    best = gbest
             if best and best[0] >= accept:
                 ent["matched_page_index"] = best[1]
                 ent["matched_heading"] = best[2]
                 ent["similarity"] = round(best[0], 3) if chapter_style else 1.0
+                if best[3]:
+                    ent["matched_rect"] = best[3]
                 matched.add((best[1], best[2]))
                 if chapter_style:
                     continue   # 章扉のページずれ検査は行わない（柱一致で十分）
@@ -2067,7 +2332,7 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
                     continue  # 部名の柱は章照合に使わない
                 r = match_ratio(title_n, pn)
                 if best is None or r > best[0]:
-                    best = (r, j, part)
+                    best = (r, j, part, pages[j].hashira_bbox)
 
         # 柱で見つからなければ生テキスト行で（章扉の大きめ字など）
         if best is None or best[0] < fuzzy_threshold:
@@ -2082,7 +2347,8 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
                 for c in cols:
                     r = match_ratio(title_n, normalize(clean_text(c["text"])))
                     if best is None or r > best[0]:
-                        best = (r, j, clean_text(c["text"]))
+                        best = (r, j, clean_text(c["text"]),
+                                [c["x0"], c["y0"], c["x1"], c["y1"]])
 
         if best is None:
             issues.append({
@@ -2092,11 +2358,13 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
                        f"ページに対応する見出し・柱が見つかりません。"})
             continue
 
-        r, j, text = best
+        r, j, text, tbbox = best
         # 章境界はノンブル基準の idx を正とする（柱の誤植で境界がぶれないように）
         ent["matched_page_index"] = idx
         ent["matched_heading"] = text
         ent["similarity"] = round(r, 3)
+        if tbbox:
+            ent["matched_rect"] = tbbox
         if r >= 0.999:
             matched.add((j, text))
         elif r >= fuzzy_threshold:
@@ -2122,10 +2390,17 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
     """
     issues = []
 
-    # 部の境界
+    # 部の境界。level0は「第N部」パターンに合致しない章サブタイトル等
+    # （vsize判定だけで部相当に分類された行）も含みうるため、そのまま
+    # 部境界に使うと「サブタイトルの版面以降がその部扱い」になり、
+    # 本来の部（第Ⅰ部・第Ⅱ部…）の柱を誤って部不一致（HSR-1）と
+    # 判定してしまう。ここでは「第N部」パターンに実際に合致する行だけを
+    # 部境界として使う。
     parts = []  # (page_index, 部名)
     for e in toc_entries:
-        if e.get("level") == 0 and "matched_page_index" in e:
+        if e.get("level") == 0 and "matched_page_index" in e \
+                and (VERT_PART_RE.match(e["title"].strip())
+                     or VERT_PART_PREFIX_RE.match(e["title"].strip())):
             parts.append((e["matched_page_index"],
                           e.get("matched_heading", e["title"])))
     parts.sort()
@@ -2140,14 +2415,16 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
             chap.append((e["matched_page_index"], e["title"]))
     chap.sort()
 
-    # 章・節構造（level0＝『第N章/編…』）で柱＝章タイトルの版面では、柱が章タイトル
-    # （接頭辞なし）に一致するなら正しい柱として扱い、節との不一致を誤検出しない。
-    # 部/章本は level0＝部のため下記は空となり、従来挙動を一切変えない。
-    doc_chapter_style = any(e.get("level") == 0 and is_chapter_head(e["title"])
-                            for e in toc_entries)
-    chap_head_titles = ([normalize(strip_head_prefix(e["title"]))
-                         for e in toc_entries if e.get("level") == 0]
-                        if doc_chapter_style else [])
+    # 章・節構造（『第N章/編…』見出しを含む）で柱＝章タイトルの版面では、柱が
+    # 章タイトル（接頭辞なし）に一致するなら正しい柱として扱い、章内の
+    # 節（一・二…）との不一致を誤検出しない。判定・対象ともlevel
+    # （部/章と混同されうる vsize 由来で不安定）ではなくタイトル自体の
+    # パターンで行う（例: 部・章構造の本で「第1章」がvsize都合でlevel1に
+    # なっても、章としての柱緩和が正しく効くようにする）。
+    # 部/章本のいずれでも「第N章/編」に一致する行が無ければ空のままで、
+    # 従来どおり何も緩和しない。
+    chap_head_titles = [normalize(strip_head_prefix(e["title"]))
+                        for e in toc_entries if is_chapter_head(e["title"])]
     chap_head_titles = [t for t in chap_head_titles if t]
 
     def current_part(idx):
@@ -2227,7 +2504,7 @@ def check_hashira_vertical(pages, toc_entries, fuzzy_threshold=0.60):
 
 
 def analyze_vertical(raw, toc_pages=None, fuzzy=0.60, debug=False):
-    pages, body_size = extract_roles_vertical(raw, debug=debug)
+    pages, body_size = extract_roles_vertical_auto(raw, debug=debug)
     toc_idx = list(toc_pages) if toc_pages else find_toc_pages_vertical(raw, pages)
     toc_entries = parse_toc_vertical(raw, toc_idx, debug=debug)
 
@@ -2385,7 +2662,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "070717";
+document.getElementById("buildId").textContent = "07101245";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -2803,19 +3080,41 @@ async function loadPDF(file) {
       if (!it.str || !it.str.trim()) continue;
       textLen += it.str.trim().length;
       const tr = it.transform;
-      const size = Math.hypot(tr[0], tr[1]) || it.height || 1;
+      // フォントサイズは変換行列のY軸成分（tr[2],tr[3]）から取る。
+      // ダーシ等の一部字形はX方向だけ意図的に広く（複数文字幅ぶん）
+      // 描かれるため、X軸成分（tr[0],tr[1]）で測ると実際の級数より
+      // 大きく誤判定される（実例: 全角ダーシが幅17pt・級数8.5ptの本文中で
+      // size=17と誤認識され、行の組み立てで前後の文字と分離し目次の
+      // 誤植判定が誤爆した）。
+      const size = Math.hypot(tr[2], tr[3]) || it.height || 1;
       // 縦組み判定（pdf.js実挙動）: 縦組みは width≈font・height≈font×文字数 で
       // 1ラン=1item として返る（transformのb成分は0なので使えない）。
       // → height が width を大きく上回り複数文字なら縦組みラン。
       const e = tr[4], itw = it.width || 0, ith = it.height || 0;
       const nchar = Array.from(it.str).length;
-      const vertical = nchar >= 2 && ith > itw * 1.5 && ith > size * 1.5;
+      // 縦組み中の装飾ダーシ（──等）は1文字runとしてtransformだけが
+      // 縦長（Y軸成分>>X軸成分）になる一方、it.width/it.heightは
+      // グリフ固有メトリクスのため両方ほぼ同じ値になり縦横判定に使えない
+      // （実例: transform=[7.65,0,0,17.01,...] なのに it.width===it.height
+      // ===7.65）。これを従来のnchar>=2条件だけで判定すると横組み扱いに
+      // 落ち、周囲の縦連結文字と1文字分の重なりを起こしてソート順が
+      // ずれ、「素材として」の間にダーシが誤って挟まる誤植を生んでいた。
+      // transform自体のY/X軸比でも縦長runを検出することで、
+      // 1文字のみのrunも正しく縦組みとして扱う。
+      const xScaleTr = Math.hypot(tr[0], tr[1]);
+      const yScaleTr = Math.hypot(tr[2], tr[3]);
+      const singleTallGlyph = nchar === 1 && xScaleTr > 0 &&
+                              yScaleTr > xScaleTr * 1.3;
+      const vertical = (nchar >= 2 && ith > itw * 1.5 && ith > size * 1.5) ||
+                       singleTallGlyph;
       if (vertical) vCount++; else hCount++;
       const yTopPDF = H - tr[5];   // ラン上端（上原点）
       if (vertical) {
         // str を1字ずつ縦に割る。1字の縦送り = ラン高 / 文字数。
+        // it.height は上記の理由で1文字runでは信頼できないため、
+        // その場合はtransform由来のsize（フォント級数相当）を使う。
         const chars = Array.from(it.str);
-        const adv = ith / chars.length;
+        const adv = chars.length >= 2 ? (ith / chars.length) : size;
         for (let ci = 0; ci < chars.length; ci++) {
           const cy = yTopPDF + ci * adv;
           items.push({ text: chars[ci], size: size,
@@ -2832,11 +3131,8 @@ async function loadPDF(file) {
     }
     const wmode = vCount > hCount ? 1 : 0;
     rawData.push({ h: H, w: vp.width, lines: items, wmode: wmode });
-    // テキストがほぼ無ければ OCR 対象（スキャン頁 or アウトライン化されたページ）
-    // ※以前は「画像貼込みページ」限定だったが、ノンブル等の文字がアウトライン化(パス化)
-    //   されているだけで埋め込みラスター画像を持たないページ（地色/イラストがベクター
-    //   描画のみ等）はここに引っかからず検出漏れになっていたため、テキスト量のみで判定。
-    if (textLen < OCR.TEXT_THRESHOLD)
+    // テキストがほぼ無く、ページに画像があれば OCR 対象（スキャン頁）
+    if (textLen < OCR.TEXT_THRESHOLD && await pageHasImage(page))
       scanPages.push(p);
     if (p % 10 === 0 || p === N) status(`テキスト抽出中… ${p} / ${N} ページ`, true);
   }
@@ -3027,8 +3323,10 @@ function gotoTocEntry(i) {
   if (!result) return;
   const e = result.toc_entries[i];
   if (!e) return;
-  if (e.matched_page_index != null) gotoPage(e.matched_page_index);
-  else if (e.page != null) jumpToNombre(String(e.page));
+  if (e.matched_page_index != null) {
+    viewRects = e.matched_rect ? [e.matched_rect] : [];
+    gotoPage(e.matched_page_index, true, false, true);
+  } else if (e.page != null) jumpToNombre(String(e.page));
 }
 
 // 「目次ページを表示」→ 検出された目次ページだけを別ウィンドウでプレビュー
@@ -3158,7 +3456,8 @@ function buildNavItems() {
     items.push({ type: "check", entryIndex: i,
       page_index: (e.matched_page_index != null) ? e.matched_page_index : null,
       nombre: e.page, title: e.title,
-      matched: e.matched_heading, similarity: e.similarity });
+      matched: e.matched_heading, similarity: e.similarity,
+      rects: e.matched_rect ? [e.matched_rect] : [] });
   });
   // エラー→警告→参考→要確認、同種内は該当ページ順
   items.sort((a, b) => {
@@ -3180,8 +3479,12 @@ function selectNav(k) {
   const el = $("nav" + k);
   if (el) {
     el.classList.add("sel");
-    // 指摘リスト内だけをスクロール（サマリーや左カラム全体は動かさない）
-    const box = $("issueList");
+    // 指摘リスト内だけをスクロール（サマリーや左カラム全体は動かさない）。
+    // 実際にスクロールするのは #issueList ではなく、それを包む
+    // .scrollarea（overflow-y:auto）側。#issueList自体はスクロールしない
+    // ため、以前は box.scrollTop を書いても効果が無く、選択項目が下に
+    // あると表示範囲外のまま残ってしまっていた。
+    const box = $("issueList").closest(".scrollarea") || $("issueList");
     const r = el.getBoundingClientRect(), br = box.getBoundingClientRect();
     if (r.top < br.top) box.scrollTop -= (br.top - r.top) + 6;
     else if (r.bottom > br.bottom) box.scrollTop += (r.bottom - br.bottom) + 6;
@@ -3189,11 +3492,13 @@ function selectNav(k) {
   if (n.type === "issue") {
     const iss = result.issues[n.issueIndex];
     viewRects = iss.rects || [];
-    gotoPage(iss.page_index, true);
+    gotoPage(iss.page_index, true, false, true);
   } else {
-    // 要確認: 該当ページへ移動（矩形ハイライトは持たないためページのみ）
-    if (n.page_index != null) gotoPage(n.page_index);
-    else if (n.nombre != null) jumpToNombre(String(n.nombre));
+    // 要確認: 該当見出し・柱の矩形があればハイライトしつつ該当ページへ移動
+    if (n.page_index != null) {
+      viewRects = n.rects || [];
+      gotoPage(n.page_index, true, false, true);
+    } else if (n.nombre != null) jumpToNombre(String(n.nombre));
   }
 }
 
@@ -3302,7 +3607,7 @@ async function renderPage(anchor) {
     (zoom > 1.01 ? ` ｜ ${Math.round(zoom * 100)}%` : "");
 }
 
-async function gotoPage(idx, keepRects, keepZoom) {
+async function gotoPage(idx, keepRects, keepZoom, focus) {
   if (!pdfDoc || !result) return;
   idx = Math.max(0, Math.min(result.pages.length - 1, idx));
   if (idx !== viewPage) curPageObj = null;
@@ -3314,6 +3619,47 @@ async function gotoPage(idx, keepRects, keepZoom) {
   viewPage = idx;
   markMapSelection(idx);
   await renderPage();
+  // 指摘/要確認をクリックした場合のみ、該当矩形が見やすい大きさで
+  // 画面中央に来るようズーム・スクロールする（単なるページ送りや
+  // 再描画では移動前の見た目を保つ）。
+  if (focus && !keepZoom) await focusOnRects(viewRects);
+}
+
+// 指摘・要確認の矩形群が、フィット表示では小さすぎて見づらい場合に
+// ズームインし、矩形の中心が画面中央に来るようスクロールする。
+// フィット表示でも十分な大きさがあればズームはせずそのまま。
+function nextFrame() {
+  return new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+}
+
+async function focusOnRects(rects) {
+  if (!rects || !rects.length) return;
+  const box = $("cvwrap");
+  if (!box.clientHeight) return;
+  const y0 = Math.min(...rects.map(r => r[1]));
+  const y1 = Math.max(...rects.map(r => r[3]));
+  const hPt = Math.max(4, y1 - y0);
+  const marginPt = 70;  // 矩形の上下に確保したい余白（版面pt単位）
+  const fitPx = (hPt + marginPt * 2) * fitScale;
+  if (fitPx < box.clientHeight * 0.33) {
+    const wantZoom = (box.clientHeight * 0.33) / Math.max(1, fitPx) * zoom;
+    zoom = Math.min(3.2, Math.max(1, wantZoom));
+    await renderPage();
+  }
+  // レンダリング直後はレイアウトの反映（cvwrapのスクロール可能範囲の更新）が
+  // 確定していない場合があるため、1フレーム待ってから実測する。
+  await nextFrame();
+  const cv = $("pgcanvas");
+  if (!cv.width) return;
+  const scale = Math.min(8, fitScale * zoom);
+  const x0 = Math.min(...rects.map(r => r[0])) * scale;
+  const x1 = Math.max(...rects.map(r => r[2])) * scale;
+  const sy0 = y0 * scale, sy1 = y1 * scale;
+  const maxLeft = Math.max(0, box.scrollWidth - box.clientWidth);
+  const maxTop = Math.max(0, box.scrollHeight - box.clientHeight);
+  const left = Math.min(maxLeft, Math.max(0, (x0 + x1) / 2 - box.clientWidth / 2));
+  const top = Math.min(maxTop, Math.max(0, (sy0 + sy1) / 2 - box.clientHeight / 2));
+  box.scrollTo({ left, top, behavior: "auto" });
 }
 
 function setupZoom() {
