@@ -255,6 +255,49 @@ a.lnk{color:var(--amber)}
 .fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
   background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
 .fbnote.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+/* ---------- 奥付け照合モーダル ---------- */
+.obcard{width:min(560px,92vw)}
+.obstep-hd{font-size:12px;color:var(--ink-dim);margin:0 0 10px;line-height:1.6}
+.obdrop{border:2px dashed var(--line);border-radius:10px;padding:26px 16px;text-align:center;
+  background:var(--panel2);cursor:pointer;transition:.15s;font-size:12.5px;color:var(--ink-dim)}
+.obdrop:hover,.obdrop.hot{border-color:var(--amber);background:var(--amber-bg)}
+.obcand{display:flex;flex-direction:column;gap:6px;max-height:170px;overflow-y:auto;margin-bottom:12px}
+.obcand button{text-align:left;font-family:var(--ui);font-size:12px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel2);color:var(--ink);cursor:pointer;transition:.12s}
+.obcand button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.obcand button.sel{border-color:var(--amber);background:var(--amber-bg);font-weight:700}
+.obcand .sc{color:var(--ink-faint);font-size:10.5px;margin-left:6px;font-weight:400}
+.obcand .sn{display:block;color:var(--ink-dim);font-size:10.5px;margin-top:2px;font-family:var(--mono);
+  font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.obnav{display:flex;align-items:center;gap:8px;margin:2px 0 10px;flex-wrap:wrap}
+.obnav input{width:56px;font-family:var(--mono);font-size:12px;padding:5px 6px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);text-align:center}
+.obnav button{font-size:12px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel2);color:var(--ink);cursor:pointer;transition:.12s}
+.obnav button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.obnav button:disabled{opacity:.4;cursor:not-allowed}
+.obnav .oblabel{font-size:11px;color:var(--ink-faint)}
+.obpreview{border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:280px;background:var(--stage);
+  display:flex;justify-content:center;padding:8px;margin-bottom:10px;position:relative}
+.obpreview canvas{max-width:100%;box-shadow:var(--shadow)}
+.obpreview .obload{color:var(--ink-faint);font-size:12px;padding:30px}
+.obactions2{display:flex;gap:9px;margin-top:6px}
+.obactions2 button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+.obactions2 .obback{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+.obactions2 .obconfirm{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .obactions2 .obconfirm{color:#1a1205}
+.obactions2 .obconfirm:hover{filter:brightness(1.06)}
+.obactions2 button:disabled{opacity:.5;cursor:not-allowed}
+.obbtn{display:inline-flex;align-items:center;gap:6px}
+.obbtn svg{width:14px;height:14px}
+@keyframes obPulse{
+  0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--amber) 60%, transparent)}
+  70%{box-shadow:0 0 0 8px color-mix(in srgb, var(--amber) 0%, transparent)}
+  100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent)}
+}
+.obbtn.glow{border-color:var(--amber);background:var(--amber-bg);color:var(--ink);
+  animation:obPulse 1.8s ease-out infinite}
+.obbtn.glow:hover{animation-play-state:paused}
 .chk .issfb{margin-left:auto;background:var(--panel2);border:1px solid var(--line);
   color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
   border-radius:6px;padding:2px 8px;line-height:1.4;transition:.12s;white-space:nowrap;flex:0 0 auto}
@@ -285,6 +328,10 @@ a.lnk{color:var(--amber)}
       <button id="btnReset" disabled>リセット</button>
       <button id="btnOpen" class="btn">PDFを選択</button>
       <input type="file" id="file" accept="application/pdf" class="hidden">
+      <button id="obOpen" class="btn obbtn" disabled title="本文PDFの奥付けに記載されたISBN・Cコードを、バーコード読取値・表紙印字と照合します">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+        <span>奥付け照合</span>
+      </button>
       <button class="fbbtn" id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>フィードバック</span>
@@ -405,6 +452,29 @@ a.lnk{color:var(--amber)}
   </div>
 </div>
 
+<!-- ============ 奥付け照合機能 ============ -->
+<div class="fbmodal" id="obModal">
+  <div class="fbcard obcard">
+    <h3>奥付け照合</h3>
+    <p class="fbsub">本文PDFを読み込み、奥付けページに記載されたISBN・Cコードを、現在開いている表紙PDFのバーコード読取値・印字と突き合わせます。単ページのPDFはそのまま使い、複数ページのPDFは奥付けページを自動検出します（PDFは外部に送信されません）。</p>
+    <div id="obBody"></div>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="obCancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 奥付けページのプレビュー(画面いっぱいのオーバーレイ・ポップアップ許可不要) ============ -->
+<div class="fbmodal" id="obPreviewModal">
+  <div class="fbcard" style="width:min(820px,94vw)">
+    <h3>奥付けページの照合プレビュー</h3>
+    <div id="obPreviewBody"></div>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="obPreviewClose" onclick="closeObPreview()">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    ISBN検版 — バーコード照合チェッカー
@@ -497,7 +567,9 @@ def extract_isbn_text(text):
     return res
 def extract_ccode_text(text):
     t=norm(text)
-    m=re.search(r"[Cc(\[©]\s*([0-9]{4})", t)
+    # "C"の文字のみを対象とする(©記号や括弧は対象外)。©2026のような発行年の誤検出を防ぐため、
+    # 直前が英数字でない・直後に5桁目の数字が続かないことも確認する。
+    m=re.search(r"(?<![A-Za-z0-9])[Cc]\s?([0-9]{4})(?!\d)", t)
     if m: return m.group(1)
     m=re.search(r"(?<![0-9¥￥])([0-9]{4})\s*[¥￥Ee]", t)
     if m: return m.group(1)
@@ -604,6 +676,49 @@ def cross_check_jan(jan_bc,ocr_text):
     return rep
 def run_check_jan(jan_bc,ocr_text):
     return json.dumps(cross_check_jan(jan_bc or None,ocr_text or ""),ensure_ascii=False)
+def cross_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
+    # 表紙バーコード↔表紙印字の照合(cross_check)に、本文PDFの奥付け記載を第三の情報源として追加する。
+    # 「バーコード↔奥付け」「表紙印字↔奥付け」の両方を突き合わせ、3点で一致するかを見る。
+    rep=cross_check(isbn_bc,dnc_bc,cover_text)
+    def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
+        rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
+                              "ruleId":rid,"expected":exp,"actual":act,"box":box})
+    isbn=rep.get("isbn"); dnc=rep.get("dnc")
+    ti=rep["text"]["isbn"]; tc=rep["text"]["ccode"]
+    ci=extract_isbn_text(colophon_text) if colophon_text else None
+    cc=extract_ccode_text(colophon_text) if colophon_text else None
+    if colophon_text:
+        if ci and ci.get("isbn13"):
+            if isbn:
+                same=(isbn["isbn13"]==ci["isbn13"]); d=("　"+diff_pos(isbn["isbn13"],ci["isbn13"])) if not same else ""
+                add(lbl("ISBN バーコード↔奥付け",same),same,"BC:%s ／ 奥付:%s%s%s"%(isbn["isbn13"],ci["isbn13"],"("+ci["note"]+")" if ci.get("note") else "",d),
+                    rid="ISBN-C1", exp=isbn["isbn13"], act=ci["isbn13"], box="isbn")
+            if ti and ti.get("isbn13"):
+                same2=(ti["isbn13"]==ci["isbn13"]); d2=("　"+diff_pos(ti["isbn13"],ci["isbn13"])) if not same2 else ""
+                add(lbl("ISBN 表紙印字↔奥付け",same2),same2,"表紙:%s ／ 奥付:%s%s"%(ti["isbn13"],ci["isbn13"],d2),
+                    rid="ISBN-C2", exp=ti["isbn13"], act=ci["isbn13"], box="isbn")
+        else:
+            add("奥付け ISBN の読取",False,"奥付けページからISBNを読み取れませんでした",level="WARN",
+                rid="ISBN-C3", exp="奥付けISBNの読取成功", act="読取失敗", box="isbn")
+        if cc is not None:
+            if dnc:
+                cs=(dnc["ccode"]==cc); d3=("　"+diff_pos(dnc["ccode"],cc)) if not cs else ""
+                add(lbl("Cコード バーコード↔奥付け",cs),cs,"BC:C%s ／ 奥付:C%s%s"%(dnc["ccode"],cc,d3),
+                    rid="ISBN-C4", exp=dnc["ccode"], act=cc, box="dnc")
+            if tc is not None:
+                cs2=(tc==cc); d4=("　"+diff_pos(tc,cc)) if not cs2 else ""
+                add(lbl("Cコード 表紙印字↔奥付け",cs2),cs2,"表紙:C%s ／ 奥付:C%s%s"%(tc,cc,d4),
+                    rid="ISBN-C5", exp=tc, act=cc, box="dnc")
+        else:
+            add("奥付け Cコード の読取",False,"奥付けページからCコードを読み取れませんでした",level="WARN",
+                rid="ISBN-C6", exp="奥付けCコードの読取成功", act="読取失敗", box="dnc")
+    rep["colophon"]={"isbn":ci,"ccode":cc}
+    ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
+    wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
+    rep["status"]="NG" if ng else ("WARN" if wn else "OK")
+    return rep
+def run_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
+    return json.dumps(cross_check_colophon(isbn_bc or None,dnc_bc or None,cover_text or "",colophon_text or ""),ensure_ascii=False)
 `;
 
 /* ---------- 状態 ---------- */
@@ -611,6 +726,10 @@ let pdfDoc=null, pyReady=null, pages=[], selected=-1, cancelFlag=false, ocrWorke
 let zoom=1, baseCssW=0, baseCssH=0;   // プレビューのズーム状態(1=フィット表示)
 let fbFileName="";   // フィードバック送信用（ファイル名の表示のみに使用）
 let fbIssues=[];     // フィードバック「誤検知?」用：直近renderResult()で構築された指摘一覧
+/* ---------- 奥付け照合の状態 ---------- */
+let obState={step:'file', doc:null, fileName:'', numPages:0, curPage:1,
+             candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+const OB_SCORE_MIN=3;   // このスコア以上を「奥付けらしいページ」の候補とする
 
 /* ---------- Pyodide 起動 ---------- */
 async function ensurePy(){
@@ -1331,6 +1450,16 @@ function renderResult(rec){
       html+=kv("Cコード内訳",dc?`${dc.target}／${dc.form}／内容${dc.content}`:"—");
       html+=kv("本体価格(バーコード)",`${d.price.toLocaleString()} 円（税抜）`);
     }
+    if(s.colophon){
+      const ci=s.colophon.isbn, cc=s.colophon.ccode;
+      const meta=s.colophonMeta||{};
+      html+=kv("奥付け記載 ISBN", ci&&ci.isbn13?ci.isbn13:(ci&&ci.error?"読取異常："+ci.error:"（読取不可）"));
+      html+=kv("奥付け記載 Cコード", cc!=null?("C"+cc):"（読取不可）");
+      if(meta.page) html+=kv("奥付け照合の元ページ", `${esc(meta.fileName||"")} P${meta.page}${meta.ocrUsed?"（OCR補完）":""}`);
+      if(s.colophonPreview) html+=`<div class="kv"><button class="btn obbtn glow" style="width:100%;justify-content:center;font-weight:700" onclick="showColophonPreview(${idx})">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        奥付けページを別ウィンドウで確認</button></div>`;
+    }
     // チェック項目
     s.items.forEach(it=>{
       const mk=it.ok?"✓":(it.level==="WARN"?"△":"✕");
@@ -1426,6 +1555,354 @@ async function recheckManualJan(idx){
   }
 }
 window.recheckManualJan=recheckManualJan;
+
+/* ============================================================
+   奥付け照合機能
+   本文PDFを読み込み、奥付けページのISBN・Cコード記載を
+   現在のバーコード読取値・表紙印字と3点照合する
+   ============================================================ */
+function scoreColophonText(text){
+  if(!text) return 0;
+  let s=0;
+  if(/ISBN[\s:]*97[89][\d\-‐ー－\s]{9,}/i.test(text)) s+=4;
+  else if(/97[89][\d\-‐ー－\s]{9,}/.test(text)) s+=2;
+  if(/C\s?[0-9]{4}/.test(text)) s+=2;
+  if(/発行所|発行者|発売元|印刷所|製本所|Printed in Japan/.test(text)) s+=2;
+  if(/定価/.test(text)) s+=1;
+  if(/著者|訳者|編集/.test(text)) s+=1;
+  return s;
+}
+async function obGetPageText(n){
+  if(obState.textCache[n]!=null) return obState.textCache[n];
+  const page=await obState.doc.getPage(n);
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ tc={items:[]}; }
+  const text=tc.items.map(it=>it.str||"").join(" ").replace(/\s+/g," ").trim();
+  obState.textCache[n]=text;
+  return text;
+}
+async function obScanAllPages(){
+  const n=obState.numPages;
+  const scored=[];
+  for(let p=1;p<=n;p++){
+    showBanner(true,`奥付けページを検索中… ${p}/${n}`, (p-1)/n*100);
+    const text=await obGetPageText(p);
+    const sc=scoreColophonText(text);
+    if(sc>0) scored.push({page:p, score:sc, snippet:text.slice(0,60)});
+  }
+  showBanner(false);
+  scored.sort((a,b)=>b.score-a.score);
+  obState.candidates=scored.filter(c=>c.score>=OB_SCORE_MIN).slice(0,8);
+  obState.scanned=true;
+}
+/* 奥付けページのプレビュー描画(モーダル内の小さいcanvas) */
+async function obRenderPreview(n){
+  const wrap=document.getElementById('obPrevWrap'); if(!wrap) return;
+  wrap.innerHTML='<div class="obload">読み込み中…</div>';
+  try{
+    const page=await obState.doc.getPage(n);
+    const vp0=page.getViewport({scale:1});
+    const scale=Math.min(1.6, 480/vp0.width);
+    const vp=page.getViewport({scale});
+    const cv=document.createElement('canvas');
+    cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+    await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    wrap.innerHTML=''; wrap.appendChild(cv);
+  }catch(e){ wrap.innerHTML='<div class="obload">プレビューを表示できません</div>'; }
+}
+function selectObPage(n){
+  n=Math.max(1,Math.min(obState.numPages,n));
+  obState.curPage=n;
+  renderOb();
+  obRenderPreview(n);
+}
+window.selectObPage=selectObPage;
+/* 奥付けページ確定→実テキスト抽出(不足時はOCR補完)→確認ステップへ */
+async function obConfirmPage(){
+  const n=obState.curPage;
+  showBanner(true,"奥付けページのテキストを抽出中…",30);
+  let text=await obGetPageText(n);
+  let ocrUsed=false;
+  obState.ocrWords=null;
+  if((text||"").replace(/\s/g,"").length<20){
+    // 実テキストがほぼ無い(アウトライン化・画像化されたページ)のでOCRで補完する
+    try{
+      const page=await obState.doc.getPage(n);
+      const vp0=page.getViewport({scale:1});
+      const scale=Math.min(3, 2200/vp0.width);
+      const vp=page.getViewport({scale});
+      const cv=document.createElement('canvas');
+      cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+      await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+      showBanner(true,"奥付けページをOCR中…（実テキストが読み取れないため）",60);
+      const w=await ensureOcr();
+      const {data}=await w.recognize(cv);
+      text=((text||"")+" "+(data.text||"")).trim();
+      ocrUsed=true;
+      const W=cv.width,H=cv.height;
+      obState.ocrWords=collectWords(data).map(wd=>{
+        const b=wd.bbox||{};
+        return {text:(wd.text||"").trim(),
+                x:(b.x0||0)/W, y:(b.y0||0)/H,
+                w:((b.x1||0)-(b.x0||0))/W, h:((b.y1||0)-(b.y0||0))/H};
+      });
+    }catch(e){ /* OCR失敗時は実テキストのみで続行 */ }
+  }
+  showBanner(false);
+  obState.text=text; obState.ocrUsed=ocrUsed; obState.step='review';
+  renderOb();
+}
+window.obConfirmPage=obConfirmPage;
+/* ---------- 奥付けプレビュー(別ウィンドウ)用: 読取位置の推定 ---------- */
+/* pdf.jsの実テキストを行単位にグルーピングし、ISBN/Cコードが載っている行のboxを探す */
+async function obPageTextLines(page, scale){
+  const vp=page.getViewport({scale});
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const items=[];
+  for(const it of tc.items){
+    if(!it.str || !it.str.trim()) continue;
+    const m=pdfjsLib.Util.transform(vp.transform,it.transform);
+    const x=m[4], w=(it.width||0)*scale, h=Math.abs(m[3])||10, y=m[5]-h; // yはベースラインなので上端側へおおまかに補正
+    items.push({str:it.str, x, y, w, h:h*1.3});
+  }
+  items.sort((a,b)=>a.y-b.y||a.x-b.x);
+  const lines=[]; let cur=null;
+  for(const it of items){
+    if(cur && Math.abs(it.y-cur.y0)<cur.h*0.7){
+      cur.text+=it.str;
+      cur.x1=Math.max(cur.x1, it.x+it.w); cur.y1=Math.max(cur.y1, it.y+it.h);
+      cur.x0=Math.min(cur.x0, it.x);
+    }else{
+      cur={text:it.str, x0:it.x, y0:it.y, x1:it.x+it.w, y1:it.y+it.h, h:it.h};
+      lines.push(cur);
+    }
+  }
+  return lines;
+}
+function obFindLineBox(lines, isbn13, ccode, W, H){
+  if(!lines||!lines.length) return null;
+  const isbnDigits=(isbn13||"").replace(/\D/g,"");
+  for(const ln of lines){
+    const t=ln.text||"";
+    const compact=t.replace(/[^0-9A-Za-z]/g,"");
+    const hasIsbn=isbnDigits && compact.includes(isbnDigits);
+    const hasC=ccode && new RegExp("C\\s?"+ccode).test(t.toUpperCase());
+    if(hasIsbn || hasC || /ISBN/i.test(t)) return {x:ln.x0/W, y:ln.y0/H, w:(ln.x1-ln.x0)/W, h:(ln.y1-ln.y0)/H};
+  }
+  return null;
+}
+/* OCR単語(0..1正規化済)から、ISBN・Cコードに一致する単語のboxをまとめる */
+function obFindOcrBox(words, isbn13, ccode){
+  if(!words||!words.length) return null;
+  const targets=[]; if(isbn13) targets.push(isbn13); if(ccode) targets.push("C"+ccode);
+  let x0=null,y0=null,x1=null,y1=null;
+  for(const wd of words){
+    const raw=(wd.text||"").replace(/\s/g,""); if(!raw) continue;
+    const dg=ocrFixDigits(raw).replace(/[^0-9A-Za-z]/g,"");
+    const hit=targets.some(t=>{ const tt=t.replace(/[^0-9A-Za-z]/g,""); return tt.length>=3 && dg.includes(tt); });
+    if(hit){
+      x0=(x0==null)?wd.x:Math.min(x0,wd.x); y0=(y0==null)?wd.y:Math.min(y0,wd.y);
+      x1=(x1==null)?wd.x+wd.w:Math.max(x1,wd.x+wd.w); y1=(y1==null)?wd.y+wd.h:Math.max(y1,wd.y+wd.h);
+    }
+  }
+  if(x0==null) return null;
+  return {x:x0, y:y0, w:x1-x0, h:y1-y0};
+}
+/* 奥付けページを画像化し、読取位置のboxを添えてプレビューデータを作る */
+async function buildColophonPreview(nrep){
+  try{
+    const page=await obState.doc.getPage(obState.curPage);
+    const vp0=page.getViewport({scale:1});
+    const scale=Math.min(2.2, 1500/vp0.width);
+    const vp=page.getViewport({scale});
+    const cv=document.createElement('canvas');
+    cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+    await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    const ci=nrep.colophon&&nrep.colophon.isbn, cc=nrep.colophon&&nrep.colophon.ccode;
+    let box=null;
+    if(obState.ocrUsed && obState.ocrWords && obState.ocrWords.length){
+      box=obFindOcrBox(obState.ocrWords, ci&&ci.isbn13, cc);
+    }else{
+      const lines=await obPageTextLines(page, scale);
+      box=obFindLineBox(lines, ci&&ci.isbn13, cc, cv.width, cv.height);
+    }
+    return {img:cv.toDataURL('image/png'), box, page:obState.curPage};
+  }catch(e){ return null; }
+}
+/* 奥付けページを画面いっぱいのオーバーレイで表示し、読取位置を囲み、照合OK/NGを大きく表示する。
+   window.open()のポップアップ許可設定はブラウザごと・サイトごとに必要で全員に周知するのが難しいため、
+   同一ページ内のオーバーレイ表示にして、許可設定なしで確実に動くようにする。 */
+function showColophonPreview(idx){
+  const rec=pages[selected]; if(!rec) return;
+  const s=rec.sets[idx]; if(!s||!s.colophonPreview) return;
+  const pv=s.colophonPreview;
+  const cItems=(s.items||[]).filter(it=>(it.ruleId||"").indexOf("ISBN-C")===0);
+  const ng=cItems.some(it=>!it.ok && it.level==="NG");
+  const warn=cItems.some(it=>!it.ok && it.level==="WARN");
+  const status=ng?"NG":(warn?"WARN":"OK");
+  const label={NG:"✕ 照合NG（不一致あり）",WARN:"△ 要確認（読取不可あり）",OK:"✓ 照合OK（一致）"}[status];
+  const color={NG:"var(--err)",WARN:"var(--warn)",OK:"var(--ok)"}[status];
+  const bg={NG:"var(--err-bg)",WARN:"var(--warn-bg)",OK:"var(--ok-bg)"}[status];
+  const boxHtml=pv.box?`<div style="position:absolute;left:${(pv.box.x*100).toFixed(3)}%;top:${(pv.box.y*100).toFixed(3)}%;
+    width:${(pv.box.w*100).toFixed(3)}%;height:${(pv.box.h*100).toFixed(3)}%;
+    border:3px solid ${color};border-radius:3px;pointer-events:none"></div>`:"";
+  const noteTxt=pv.box?"枠内が、ISBN・Cコードの記載として読み取った位置です（自動検出のため多少ずれる場合があります）。"
+    :"読み取り位置は自動検出できませんでした。画像全体をご確認ください。";
+  const itemsHtml=cItems.map(it=>`<div class="chk ${it.ok?'OK':it.level}"><span class="mark">${it.ok?'✓':(it.level==='WARN'?'△':'✕')}</span>
+    <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span></div>`).join("");
+  document.getElementById('obPreviewBody').innerHTML=`
+    <div style="position:sticky;top:-1px;z-index:5;font-size:20px;font-weight:800;color:${color};background:${bg};
+      border:2px solid ${color};border-radius:10px;padding:14px 18px;text-align:center;margin-bottom:16px;
+      box-shadow:0 4px 10px rgba(0,0,0,.08)">${label}</div>
+    <div style="position:relative;display:inline-block;border:1px solid var(--line);line-height:0;max-width:100%">
+      <img src="${pv.img}" style="max-width:100%;display:block">
+      ${boxHtml}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12px;margin:10px 0 14px">奥付け P${pv.page}／${noteTxt}</p>
+    <div class="cards" style="padding:0">${itemsHtml}</div>`;
+  document.getElementById('obPreviewModal').classList.add('show');
+}
+window.showColophonPreview=showColophonPreview;
+function closeObPreview(){ document.getElementById('obPreviewModal').classList.remove('show'); }
+window.closeObPreview=closeObPreview;
+/* 実際の照合を実行し、現在ページの書籍バーコード組にマージする */
+async function applyColophon(){
+  const rec=pages[selected];
+  const sets=(rec&&rec.sets)?rec.sets:[];
+  const bookIdx=sets.findIndex(s=>!s.isJan);
+  if(!rec || bookIdx<0){
+    alert("先に表紙PDFを読み込み、ISBN・日本図書コードのバーコードを検出したページを選択してください。");
+    return;
+  }
+  const ta=document.getElementById('obText');
+  const colophonText=ta?ta.value:obState.text;
+  const old=sets[bookIdx];
+  const btn=document.getElementById('obApply');
+  if(btn){ btn.disabled=true; btn.textContent="照合中…"; }
+  try{
+    const py=await ensurePy(); const rc=py.globals.get('run_check_colophon');
+    const isbnBc=old.isbn?old.isbn.raw:"";
+    const dncBc =old.dnc ?old.dnc.raw :"";
+    const coverTxt=old.ocrText||"";
+    const nrep=JSON.parse(rc(isbnBc,dncBc,coverTxt,colophonText)); rc.destroy?.();
+    nrep.boxes=old.boxes; nrep.ocrText=coverTxt; nrep.manual=old.manual;
+    nrep.colophonMeta={page:obState.curPage, fileName:obState.fileName, ocrUsed:obState.ocrUsed};
+    nrep.colophonPreview=await buildColophonPreview(nrep);
+    rec.sets[bookIdx]=nrep;
+    rec.status=rollup(rec.sets);
+    renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
+    closeObModal();
+    if(nrep.colophonPreview) showColophonPreview(bookIdx);
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="この内容で照合する"; }
+    alert("照合中にエラーが発生しました。もう一度お試しください。");
+  }
+}
+window.applyColophon=applyColophon;
+/* 本文PDFの読込エントリポイント */
+async function loadColophonPdf(file){
+  if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
+  obState={step:'scanning', doc:null, fileName:file.name||"", numPages:0, curPage:1,
+           candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+  renderOb();
+  const buf=await file.arrayBuffer();
+  const doc=await pdfjsLib.getDocument({data:buf,
+    cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+  obState.doc=doc; obState.numPages=doc.numPages;
+  if(doc.numPages<=1){
+    // 単ページPDFはページ検出をスキップしてそのまま使う
+    obState.curPage=1;
+    await obConfirmPage();
+    return;
+  }
+  obState.step='scanning'; renderOb();
+  await obScanAllPages();
+  obState.curPage=(obState.candidates[0]&&obState.candidates[0].page)||obState.numPages;
+  obState.step='choose-page';
+  renderOb();
+  obRenderPreview(obState.curPage);
+}
+/* ---------- モーダルの開閉・描画 ---------- */
+function openObModal(){
+  document.getElementById('obOpen').classList.remove('glow');
+  obState={step:'file', doc:null, fileName:'', numPages:0, curPage:1,
+           candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+  document.getElementById('obModal').classList.add('show');
+  renderOb();
+}
+window.openObModal=openObModal;
+function closeObModal(){
+  document.getElementById('obModal').classList.remove('show');
+}
+window.closeObModal=closeObModal;
+function renderOb(){
+  const body=document.getElementById('obBody'); if(!body) return;
+  if(obState.step==='file'){
+    body.innerHTML=`
+      <div class="obdrop" id="obDrop">本文PDFをドラッグ＆ドロップ<br>またはクリックして選択</div>
+      <input type="file" id="obFile" accept="application/pdf" class="hidden">`;
+    const dz=document.getElementById('obDrop'), fi=document.getElementById('obFile');
+    dz.onclick=()=>fi.click();
+    fi.onchange=e=>{ if(e.target.files[0]) loadColophonPdf(e.target.files[0]); };
+    ;['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+    ;['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+    dz.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadColophonPdf(f); });
+    return;
+  }
+  if(obState.step==='scanning'){
+    body.innerHTML=`<p class="obstep-hd">「${esc(obState.fileName)}」を解析しています…（ページ数が多いPDFは少し時間がかかります）</p>`;
+    return;
+  }
+  if(obState.step==='choose-page'){
+    let cand="";
+    if(obState.candidates.length){
+      cand=`<div class="obcand">`+obState.candidates.map(c=>
+        `<button class="${c.page===obState.curPage?'sel':''}" onclick="selectObPage(${c.page})">P${c.page}<span class="sc">スコア${c.score}</span><span class="sn">${esc(c.snippet)}</span></button>`
+      ).join("")+`</div>`;
+    }else{
+      cand=`<p class="obstep-hd">自動検出できませんでした。奥付けは巻末付近にあることが多いので、下のページ送りで探してください。</p>`;
+    }
+    body.innerHTML=`
+      <p class="obstep-hd">「${esc(obState.fileName)}」（全${obState.numPages}ページ）${obState.candidates.length?"から、奥付けらしいページの候補です。クリックして選ぶか、下のページ送りで別のページも確認できます。":""}</p>
+      ${cand}
+      <div class="obnav">
+        <button onclick="selectObPage(obState.curPage-1)" ${obState.curPage<=1?'disabled':''}>◂ 前へ</button>
+        <span class="oblabel">ページ</span>
+        <input type="number" id="obPageNum" min="1" max="${obState.numPages}" value="${obState.curPage}">
+        <span class="oblabel">/ ${obState.numPages}</span>
+        <button onclick="selectObPage(obState.curPage+1)" ${obState.curPage>=obState.numPages?'disabled':''}>次へ ▸</button>
+      </div>
+      <div class="obpreview" id="obPrevWrap"><div class="obload">読み込み中…</div></div>
+      <div class="obactions2">
+        <button type="button" class="obback" onclick="obState.step='file';renderOb();">戻る</button>
+        <button type="button" class="obconfirm" onclick="obConfirmPage()">このページ(P${obState.curPage})を奥付けとして使う</button>
+      </div>`;
+    const pn=document.getElementById('obPageNum');
+    if(pn) pn.onchange=()=>{ const v=parseInt(pn.value,10); if(!isNaN(v)) selectObPage(v); };
+    return;
+  }
+  if(obState.step==='review'){
+    const sets=(pages[selected]&&pages[selected].sets)?pages[selected].sets:[];
+    const bookIdx=sets.findIndex(s=>!s.isJan);
+    const noBook=bookIdx<0?`<div class="fbnote" style="display:block">現在、照合先となる表紙PDFのISBN・日本図書コードのバーコードが選択されていません。先に表紙PDFを読み込んでから適用してください。</div>`:"";
+    body.innerHTML=`
+      <p class="obstep-hd">P${obState.curPage}${obState.ocrUsed?"（実テキストが読み取れなかったためOCRで補完しました。誤読があれば下の内容を直接修正できます）":""}から抽出した内容です。ISBN・Cコードの記載が含まれていることを確認し、必要なら修正してから照合してください。</p>
+      <div class="fbfield"><textarea id="obText" style="min-height:110px">${esc(obState.text)}</textarea></div>
+      ${noBook}
+      <div class="obactions2">
+        <button type="button" class="obback" onclick="obState.step='choose-page';renderOb();obRenderPreview(obState.curPage);">戻る</button>
+        <button type="button" class="obconfirm" id="obApply" onclick="applyColophon()" ${bookIdx<0?'disabled':''}>この内容で照合する</button>
+      </div>`;
+    return;
+  }
+}
+document.getElementById('obCancel').addEventListener('click', closeObModal);
+document.getElementById('obModal').addEventListener('click', e=>{ if(e.target.id==='obModal') closeObModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && document.getElementById('obModal').classList.contains('show')) closeObModal(); });
+document.getElementById('obPreviewModal').addEventListener('click', e=>{ if(e.target.id==='obPreviewModal') closeObPreview(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && document.getElementById('obPreviewModal').classList.contains('show')) closeObPreview(); });
+document.getElementById('obOpen').addEventListener('click', openObModal);
+
+
 /* 既刊・再販の照合用に、ISBNから外部サイトを別タブで開くリンク群 */
 function extLinks(isbn){
   const i13=(isbn.isbn13||isbn.raw||"").replace(/[^0-9Xx]/g,"");
@@ -1610,6 +2087,8 @@ function showBanner(show,text,pct){
 async function loadFile(file){
   if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
   $("#btnReset").disabled=false;
+  $("#obOpen").disabled=false;
+  $("#obOpen").classList.add('glow');
   fbFileName=file.name||"";
   const buf=await file.arrayBuffer();
   pdfDoc=await pdfjsLib.getDocument({data:buf,
@@ -1625,7 +2104,7 @@ function resetAll(){
   $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
   $("#tiles").innerHTML='<div class="empty-msg" style="padding:6px 0">—</div>';
   $("#result").innerHTML='<div class="empty-msg">—</div>';
-  $("#file").value=""; $("#btnReset").disabled=true; showBanner(false);
+  $("#file").value=""; $("#btnReset").disabled=true; $("#obOpen").disabled=true; $("#obOpen").classList.remove('glow'); showBanner(false);
 }
 
 /* ---------- イベント ---------- */
