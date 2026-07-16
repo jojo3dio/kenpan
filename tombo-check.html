@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>トンボ計測 — トリムサイズ自動検出</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+/* ---------- light (default 紙色 / トンボ=シアン系) ---------- */
+:root{
+  --bg:#eaf7f9; --panel:#ffffff; --panel2:#e3f2f4; --line:#ddd5c4;
+  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
+  --amber:#0891b2; --amber-bg:#e1f3f7;
+  --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#e7f5f7; --shadow:0 1px 4px rgba(60,45,20,.10);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+/* ---------- dark (下版チェッカー系) ---------- */
+[data-theme="dark"]{
+  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#22b8d8; --amber-bg:#123039;
+  --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+     font-size:14px;transition:background .2s,color .2s}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+.mk{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  background:none;border:none;color:var(--amber)}
+.brand b{font-weight:700;font-size:16px;letter-spacing:.02em}
+.brand span{color:var(--ink-faint);font-size:12px}
+.sp{flex:1}
+.tools{display:flex;align-items:center;gap:8px}
+button,.btn{font-family:var(--ui);font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:7px;padding:7px 12px;transition:.15s}
+button:hover,.btn:hover{border-color:var(--amber);background:var(--amber-bg)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.icobtn{padding:7px 10px}
+.opt{display:flex;align-items:center;gap:6px;color:var(--ink-dim);font-size:12px}
+
+/* ---------- body ---------- */
+.main{flex:1;display:flex;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0}
+.left{flex:0 0 224px;border-right:1px solid var(--line);background:var(--panel);overflow:auto}
+.center{flex:1;background:var(--stage);position:relative;display:flex;flex-direction:column;overflow:hidden}
+.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);overflow:auto}
+.colhd{height:34px;line-height:34px;padding:0 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--panel);z-index:3;letter-spacing:.04em}
+.colhd.sub{border-top:1px solid var(--line)}
+
+/* ---------- page list ---------- */
+.plist{overflow:auto;flex:1}
+.prow{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid var(--line);
+  cursor:pointer;font-size:13px}
+.prow:hover{background:var(--panel2)}
+.prow.sel{background:var(--amber-bg)}
+.pno{font-family:var(--mono);color:var(--ink-dim);min-width:34px}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--ink-faint)}
+.dot.ok{background:var(--ok)}
+.prow .lbl{flex:1;color:var(--ink-dim)}
+.empty-msg{padding:24px 16px;color:var(--ink-faint);text-align:center;font-size:13px}
+
+/* ---------- drop / empty ---------- */
+.drop{margin:auto;max-width:520px;text-align:center;padding:40px}
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);transition:.18s;cursor:pointer}
+.dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
+.dropzone h2{margin:.4em 0 .2em;font-size:18px}
+.dropzone p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dropmk{width:56px;height:56px;margin:0 auto 14px;border-radius:8px;background:var(--amber-bg);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--amber);opacity:.9}
+.dropmk svg{width:30px;height:30px}
+
+/* ---------- canvas viewer ---------- */
+.canvaswrap{flex:1;position:relative;overflow:auto;cursor:grab}
+.canvaswrap.grabbing{cursor:grabbing}
+.cw-scroll{min-width:100%;min-height:100%;padding:36px 30px 110px;box-sizing:border-box;
+  display:flex;align-items:flex-start;justify-content:flex-start}
+.viewer{position:relative;flex-shrink:0;overflow:visible}
+.viewer.hidden{display:none}
+#pdfC{display:block;box-shadow:var(--shadow);background:#fff}
+#ovC{position:absolute;left:0;top:0;pointer-events:none}
+#ixC{position:absolute;left:0;top:0;cursor:default}
+.zoomctl{position:absolute;right:14px;bottom:12px;z-index:5;display:flex;align-items:center;gap:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:4px 6px;
+  box-shadow:var(--shadow)}
+.zoomctl.hidden{display:none}
+.zoomctl button{font-size:14px;line-height:1;min-width:30px;height:28px;padding:0 6px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.zoomctl button#zFit{font-size:11px;min-width:auto;padding:0 9px;font-family:var(--ui)}
+.zoomctl button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:42px;text-align:center}
+.zoomctl .zsep{width:1px;align-self:stretch;background:var(--line);margin:3px 1px}
+.zoomctl #dimToggleBtn.off{color:var(--ink-faint);border-color:var(--line);background:var(--panel2)}
+.zoomctl #dimToggleBtn.on{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
+.zoomctl #tomboToggleBtn.off{color:var(--ink-faint);border-color:var(--line);background:var(--panel2)}
+.zoomctl #tomboToggleBtn.on{color:#e05020;border-color:#e05020;background:rgba(224,80,32,.12)}
+
+/* ---------- 下部の凡例・ステータスバー ---------- */
+.vbar{display:none;align-items:center;gap:14px;color:var(--ink-dim);font-size:11px;flex-wrap:wrap;
+  flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:7px 14px}
+.vbar.show{display:flex}
+.vbar .li{display:flex;align-items:center;gap:5px}
+.vbar .ll{width:14px;height:2px;border-radius:1px;flex-shrink:0}
+.vbar .sep{width:1px;align-self:stretch;background:var(--line)}
+.vbar .hint{color:var(--ink-faint)}
+.vbar .grow{flex:1}
+
+/* ---------- 右カラム: 設定 ---------- */
+.rsec{padding:12px 13px 14px}
+.rfld{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}
+.rfld label{font-size:11px;color:var(--ink-dim);font-weight:500}
+.rfr{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+select.rin,input.rin{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel2);color:var(--ink);font-size:12px;font-family:var(--mono);appearance:none}
+select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);background:var(--panel)}
+.rchk{margin-top:2px;padding:8px 9px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  display:flex;align-items:flex-start;gap:8px}
+.rchk input{margin-top:2px;cursor:pointer;width:14px;height:14px;flex-shrink:0}
+.rchk label{font-size:11.5px;color:var(--ink-dim);cursor:pointer;line-height:1.5}
+.rchk label small{display:block;font-size:10px;color:var(--ink-faint);margin-top:1px}
+.btn-primary{width:100%;justify-content:center;display:flex;align-items:center;gap:6px;
+  border-color:var(--amber);background:var(--amber);color:#fff;font-weight:700;margin-top:11px}
+.btn-primary:hover{filter:brightness(1.06);border-color:var(--amber);background:var(--amber)}
+[data-theme="dark"] .btn-primary{color:#062a33}
+
+/* ---------- 右カラム: 計測結果 ---------- */
+.rl{display:flex;flex-direction:column;gap:3px}
+.ri{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:7px;cursor:pointer;
+  border:1px solid transparent;transition:all .1s}
+.ri:hover{background:var(--panel2)}
+.ri.act{background:var(--amber-bg);border-color:color-mix(in srgb, var(--amber) 30%, transparent)}
+.rdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.rlbl{font-size:11.5px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.rval{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;min-width:60px;text-align:right;flex-shrink:0;
+  font-family:var(--mono)}
+.runit{font-size:10px;color:var(--ink-faint);margin-left:2px}
+.secttl{font-size:10px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;padding:6px 2px 4px}
+.secttlb{border-top:1px solid var(--line);margin-top:6px}
+.rrow2{margin-top:9px;display:flex;gap:6px;flex-wrap:wrap}
+.rrow2 button{font-size:11px;padding:6px 10px;flex:1;min-width:80px}
+.al{padding:9px 10px;border-radius:8px;font-size:11.5px;border:1px solid;line-height:1.6}
+.ali{background:var(--amber-bg);color:var(--amber);border-color:color-mix(in srgb, var(--amber) 35%, transparent)}
+.alw{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb, var(--warn) 35%, transparent)}
+
+/* ---------- 右カラム: 検出情報 ---------- */
+
+/* ---------- ページ移動バー ---------- */
+.pgbar{display:none;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);flex:0 0 auto;font-size:12px}
+.pgbar.show{display:flex}
+.pgbar button{min-width:30px;height:28px;padding:0 8px;font-size:12px}
+.pgbar button:disabled{opacity:.35;cursor:not-allowed}
+.pgbar input{width:52px;text-align:center;padding:5px 4px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel2);color:var(--ink);font-family:var(--mono);font-size:12px}
+.pgbar input:focus{outline:none;border-color:var(--amber)}
+.pgbar #pgTotal{color:var(--ink-dim);font-family:var(--mono)}
+.pgbar .sp{flex:1}
+.pgbar #pgProgress{color:var(--ink-faint);font-size:11px}
+.hidden{display:none!important}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mk" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
+      </span>
+      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-07-15</small></span>
+    </div>
+    <div class="sp"></div>
+    <div class="tools">
+      <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
+      <button id="btnReset" disabled>リセット</button>
+      <button id="btnOpen" class="btn">PDFを選択</button>
+      <input type="file" id="file" accept="application/pdf" class="hidden">
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- 左: ページ一覧 -->
+    <div class="col left">
+      <div class="colhd">ページ</div>
+      <div class="plist" id="plist">
+        <div class="empty-msg">PDF未読込</div>
+      </div>
+    </div>
+
+    <!-- 中央: プレビュー -->
+    <div class="col center">
+      <div class="pgbar" id="pgbar">
+        <button id="pgPrev" title="前のページ">◀</button>
+        <input type="number" id="pgInput" min="1" value="1">
+        <span id="pgTotal">/ 1</span>
+        <button id="pgNext" title="次のページ">▶</button>
+        <span class="sp"></span>
+        <span id="pgProgress" class="hint"></span>
+      </div>
+      <div class="canvaswrap" id="canvaswrap">
+        <div class="cw-scroll" id="cwScroll">
+          <div class="drop" id="drop">
+            <div class="dropzone" id="dropzone">
+              <div class="dropmk" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
+              </div>
+              <h2>PDFをドラッグ＆ドロップ</h2>
+              <p>またはクリックして選択（このPDFは外部に送信されません）</p>
+              <p style="margin-top:14px;color:var(--ink-faint)">トンボ付きの表紙・カバー展開図を読み込むと、トンボ線を自動検出して<br>各種寸法（天地・左右・折り位置）を計測します。</p>
+            </div>
+          </div>
+          <div class="viewer hidden" id="viewer">
+            <canvas id="pdfC"></canvas>
+            <canvas id="ovC"></canvas>
+            <canvas id="ixC"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="zoomctl hidden" id="zoomctl">
+        <button id="zOut" title="縮小">−</button>
+        <span id="zoomhint">100%</span>
+        <button id="zIn" title="拡大">＋</button>
+        <button id="zFit" title="全体表示">全体</button>
+        <span class="zsep"></span>
+        <button id="dimToggleBtn" title="寸法の表示/非表示"></button>
+        <button id="tomboToggleBtn" title="検出トンボ線の表示/非表示"></button>
+      </div>
+      <div class="vbar" id="vbar">
+        <span class="li"><span class="ll" style="background:#e05020"></span>検出トンボ線</span>
+        <span class="li"><span class="ll" style="background:#1a4fa0"></span>水平寸法</span>
+        <span class="li"><span class="ll" style="background:#0a7040"></span>垂直寸法</span>
+        <span class="hint">● ハンドルをドラッグして微調整・ホイールでズーム・ドラッグでパン</span>
+        <span class="grow"></span>
+        <span id="sbpos" class="hint">—</span>
+        <span class="sep"></span>
+        <span id="sbpg" class="hint">—</span>
+        <span class="sep"></span>
+        <span id="sbdet" class="hint">—</span>
+      </div>
+    </div>
+
+    <!-- 右: 設定・結果 -->
+    <div class="col right">
+      <div class="colhd">検出設定</div>
+      <div class="rsec">
+        <div class="rfr">
+          <div class="rfld"><label>表示単位</label>
+            <select id="unitSel" class="rin" onchange="refreshDisp()"><option value="mm">mm</option><option value="pt">pt</option></select>
+          </div>
+          <div class="rfld"><label>最小線長 (mm)</label>
+            <input type="number" id="minLen" class="rin" value="2" min="0.5" max="20" step="0.5">
+          </div>
+        </div>
+        <div class="rfr">
+          <div class="rfld"><label>最大線幅 (pt)</label>
+            <input type="number" id="maxLW" class="rin" value="1.0" min="0.05" max="3" step="0.05">
+          </div>
+          <div class="rfld"><label>クラスタ許容 (mm)</label>
+            <input type="number" id="clTol" class="rin" value="1.0" min="0.2" max="5" step="0.1">
+          </div>
+        </div>
+        <div class="rchk">
+          <input type="checkbox" id="cbIgnoreCenter">
+          <label for="cbIgnoreCenter">左右のセンタートンボを無視する<small>扉など背のない単ページ向け</small></label>
+        </div>
+        <button class="btn-primary" id="abtn" onclick="analyze()" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          設定を反映して再検出
+        </button>
+        <div style="font-size:10.5px;color:var(--ink-faint);margin-top:6px;line-height:1.6">ページを開くと自動でトンボを検出します。設定を変えた場合はこのボタンで再検出してください。</div>
+      </div>
+
+      <div class="colhd sub" id="resHd" style="display:none">計測結果</div>
+      <div class="rsec" id="resSec" style="display:none">
+        <div id="resList" class="rl"></div>
+        <div class="rrow2">
+          <button onclick="exportCSV()">CSV出力</button>
+          <button id="togBtn" onclick="toggleAll()">全非表示</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// PDF.js setup with CMap support for CJK fonts
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const CMAP_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/';
+const STDDATA_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/';
+
+const $=s=>document.querySelector(s);
+const PT2MM = 25.4/72, MM2PT = 72/25.4;
+const ZMIN = 0.2, ZMAX = 8;
+
+let pdfDoc=null, curPg=1, usc=1, bsc=1;
+let pgRes={}, actIdx=-1, showAll=true, showTombo=true, drag=null;
+
+/* ---------- テーマ ---------- */
+$("#btnTheme").onclick=()=>{
+  const r=document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+};
+
+/* ---------- PDF読み込み ---------- */
+async function loadPDF(file){
+  $("#cbIgnoreCenter").checked=false;
+  try{
+    const buf = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(buf),
+      cMapUrl: CMAP_URL, cMapPacked: true,
+      standardFontDataUrl: STDDATA_URL,
+    }).promise;
+    pgRes={}; curPg=1; usc=1; actIdx=-1;
+    $("#drop").classList.add('hidden');
+    $("#viewer").classList.remove('hidden');
+    $("#zoomctl").classList.remove('hidden');
+    $("#vbar").classList.add('show');
+    $("#abtn").disabled=false;
+    $("#btnReset").disabled=false;
+
+    const multi = pdfDoc.numPages>1;
+    $(".left").classList.toggle('hidden', !multi);
+    $("#pgbar").classList.toggle('show', multi);
+    $("#pgTotal").textContent='/ '+pdfDoc.numPages;
+    $("#pgInput").max=pdfDoc.numPages;
+
+    renderList();
+    await selectPage(0);
+    if(multi) analyzeAllPages(); // 残りのページをバックグラウンドで自動検出
+  }catch(e){ alert('PDF読み込み失敗: '+e.message); }
+}
+function resetAll(){
+  pdfDoc=null; pgRes={}; curPg=1; usc=1; actIdx=-1;
+  $("#drop").classList.remove('hidden');
+  $("#viewer").classList.add('hidden');
+  $("#zoomctl").classList.add('hidden');
+  $("#vbar").classList.remove('show');
+  $(".left").classList.remove('hidden');
+  $("#pgbar").classList.remove('show');
+  $("#pgProgress").textContent='';
+  $("#abtn").disabled=true; $("#btnReset").disabled=true;
+  $("#resHd").style.display='none'; $("#resSec").style.display='none';
+  $("#file").value='';
+  $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
+}
+
+/* ---------- ページ一覧 / ページ移動 ---------- */
+function renderList(){
+  const el=$("#plist"); el.innerHTML='';
+  for(let i=0;i<pdfDoc.numPages;i++){
+    const n=i+1;
+    const row=document.createElement('div');
+    row.className='prow'+(i===(curPg-1)?' sel':'');
+    const r=pgRes[n];
+    row.innerHTML='<span class="pno">P'+n+'</span>'
+      +'<span class="dot'+(r?' ok':'')+'"></span>'
+      +'<span class="lbl">'+(r?('検出済・'+r.tl.length+'本'):'未解析')+'</span>';
+    row.onclick=()=>selectPage(i);
+    el.appendChild(row);
+  }
+}
+function updatePgNav(){
+  $("#pgInput").value=curPg;
+  $("#pgPrev").disabled=curPg<=1;
+  $("#pgNext").disabled=!pdfDoc||curPg>=pdfDoc.numPages;
+}
+function gotoPage(n){
+  if(!pdfDoc) return;
+  n=Math.max(1,Math.min(pdfDoc.numPages,n));
+  if(n===curPg){ updatePgNav(); return; }
+  selectPage(n-1);
+}
+async function selectPage(i){
+  curPg=i+1;
+  renderList();
+  updatePgNav();
+  actIdx=-1;
+  await renderPg(curPg);
+  if(pgRes[curPg]){ drawOv(pgRes[curPg]); buildRes(pgRes[curPg]); updateStatus(pgRes[curPg]); }
+  else await analyze(); // 自動でトンボ検出
+}
+
+/* ---------- 全ページ一括検出 ---------- */
+let batchRunning=false;
+async function analyzeAllPages(){
+  if(!pdfDoc || batchRunning) return;
+  batchRunning=true;
+  const total=pdfDoc.numPages;
+  try{
+    for(let n=1;n<=total;n++){
+      if(pgRes[n]) continue;
+      $("#pgProgress").textContent='全ページ検出中… '+n+' / '+total;
+      try{ pgRes[n]=await computePageAnalysis(n); }catch(e){ console.error('page',n,e); }
+      renderList();
+      if(n===curPg){ drawOv(pgRes[curPg]); buildRes(pgRes[curPg]); updateStatus(pgRes[curPg]); }
+    }
+  } finally {
+    $("#pgProgress").textContent='';
+    batchRunning=false;
+  }
+}
+
+
+
+/* ---------- レンダリング ---------- */
+async function renderPg(n){
+  const page = await pdfDoc.getPage(n);
+  const vp1  = page.getViewport({scale:1});
+  const cw   = $("#canvaswrap");
+  const mW=Math.max(300,cw.clientWidth-72), mH=Math.max(300,cw.clientHeight-150);
+  bsc = Math.min(mW/vp1.width, mH/vp1.height, 2.0);
+  const sc  = bsc*usc;
+  const vp  = page.getViewport({scale:sc});
+
+  const pC=$("#pdfC"), oC=$("#ovC"), iC=$("#ixC");
+  const EXTRA=100; // px above page for dimension lines
+  const EXTRA_B=80; // px below page for dimension lines
+  pC.width=vp.width; pC.height=vp.height;
+  pC.style.width=vp.width+'px'; pC.style.height=vp.height+'px';
+  [oC,iC].forEach(c=>{
+    c.width=vp.width; c.height=vp.height+EXTRA+EXTRA_B;
+    c.style.width=vp.width+'px'; c.style.height=(vp.height+EXTRA+EXTRA_B)+'px';
+    c.style.top=(-EXTRA)+'px';
+  });
+  const viewer=$("#viewer");
+  viewer.style.width=vp.width+'px'; viewer.style.height=vp.height+'px';
+
+  await page.render({canvasContext:pC.getContext('2d'),viewport:vp}).promise;
+
+  const view=page.view, pgW=view[2]-view[0], pgH=view[3]-view[1];
+  $("#zoomhint").textContent=Math.round(sc/bsc*100)+'%';
+  $("#sbpg").textContent='ページ: '+(pgW*PT2MM).toFixed(1)+'×'+(pgH*PT2MM).toFixed(1)+'mm';
+  setupIx();
+}
+
+/* ---------- LINE EXTRACTION via constructPath (PDF.js 3.11) ---------- */
+async function extractLines(page){
+  const ops  = await page.getOperatorList();
+  const fns  = ops.fnArray, args = ops.argsArray;
+  const view = page.view;
+  const pgOX = view[0], pgOY = view[1], pgH = view[3]-view[1];
+  const maxLW= parseFloat($("#maxLW").value)||1.0;
+  const minL = (parseFloat($("#minLen").value)||2)*MM2PT;
+
+  const CP = 91; // constructPath
+  const OPS = pdfjsLib.OPS;
+
+  const opsSeen = new Map();
+  for(const fn of fns) opsSeen.set(fn,(opsSeen.get(fn)||0)+1);
+
+  const stk = [[1,0,0,1,0,0]];
+  const ctm = () => stk[stk.length-1];
+  const pushCtm = m => {
+    const c = ctm();
+    stk.push([
+      m[0]*c[0]+m[1]*c[2], m[0]*c[1]+m[1]*c[3],
+      m[2]*c[0]+m[3]*c[2], m[2]*c[1]+m[3]*c[3],
+      m[4]*c[0]+m[5]*c[2]+c[4], m[4]*c[1]+m[5]*c[3]+c[5]
+    ]);
+  };
+  const ap = (x,y) => {
+    const m = ctm();
+    return [m[0]*x+m[2]*y+m[4]-pgOX, m[1]*x+m[3]*y+m[5]-pgOY];
+  };
+  const lwSc = () => {
+    const m = ctm();
+    return Math.sqrt(Math.abs(m[0]*m[3]-m[1]*m[2]));
+  };
+
+  let lw = 1;
+  let pendingSegs = [];
+  const out = [];
+
+  for(let i=0;i<fns.length;i++){
+    const fn=fns[i], a=args[i]||[];
+
+    if(fn===OPS.save)   { stk.push([...ctm()]); continue; }
+    if(fn===OPS.restore){ if(stk.length>1) stk.pop(); continue; }
+    if(fn===OPS.transform){ pushCtm(a); continue; }
+    if(fn===OPS.setLineWidth){ lw=a[0]; continue; }
+
+    if(fn===CP){
+      pendingSegs = [];
+      const cmds  = a[0];
+      const coords= a[1];
+      let ci=0, cx=0, cy=0, startX=0, startY=0;
+      for(const cmd of cmds){
+        if(cmd===13){
+          cx=coords[ci++]; cy=coords[ci++];
+          startX=cx; startY=cy;
+        } else if(cmd===14){
+          const nx=coords[ci++], ny=coords[ci++];
+          pendingSegs.push({x1:cx,y1:cy,x2:nx,y2:ny});
+          cx=nx; cy=ny;
+        } else if(cmd===15){
+          ci+=6;
+        } else if(cmd===17){
+          if(cx!==startX||cy!==startY)
+            pendingSegs.push({x1:cx,y1:cy,x2:startX,y2:startY});
+          cx=startX; cy=startY;
+        } else if(cmd===19){
+          const rx=coords[ci++],ry=coords[ci++],rw=coords[ci++],rh=coords[ci++];
+          pendingSegs = [];
+        } else {
+        }
+      }
+      continue;
+    }
+
+    if(fn===OPS.stroke||fn===OPS.closeStroke){
+      const slw = lw * lwSc();
+      if(slw <= maxLW && pendingSegs.length > 0){
+        for(const seg of pendingSegs){
+          const [ax,ay] = ap(seg.x1, seg.y1);
+          const [bx,by] = ap(seg.x2, seg.y2);
+          const px1=ax, py1=pgH-ay, px2=bx, py2=pgH-by;
+          const len = Math.hypot(px2-px1, py2-py1);
+          if(len >= minL){
+            out.push({x1:px1,y1:py1,x2:px2,y2:py2,lw:slw});
+          }
+        }
+      }
+      pendingSegs = [];
+      continue;
+    }
+
+    if(fn===OPS.fill||fn===OPS.eoFill||fn===OPS.fillStroke||
+       fn===OPS.eoFillStroke||fn===OPS.endPath||fn===28){
+      pendingSegs = [];
+    }
+  }
+
+  extractLines._lastOpsSeen = opsSeen;
+  return out;
+}
+
+/* ---------- CLASSIFY ---------- */
+function classify(raw, pgW, pgH){
+  const tolPt=(parseFloat($("#clTol").value)||2.0)*MM2PT;
+  const midX=pgW/2, midY=pgH/2;
+  const cornerEdgePt=20*MM2PT;
+  const mX=cornerEdgePt, mY=cornerEdgePt;
+
+  const lines=[];
+  for(const l of raw){
+    const dx=l.x2-l.x1, dy=l.y2-l.y1;
+    const ang=Math.abs(Math.atan2(Math.abs(dy),Math.abs(dx))*180/Math.PI);
+    if(ang>5&&ang<85) continue;
+    const dir=ang<5?'H':'V';
+    const cx=(l.x1+l.x2)/2, cy=(l.y1+l.y2)/2;
+    lines.push({...l,dir,cx,cy});
+  }
+
+  const getZone=(cx,cy)=>{
+    const nL=cx<mX,nR=cx>pgW-mX,nT=cy<mY,nB=cy>pgH-mY;
+    if(nT&&nL) return 'TL';
+    if(nT&&nR) return 'TR';
+    if(nB&&nL) return 'BL';
+    if(nB&&nR) return 'BR';
+    return 'nc';
+  };
+
+  const cornerGrps={TL_H:[],TL_V:[],TR_H:[],TR_V:[],BL_H:[],BL_V:[],BR_H:[],BR_V:[]};
+  const foldLH=[], foldRH=[];
+  const nonCorner=[];
+  for(const l of lines){
+    const z=getZone(l.cx,l.cy);
+    if(z!=='nc'){
+      cornerGrps[z+'_'+l.dir].push(l);
+    } else {
+      const nL=l.cx<mX, nR=l.cx>pgW-mX;
+      const nT=l.cy<mY, nB=l.cy>pgH-mY;
+      if(l.dir==='H'&&!nT&&!nB&&nL&&Math.abs(l.cy-pgH/2)>=pgH*0.15) foldLH.push(l);
+      else if(l.dir==='H'&&!nT&&!nB&&nR&&Math.abs(l.cy-pgH/2)>=pgH*0.15) foldRH.push(l);
+      else nonCorner.push(l);
+    }
+  }
+
+  const merged=[];
+  for(const[key,grp] of Object.entries(cornerGrps)){
+    const cls=clusterLines(grp,tolPt);
+    cls.forEach(l=>{ l._ckey=key; });
+    merged.push(...cls);
+  }
+  const clsFoldL=clusterLines(foldLH,tolPt);
+  clsFoldL.forEach(l=>{ l._foldSide='L'; });
+  merged.push(...clsFoldL);
+  const clsFoldR=clusterLines(foldRH,tolPt);
+  clsFoldR.forEach(l=>{ l._foldSide='R'; });
+  merged.push(...clsFoldR);
+  const ncMerged=clusterLines(nonCorner,tolPt);
+  merged.push(...ncMerged);
+
+  const roleMap=new Map();
+  for(const z of ['TL','TR','BL','BR']){
+    for(const dir of ['H','V']){
+      const key=z+'_'+dir;
+      const grp=merged.filter(l=>l._ckey===key);
+      grp.sort((a,b)=>{
+        const da=dir==='H'?Math.abs(a.cy-midY):Math.abs(a.cx-midX);
+        const db=dir==='H'?Math.abs(b.cy-midY):Math.abs(b.cx-midX);
+        return da-db;
+      });
+      grp.forEach((l,i)=>
+        roleMap.set(l, i===0?'corner-'+z+'-'+dir:'outer-corner-'+z+'-'+dir));
+    }
+  }
+
+  const cornerHinner=merged.filter(l=>l._ckey&&l._ckey.endsWith('_H')&&roleMap.get(l)&&roleMap.get(l).startsWith('corner-'));
+  let bandPt=30*MM2PT;
+  if(cornerHinner.length){
+    const topCorners=cornerHinner.filter(l=>l.cy<midY);
+    if(topCorners.length){
+      const avgMargin=topCorners.reduce((s,l)=>s+l.cy,0)/topCorners.length;
+      bandPt=Math.max(avgMargin*4, 30*MM2PT);
+    }
+  }
+
+  return merged.map(l=>{
+    if(roleMap.has(l)) return{...l,role:roleMap.get(l)};
+    if(l._foldSide==='L') return{...l,role:'fold-L-H'};
+    if(l._foldSide==='R') return{...l,role:'fold-R-H'};
+    const{cx,cy,dir}=l;
+    const nL=cx<mX, nR=cx>pgW-mX;
+    const inTopBand=cy<=bandPt, inBotBand=cy>=pgH-bandPt;
+    let role='unknown';
+    if(dir==='H'){
+      const nT=cy<mY, nB=cy>pgH-mY;
+      if(nT) role='center-T';
+      else if(nB) role='center-B';
+      else if(nL&&Math.abs(cy-pgH/2)<pgH*0.15) role='center-L-H';
+      else if(nR&&Math.abs(cy-pgH/2)<pgH*0.15) role='center-R-H';
+      else if(nL) role='fold-L-H';
+      else if(nR) role='fold-R-H';
+      else role='inner-H';
+    }else{
+      if(nL) role='center-L';
+      else if(nR) role='center-R';
+      else{
+        const span=Math.abs(l.y2-l.y1);
+        if(span>=pgH*0.5) role='inner-V';
+        else if(Math.min(l.y1,l.y2)<=bandPt||Math.max(l.y1,l.y2)>=pgH-bandPt)
+          role='inner-V-single';
+        else role='content-V';
+      }
+    }
+    const span=Math.abs(l.y2-l.y1);
+    const edgeZone=span>=pgH*0.5?'M':Math.min(l.y1,l.y2)<=bandPt?'T':'B';
+    return{...l,role,_edgeZone:edgeZone,_bandPt:bandPt};
+  });
+}
+
+function clusterLines(lines,tol){
+  const used=new Set(), out=[];
+  for(let i=0;i<lines.length;i++){
+    if(used.has(i)) continue;
+    used.add(i); const grp=[lines[i]];
+    for(let j=i+1;j<lines.length;j++){
+      if(used.has(j)) continue;
+      const a=lines[i],b=lines[j];
+      if(a.dir!==b.dir) continue;
+      const perp=a.dir==='H'?Math.abs(a.cy-b.cy):Math.abs(a.cx-b.cx);
+      if(perp<=tol){grp.push(b);used.add(j);}
+    }
+    if(grp.length===1){out.push(grp[0]);continue;}
+    const avgP=grp.reduce((s,l)=>s+(l.dir==='H'?l.cy:l.cx),0)/grp.length;
+    const mn=Math.min(...grp.map(l=>l.dir==='H'?Math.min(l.x1,l.x2):Math.min(l.y1,l.y2)));
+    const mx=Math.max(...grp.map(l=>l.dir==='H'?Math.max(l.x1,l.x2):Math.max(l.y1,l.y2)));
+    const rep={...grp[0]};
+    if(rep.dir==='H'){rep.cy=avgP;rep.y1=avgP;rep.y2=avgP;rep.x1=mn;rep.x2=mx;rep.cx=(mn+mx)/2;}
+    else{rep.cx=avgP;rep.x1=avgP;rep.x2=avgP;rep.y1=mn;rep.y2=mx;rep.cy=(mn+mx)/2;}
+    out.push(rep);
+  }
+  return out;
+}
+
+/* ---------- DIMENSIONS ---------- */
+const HC=['#1a4fa0','#c03010','#8a5200','#6a20a0','#007070','#c07000'];
+const VC_L=['#0a7040','#c03010','#8a5200'];
+const VC_R=['#1a4fa0','#6a20a0','#c07000'];
+
+function computeDims(tl,pgW,pgH){
+  const dims=[];
+  const byRole={};
+  for(const l of tl){if(!byRole[l.role])byRole[l.role]=[];byRole[l.role].push(l);}
+  const aX=r=>{const ls=byRole[r]||[];return ls.length?ls.reduce((s,l)=>s+l.cx,0)/ls.length:null;};
+  const aY=r=>{const ls=byRole[r]||[];return ls.length?ls.reduce((s,l)=>s+l.cy,0)/ls.length:null;};
+  const fX=(...rs)=>{for(const r of rs){const v=aX(r);if(v!==null)return v;}return null;};
+  const fY=(...rs)=>{for(const r of rs){const v=aY(r);if(v!==null)return v;}return null;};
+
+  const ignoreCenter=$("#cbIgnoreCenter").checked;
+  const allInnerV=tl.filter(l=>l.role==='inner-V'||l.role==='inner-V-single').sort((a,b)=>a.cx-b.cx);
+  const tolX=(parseFloat($("#clTol").value)||2.0)*MM2PT;
+
+  const pairedV=ignoreCenter?[]:allInnerV.filter((l,_,arr)=>{
+    if(l.role==='inner-V') return true;
+    if(!l._edgeZone||l._edgeZone==='M') return true;
+    const opp=l._edgeZone==='T'?'B':'T';
+    return arr.some(o=>o!==l&&(o._edgeZone===opp||o._edgeZone==='M')&&Math.abs(o.cx-l.cx)<=tolX);
+  });
+
+  const innerV=pairedV.filter((l,i,arr)=>{
+    if(arr.length<3||i===0||i===arr.length-1) return true;
+    const mid=(arr[i-1].cx+arr[i+1].cx)/2;
+    return Math.abs(l.cx-mid)>1*MM2PT;
+  });
+
+  const foldVL=tl.filter(l=>l.role.startsWith('fold-TL-V')||l.role.startsWith('fold-BL-V')).sort((a,b)=>a.cx-b.cx);
+  const foldVR=tl.filter(l=>l.role.startsWith('fold-TR-V')||l.role.startsWith('fold-BR-V')).sort((a,b)=>a.cx-b.cx);
+
+  const xpts=[];
+  if(foldVL.length){
+    foldVL.forEach((l,i)=>xpts.push({x:l.cx,lbl:'左折り'+(foldVL.length>1?'('+(i+1)+')':'')}));
+  }else{
+    const xCL=fX('corner-TL-V','corner-BL-V');
+    if(xCL!==null) xpts.push({x:xCL,lbl:'左コーナー'});
+  }
+
+  const hasFolds=foldVL.length>0||foldVR.length>0;
+  if(!hasFolds||innerV.length>0){
+    innerV.forEach((l,i)=>xpts.push({x:l.cx,lbl:'境界'+(i+1)}));
+  }
+
+  if(foldVR.length){
+    foldVR.forEach((l,i)=>xpts.push({x:l.cx,lbl:'右折り'+(foldVR.length>1?'('+(i+1)+')':'')}));
+  }else{
+    const xCR=fX('corner-TR-V','corner-BR-V');
+    if(xCR!==null) xpts.push({x:xCR,lbl:'右コーナー'});
+  }
+
+  xpts.sort((a,b)=>a.x-b.x);
+  const xptsU=xpts.filter((p,i)=>i===0||Math.abs(p.x-xpts[i-1].x)>1);
+
+  const yTopRef=fY('corner-TL-H','corner-TR-H');
+  const yBotRef=fY('corner-BL-H','corner-BR-H');
+  const aboveBase=yTopRef!==null?yTopRef:pgH*0.05;
+  const belowBase=yBotRef!==null?yBotRef:pgH*0.95;
+  const rowOffset=18;
+  const yPos=aboveBase-rowOffset;
+
+  for(let i=0;i<xptsU.length-1;i++){
+    const a=xptsU[i],b=xptsU[i+1];
+    dims.push({type:'H',x1:a.x,x2:b.x,
+      y:yPos, _yRef:aboveBase,
+      label:a.lbl+' → '+b.lbl, distPt:b.x-a.x,
+      color:HC[i%HC.length], visible:true, row:i});
+  }
+  if(xptsU.length>2){
+    const first=xptsU[0], last=xptsU[xptsU.length-1];
+    const yPosBottom=belowBase+rowOffset;
+    dims.push({type:'H',x1:first.x,x2:last.x,
+      y:yPosBottom, _yRef:belowBase,
+      label:'全体（展開幅）: '+first.lbl+' → '+last.lbl, distPt:last.x-first.x,
+      color:'#333333', visible:true, row:0, isTotal:true});
+  }
+
+  const buildVside=(sideT,sideB,edgeSide)=>{
+    const vpts=[];
+    const yT=fY('corner-'+sideT+'-H');
+    const yB=fY('corner-'+sideB+'-H');
+    const foldHT=tl.filter(l=>(l.role.startsWith('fold-'+sideT+'-H'))&&l.cy<pgH/2).sort((a,b)=>a.cy-b.cy);
+    const foldHB=tl.filter(l=>(l.role.startsWith('fold-'+sideB+'-H'))&&l.cy>pgH/2).sort((a,b)=>a.cy-b.cy);
+    const edgeFoldT=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy<pgH/2).sort((a,b)=>a.cy-b.cy);
+    const edgeFoldB=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy>pgH/2).sort((a,b)=>a.cy-b.cy);
+    const allFoldT=[...foldHT,...edgeFoldT].sort((a,b)=>a.cy-b.cy);
+    const allFoldB=[...foldHB,...edgeFoldB].sort((a,b)=>a.cy-b.cy);
+    const dedupFoldT=allFoldT.filter((l,i,a)=>i===0||Math.abs(l.cy-a[i-1].cy)>2);
+    const dedupFoldB=allFoldB.filter((l,i,a)=>i===0||Math.abs(l.cy-a[i-1].cy)>2);
+    if(yT!==null) vpts.push({y:yT,lbl:'上コーナー'});
+    dedupFoldT.forEach((l,i)=>vpts.push({y:l.cy,lbl:'天折り'+(dedupFoldT.length>1?'('+(i+1)+')':'')}));
+    dedupFoldB.forEach((l,i)=>vpts.push({y:l.cy,lbl:'地折り'+(dedupFoldB.length>1?'('+(i+1)+')':'')}));
+    if(yB!==null) vpts.push({y:yB,lbl:'下コーナー'});
+    vpts.sort((a,b)=>a.y-b.y);
+    return vpts.filter((p,i)=>i===0||Math.abs(p.y-vpts[i-1].y)>1);
+  };
+
+  const xCLv=fX('corner-TL-V','corner-BL-V');
+  const xCRv=fX('corner-TR-V','corner-BR-V');
+  const xDimL=(xCLv!==null?xCLv:0)-18;
+  const xDimR=(xCRv!==null?xCRv:pgW)+18;
+
+  const vpL=buildVside('TL','BL','L');
+  for(let i=0;i<vpL.length-1;i++){
+    const a=vpL[i],b=vpL[i+1];
+    dims.push({type:'V',y1:a.y,y2:b.y,x:xDimL,
+      label:'左: '+a.lbl+' → '+b.lbl, distPt:b.y-a.y,
+      color:VC_L[i%VC_L.length], visible:true, row:i, side:'L'});
+  }
+  const vpR=buildVside('TR','BR','R');
+  for(let i=0;i<vpR.length-1;i++){
+    const a=vpR[i],b=vpR[i+1];
+    dims.push({type:'V',y1:a.y,y2:b.y,x:xDimR,
+      label:'右: '+a.lbl+' → '+b.lbl, distPt:b.y-a.y,
+      color:VC_R[i%VC_R.length], visible:true, row:i, side:'R'});
+  }
+
+  return dims;
+}
+
+/* ---------- ANALYZE ---------- */
+async function computePageAnalysis(n){
+  const page=await pdfDoc.getPage(n);
+  const view=page.view;
+  const pgW=view[2]-view[0], pgH=view[3]-view[1];
+  const raw=await extractLines(page);
+  const tl=classify(raw,pgW,pgH);
+  const dims=computeDims(tl,pgW,pgH);
+  const opsSeen=extractLines._lastOpsSeen||new Map();
+  return {tl,dims,pgW,pgH,rawN:raw.length,opsSeen};
+}
+async function analyze(){
+  if(!pdfDoc) return;
+  const btn=$("#abtn");
+  const orig=btn.innerHTML;
+  btn.textContent='解析中…'; btn.disabled=true;
+  try{
+    pgRes[curPg]=await computePageAnalysis(curPg);
+    showAll=true;
+    renderList();
+    drawOv(pgRes[curPg]);
+    buildRes(pgRes[curPg]);
+    updateStatus(pgRes[curPg]);
+    updateDimToggleUI();
+  }finally{
+    btn.innerHTML=orig; btn.disabled=false;
+  }
+}
+
+/* ---------- DRAW ---------- */
+function clearOv(){
+  ['ovC','ixC'].forEach(id=>{const c=$("#"+id);c.getContext('2d').clearRect(0,0,c.width,c.height);});
+  $("#resHd").style.display='none'; $("#resSec").style.display='none';
+  $("#sbdet").textContent='—';
+}
+function drawOv(r){
+  const sc=bsc*usc;
+  const ctx=$("#ovC").getContext('2d');
+  ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  const EXTRA=parseInt($("#ovC").style.top||'0')*-1;
+  ctx.save(); ctx.translate(0,EXTRA);
+  if(showTombo){
+    ctx.strokeStyle='#e05020'; ctx.lineWidth=1.5; ctx.globalAlpha=0.85;
+    for(const l of r.tl){ctx.beginPath();ctx.moveTo(l.x1*sc,l.y1*sc);ctx.lineTo(l.x2*sc,l.y2*sc);ctx.stroke();}
+  }
+  for(let i=0;i<r.dims.length;i++){
+    if(!r.dims[i].visible) continue;
+    ctx.globalAlpha=(actIdx===-1||actIdx===i)?1.0:0.2;
+    drawDim(ctx,r.dims[i],sc,i===actIdx);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  drawHandles(r,sc);
+}
+
+const T=5,AR=7,LP=15;
+function drawDim(ctx,d,sc,act){
+  const c=d.color, Ts=T*sc, ARs=AR*sc, LPs=LP*sc;
+  ctx.strokeStyle=c; ctx.fillStyle=c; ctx.lineWidth=act?2.2:1.5;
+  const unit=$("#unitSel").value;
+  const val=unit==='mm'?(d.distPt*PT2MM).toFixed(2)+' mm':d.distPt.toFixed(2)+' pt';
+  const fs=Math.max(9,Math.min(12,10*sc));
+  if(d.type==='H'){
+    const y=d.y*sc, x1=d.x1*sc, x2=d.x2*sc;
+    if(d._yRef!==undefined){
+      const yRef=d._yRef*sc;
+      ctx.save();
+      ctx.strokeStyle=c; ctx.lineWidth=0.8; ctx.globalAlpha*=0.35;
+      ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.moveTo(x1,Math.min(y,yRef));ctx.lineTo(x1,Math.max(y,yRef));ctx.stroke();
+      ctx.beginPath();ctx.moveTo(x2,Math.min(y,yRef));ctx.lineTo(x2,Math.max(y,yRef));ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x1,y-Ts);ctx.lineTo(x1,y+Ts);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x2,y-Ts);ctx.lineTo(x2,y+Ts);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x1+ARs,y-ARs*.35);ctx.lineTo(x1+ARs,y+ARs*.35);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(x2,y);ctx.lineTo(x2-ARs,y-ARs*.35);ctx.lineTo(x2-ARs,y+ARs*.35);ctx.closePath();ctx.fill();
+    const lx=(x1+x2)/2, ly=y-LPs*.5;
+    ctx.font=(act?'600 ':'500 ')+fs+'px system-ui'; ctx.textAlign='center';
+    const tw=ctx.measureText(val).width;
+    ctx.fillStyle='rgba(255,255,255,0.92)'; ctx.fillRect(lx-tw/2-4,ly-fs-2,tw+8,fs+6);
+    ctx.fillStyle=c; ctx.fillText(val,lx,ly);
+    if(act){ctx.globalAlpha*=.65;ctx.font='500 '+(fs-1)+'px system-ui';ctx.fillText(d.label,lx,ly+fs+3);}
+    ctx.textAlign='left';
+  }else{
+    const x=d.x*sc, y1=d.y1*sc, y2=d.y2*sc;
+    ctx.beginPath();ctx.moveTo(x,y1);ctx.lineTo(x,y2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x-Ts,y1);ctx.lineTo(x+Ts,y1);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x-Ts,y2);ctx.lineTo(x+Ts,y2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,y1);ctx.lineTo(x-ARs*.35,y1+ARs);ctx.lineTo(x+ARs*.35,y1+ARs);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(x,y2);ctx.lineTo(x-ARs*.35,y2-ARs);ctx.lineTo(x+ARs*.35,y2-ARs);ctx.closePath();ctx.fill();
+    const cy=(y1+y2)/2;
+    ctx.save();ctx.translate(x+LPs*.65,cy);ctx.rotate(-Math.PI/2);
+    ctx.font=(act?'600 ':'500 ')+fs+'px system-ui';ctx.textAlign='center';
+    const tw=ctx.measureText(val).width;
+    ctx.fillStyle='rgba(255,255,255,0.92)';ctx.fillRect(-tw/2-4,-fs-2,tw+8,fs+6);
+    ctx.fillStyle=c;ctx.fillText(val,0,0);
+    if(act){ctx.globalAlpha*=.65;ctx.font='500 '+(fs-1)+'px system-ui';ctx.fillText(d.label,0,fs+3);}
+    ctx.restore();
+  }
+}
+
+const HR=8;
+function getHandles(r,sc){
+  const EXTRA=parseInt(($("#ixC").style.top||'0'))*-1;
+  const h=[];
+  for(let i=0;i<r.dims.length;i++){
+    const d=r.dims[i]; if(!d.visible) continue;
+    if(d.type==='H'){h.push({i,end:0,sx:d.x1*sc,sy:d.y*sc+EXTRA,ax:'x'});h.push({i,end:1,sx:d.x2*sc,sy:d.y*sc+EXTRA,ax:'x'});}
+    else{h.push({i,end:0,sx:d.x*sc,sy:d.y1*sc+EXTRA,ax:'y'});h.push({i,end:1,sx:d.x*sc,sy:d.y2*sc+EXTRA,ax:'y'});}
+  }
+  return h;
+}
+function drawHandles(r,sc){
+  const ix=$("#ixC");
+  const ctx=ix.getContext('2d');
+  ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  const EXTRA=parseInt(ix.style.top||'0')*-1;
+  ctx.save(); ctx.translate(0,EXTRA);
+  for(const h of getHandles(r,sc)){
+    const act=h.i===actIdx;
+    const c=r.dims[h.i].color;
+    const sz=HR*(act?1.4:1)*sc;
+    const sq=3*(act?1.4:1)*sc;
+    ctx.strokeStyle=c; ctx.fillStyle='white'; ctx.lineWidth=act?2:1.5;
+    ctx.beginPath();
+    ctx.moveTo(h.sx-sz,h.sy); ctx.lineTo(h.sx+sz,h.sy);
+    ctx.moveTo(h.sx,h.sy-sz); ctx.lineTo(h.sx,h.sy+sz);
+    ctx.stroke();
+    ctx.fillStyle=act?c:'white';
+    ctx.strokeStyle=c; ctx.lineWidth=act?2:1.5;
+    ctx.fillRect(h.sx-sq,h.sy-sq,sq*2,sq*2);
+    ctx.strokeRect(h.sx-sq,h.sy-sq,sq*2,sq*2);
+  }
+  ctx.restore();
+}
+
+/* ---------- INTERACT (ハンドル操作) ---------- */
+function setupIx(){
+  const ix=$("#ixC");
+  ix.onmousemove=onMv; ix.onmousedown=onDn; ix.onmouseup=onUp; ix.onmouseleave=onUp;
+  function pos(e){const r=ix.getBoundingClientRect();return{sx:e.clientX-r.left,sy:e.clientY-r.top};}
+  function hit(sx,sy){
+    const r=pgRes[curPg]; if(!r) return null;
+    const sc=bsc*usc;
+    for(const h of getHandles(r,sc)) if((sx-h.sx)**2+(sy-h.sy)**2<=(HR*sc*2.5)**2) return h;
+    return null;
+  }
+  function onDn(e){
+    const{sx,sy}=pos(e);const h=hit(sx,sy);
+    if(h){drag=h;actIdx=h.i;ix.style.cursor=h.ax==='x'?'ew-resize':'ns-resize';e.preventDefault();return;}
+    // ハンドルでなければプレビューのパン開始
+    startPan(e);
+  }
+  function onMv(e){
+    const{sx,sy}=pos(e);const sc=bsc*usc;
+    const r=pgRes[curPg];
+    if(r) $("#sbpos").textContent='X:'+(sx/sc*PT2MM).toFixed(2)+'mm Y:'+(sy/sc*PT2MM).toFixed(2)+'mm';
+    if(!drag){
+      const h=hit(sx,sy);
+      ix.style.cursor=h?(h.ax==='x'?'ew-resize':'ns-resize'):'default';
+      const na=h?h.i:-1;
+      if(na!==actIdx){actIdx=na;if(r){drawOv(r);buildRes(r);}}
+      return;
+    }
+    if(!r) return;
+    const d=r.dims[drag.i];
+    const EXTRA=parseInt($("#ixC").style.top||'0')*-1;
+    const px=sx/sc, py=(sy-EXTRA)/sc;
+    if(d.type==='H'){if(drag.end===0)d.x1=px;else d.x2=px;d.distPt=Math.abs(d.x2-d.x1);}
+    else{if(drag.end===0)d.y1=py;else d.y2=py;d.distPt=Math.abs(d.y2-d.y1);}
+    drawOv(r);buildRes(r);
+  }
+  function onUp(){if(drag){drag=null;$("#ixC").style.cursor='default';}}
+}
+
+/* ---------- ホイールズーム & ドラッグパン ---------- */
+let panning=false, panX=0, panY=0, panSL=0, panST=0;
+function startPan(e){
+  if(!pdfDoc) return;
+  if(e.button!==0) return;
+  panning=true; panX=e.clientX; panY=e.clientY;
+  const cw=$("#canvaswrap");
+  panSL=cw.scrollLeft; panST=cw.scrollTop;
+  cw.classList.add('grabbing');
+}
+window.addEventListener('mousemove',e=>{
+  if(!panning) return;
+  const cw=$("#canvaswrap");
+  cw.scrollLeft=panSL-(e.clientX-panX);
+  cw.scrollTop =panST-(e.clientY-panY);
+});
+window.addEventListener('mouseup',()=>{
+  if(panning){ panning=false; $("#canvaswrap").classList.remove('grabbing'); }
+});
+
+let zoomBusy=false;
+async function doZoom(factor, anchorX, anchorY){
+  if(!pdfDoc || zoomBusy) return;
+  zoomBusy=true;
+  try{
+    const cw=$("#canvaswrap");
+    const rect=cw.getBoundingClientRect();
+    const ax = (anchorX!==undefined)?anchorX-rect.left+cw.scrollLeft : cw.scrollLeft+cw.clientWidth/2;
+    const ay = (anchorY!==undefined)?anchorY-rect.top +cw.scrollTop  : cw.scrollTop +cw.clientHeight/2;
+    const oldSc=bsc*usc;
+    if(factor===0) usc=1; else usc=Math.max(ZMIN,Math.min(ZMAX,usc*factor));
+    actIdx=-1;
+    await renderPg(curPg);
+    const r=pgRes[curPg]; if(r) drawOv(r);
+    const newSc=bsc*usc;
+    const ratio=newSc/oldSc;
+    if(factor!==0){
+      cw.scrollLeft = ax*ratio - (anchorX!==undefined?anchorX-rect.left:cw.clientWidth/2);
+      cw.scrollTop  = ay*ratio - (anchorY!==undefined?anchorY-rect.top :cw.clientHeight/2);
+    } else { cw.scrollLeft=0; cw.scrollTop=0; }
+  } finally { zoomBusy=false; }
+}
+$("#zIn").onclick=()=>doZoom(1.25);
+$("#zOut").onclick=()=>doZoom(1/1.25);
+$("#zFit").onclick=()=>doZoom(0);
+$("#pgPrev").onclick=()=>gotoPage(curPg-1);
+$("#pgNext").onclick=()=>gotoPage(curPg+1);
+$("#pgInput").onchange=e=>gotoPage(parseInt(e.target.value)||1);
+$("#pgInput").onkeydown=e=>{ if(e.key==='Enter') e.target.blur(); };
+
+$("#canvaswrap").addEventListener('wheel',e=>{
+  if(!pdfDoc) return;
+  e.preventDefault();
+  const factor=e.deltaY<0?1.12:1/1.12;
+  doZoom(factor, e.clientX, e.clientY);
+},{passive:false});
+
+window.addEventListener('resize',()=>{ if(pdfDoc) doZoom(1); });
+
+/* ---------- RESULTS ---------- */
+function buildRes(r){
+  $("#resHd").style.display='block'; $("#resSec").style.display='block';
+  const unit=$("#unitSel").value;
+  const l=$("#resList"); l.innerHTML='';
+  const hd=r.dims.filter(d=>d.type==='H');
+  const vdL=r.dims.filter(d=>d.type==='V'&&d.side==='L');
+  const vdR=r.dims.filter(d=>d.type==='V'&&d.side==='R');
+  const vdN=r.dims.filter(d=>d.type==='V'&&!d.side);
+  if(!hd.length&&!vdL.length&&!vdR.length&&!vdN.length){
+    l.innerHTML='<div class="al alw">対向するトンボ線が検出できませんでした。<br>「最大線幅」を上げる(→1.5)か「最小線長」を下げる(→1)を試してください。</div>';
+    return;
+  }
+  const addS=(title,ds,border)=>{
+    if(!ds.length) return;
+    const lb=document.createElement('div');
+    lb.className='secttl'+(border?' secttlb':''); lb.textContent=title; l.appendChild(lb);
+    ds.forEach(d=>{
+      const gi=r.dims.indexOf(d);
+      const dv=unit==='mm'?(d.distPt*PT2MM).toFixed(2):d.distPt.toFixed(2);
+      const el=document.createElement('div');
+      el.className='ri'+(gi===actIdx?' act':'');
+      el.onclick=()=>{actIdx=gi===actIdx?-1:gi;refreshDisp();};
+      const ec=d.visible?d.color:'#bbb';
+      const ep=d.visible
+        ?'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
+        :'<path d="M17.94 17.94A10 10 0 0112 20C5 20 1 12 1 12a18 18 0 015-6M9.9 4.24A9 9 0 0112 4c7 0 11 8 11 8a18 18 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
+      const dispLbl=d.label.replace(/^[左右]: /,'');
+      el.innerHTML='<div class="rdot" style="background:'+d.color+'"></div>'
+        +'<div class="rlbl" title="'+dispLbl+'">'+dispLbl+'</div>'
+        +'<div class="rval" style="color:'+d.color+'">'+dv+'<span class="runit">'+unit+'</span></div>'
+        +'<div onclick="event.stopPropagation();toggleDim('+gi+')" style="cursor:pointer;flex-shrink:0">'
+        +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="'+ec+'" stroke-width="2">'+ep+'</svg></div>';
+      l.appendChild(el);
+    });
+  };
+  let sec=0;
+  addS('水平方向（横幅）',hd,false); if(hd.length) sec++;
+  addS('垂直方向 左側',vdL,sec>0); if(vdL.length) sec++;
+  addS('垂直方向 右側',vdR,sec>0); if(vdR.length) sec++;
+  addS('垂直方向',vdN,sec>0);
+}
+function toggleDim(i){const r=pgRes[curPg];if(!r)return;r.dims[i].visible=!r.dims[i].visible;refreshDisp();}
+function toggleAll(){
+  const r=pgRes[curPg];if(!r)return; showAll=!showAll;
+  r.dims.forEach(d=>d.visible=showAll);
+  updateDimToggleUI();
+  refreshDisp();
+}
+function refreshDisp(){const r=pgRes[curPg];if(!r)return;drawOv(r);buildRes(r);}
+
+const EYE_OPEN='<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_CLOSED='<path d="M17.94 17.94A10 10 0 0112 20C5 20 1 12 1 12a18 18 0 015-6M9.9 4.24A9 9 0 0112 4c7 0 11 8 11 8a18 18 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
+function updateDimToggleUI(){
+  const tog=$("#togBtn"); if(tog) tog.textContent=showAll?'全非表示':'全表示';
+  const btn=$("#dimToggleBtn");
+  if(btn){
+    btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showAll?EYE_OPEN:EYE_CLOSED)+'</svg>';
+    btn.className=showAll?'on':'off';
+    btn.title=showAll?'寸法を非表示にする':'寸法を表示する';
+  }
+}
+$("#dimToggleBtn").onclick=toggleAll;
+updateDimToggleUI();
+
+function toggleTombo(){
+  showTombo=!showTombo;
+  updateTomboToggleUI();
+  refreshDisp();
+}
+function updateTomboToggleUI(){
+  const btn=$("#tomboToggleBtn");
+  if(!btn) return;
+  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showTombo?EYE_OPEN:EYE_CLOSED)+'</svg>';
+  btn.className=showTombo?'on':'off';
+  btn.title=showTombo?'検出トンボ線を非表示にする':'検出トンボ線を表示する';
+}
+$("#tomboToggleBtn").onclick=toggleTombo;
+updateTomboToggleUI();
+
+/* ---------- DBG ---------- */
+function updateStatus(r){
+  $("#sbdet").textContent='検出: '+r.tl.length+'本';
+}
+
+/* ---------- CSV ---------- */
+function exportCSV(){
+  const rows=[['ページ','方向','計測区間','距離(mm)','距離(pt)']];
+  for(const[pg,r] of Object.entries(pgRes))
+    for(const d of r.dims)
+      rows.push([pg,d.type,d.label,(d.distPt*PT2MM).toFixed(3),d.distPt.toFixed(3)]);
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='tombo.csv'; a.click();
+}
+
+/* ---------- FILE I/O ---------- */
+$("#btnOpen").onclick=()=>$("#file").click();
+$("#dropzone").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{ if(e.target.files[0]){ loadPDF(e.target.files[0]); e.target.value=''; } };
+$("#btnReset").onclick=resetAll;
+
+const dz=$("#dropzone"), cen=$("#canvaswrap");
+;['dragenter','dragover'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+;['dragleave','drop'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+cen.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];
+  if(f?.type==='application/pdf') loadPDF(f); else if(f) alert('PDFをドロップしてください');
+});
+</script>
+</body>
+</html>

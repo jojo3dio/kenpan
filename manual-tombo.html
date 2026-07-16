@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>トンボ計測 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#0891b2;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:700px;margin:0 auto;padding:24px 18px 60px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--glow);
+  border-radius:12px;padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">トンボ計測</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg></div>
+    <div>
+      <h1>トンボ計測</h1>
+      <p>表紙・カバー展開図のトンボ（トリムマーク）を自動検出し、天地・左右・折り位置などの各種寸法を計測します。</p>
+      <a class="open" href="tombo-check.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p class='lead'>表紙・カバー展開図の PDF からトンボ（トリムマーク）の<b>線そのもの</b>を検出し、天地・左右のサイズや、折り位置（背幅など）で区切られた各区間の寸法を自動計測します。ページを開くだけで検出まで自動で行われ、ハンドルをドラッグして計測位置を微調整することもできます。</p>
+
+  <ol class="steps">
+    <li><b>PDFを読み込む。</b>プレビュー枠に PDF をドラッグ＆ドロップするか、「PDFを選択」から開きます。</li>
+    <li><b>自動検出を待つ。</b>開いたページのトンボが自動で検出され、寸法線が重ねて表示されます。複数ページのPDFでは、表示中のページから順に残りのページもバックグラウンドで自動検出されます（進捗はプレビュー上部に表示）。</li>
+    <li><b>ページを送る。</b>複数ページの場合はプレビュー上部の <span class='tag'>◀ ページ番号 ▶</span> でページを移動できます（1ページのみのPDFではこのバーとページ一覧は自動的に隠れます）。</li>
+    <li><b>ズーム・パンで確認。</b>マウスホイールでカーソル位置を基準にズーム、ドラッグでプレビューをパン移動できます。右下の「−／％／＋／全体」でも調整できます。</li>
+    <li><b>結果を確認・調整。</b>右パネルの「計測結果」に寸法の一覧が表示されます。値が実測とズレる場合は、プレビュー上のハンドル（□）をドラッグして計測位置を微調整してください。</li>
+    <li><b>表示・非表示を切り替える。</b>右下のズームパネルにある2つのアイコンボタンで、「検出トンボ線（オレンジ）」と「寸法線・数値」をそれぞれ表示/非表示にできます。個別の寸法だけ隠したいときは、結果一覧の目のアイコンをクリックします。</li>
+    <li><b>検出精度を調整する。</b>トンボがうまく拾えない・余計な線を拾う場合は、右パネルの「検出設定」（表示単位／最小線長／最大線幅／クラスタ許容／左右のセンタートンボを無視する）を変更し、「設定を反映して再検出」を押します。</li>
+    <li><b>出力する。</b>「CSV出力」で全ページの計測結果をまとめて書き出せます。</li>
+  </ol>
+
+  <h2>画面の見かた</h2>
+  <div class="cards">
+    <div class="c"><div class="t">検出トンボ線（オレンジ）</div><div class="d">PDF内から実際に検出されたトンボ（トリムマーク）の線そのものです。</div></div>
+    <div class="c"><div class="t">水平寸法（青系）</div><div class="d">天地方向のトンボ間隔から求めた横方向の寸法です。折り（背幅など）で区切られている場合は区間ごとに色分けされ、下側に合計（展開幅）も自動表示されます。</div></div>
+    <div class="c"><div class="t">垂直寸法（緑・青系）</div><div class="d">左側・右側それぞれの上下トンボ間隔から求めた縦方向の寸法です。</div></div>
+    <div class="c"><div class="t">ハンドル（□）</div><div class="d">寸法線の両端にある四角い印。ドラッグすると計測位置を手動で微調整できます。</div></div>
+    <div class="c"><div class="t">計測結果一覧</div><div class="d">検出された寸法を方向ごとに一覧表示。クリックでプレビュー上の該当線がハイライトされます。</div></div>
+  </div>
+
+  <h2>検出設定の項目</h2>
+  <div class="cards">
+    <div class="c"><div class="t">表示単位</div><div class="d">計測結果を mm／pt のどちらで表示するか。</div></div>
+    <div class="c"><div class="t">最小線長 (mm)</div><div class="d">これより短い線はトンボ候補から除外します。短い折りトンボが拾えないときは下げてください。</div></div>
+    <div class="c"><div class="t">最大線幅 (pt)</div><div class="d">これより太い線は除外します。文字や罫線を誤検出するときは下げてください。</div></div>
+    <div class="c"><div class="t">クラスタ許容 (mm)</div><div class="d">近接する複数の線を「同じトンボ」とみなしてまとめる距離。背幅などトンボの間隔が狭いデータでは小さめの値にすると、隣接するトンボ同士を誤って一つにまとめてしまうのを防げます。</div></div>
+    <div class="c"><div class="t">左右のセンタートンボを無視する</div><div class="d">扉など背のない単ページを計測するときに使います。</div></div>
+  </div>
+
+  <div class='note'><b>ヒント：</b>背幅などトンボの間隔が数mm程度しかない場合、「クラスタ許容」の値がその間隔より大きいと、別々のトンボが誤って1本にまとめられて検出漏れになることがあります。その場合は「クラスタ許容」を間隔より小さい値（例：0.5mm）に下げて「設定を反映して再検出」を押してください。</div>
+
+  <h2>うまくいかないとき</h2>
+  <dl class="faq">
+    <dt>対向するトンボ線が検出できない</dt>
+    <dd>「最大線幅」を上げる（→1.5pt程度）か、「最小線長」を下げる（→1mm程度）と拾いやすくなります。設定変更後は「設定を反映して再検出」を押してください。</dd>
+    <dt>背幅など、間隔の狭いトンボが1本にまとめられてしまう</dt>
+    <dd>「クラスタ許容」をトンボの間隔より小さい値に下げてください（上のヒント参照）。</dd>
+    <dt>余計な線を誤検出する</dt>
+    <dd>「最大線幅」を下げる、「最小線長」を上げると、文字や罫線などの誤検出を減らせます。</dd>
+    <dt>寸法の数値がズレている</dt>
+    <dd>プレビュー上のハンドル（□）をドラッグして、計測位置を実際のトンボ線に合わせて微調整してください。</dd>
+    <dt>複数ページのはずなのにページ一覧が出ない</dt>
+    <dd>PDFが1ページのみの場合、ページ一覧とページ移動バーは自動的に非表示になります（仕様です）。</dd>
+  </dl>
+
+  <div class="foot">検版ハブ｜トンボ計測 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+</body>
+</html>
