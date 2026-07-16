@@ -1262,7 +1262,17 @@ async function selectPage(i){
   // ズーム基準サイズ(フィット表示時のCSSピクセル)
   baseCssW=base.width*fit; baseCssH=base.height*fit;
   zoom=1; applyZoom();
+  centerViewer(center, baseCssW, baseCssH);
   renderResult(rec);
+}
+/* 全体表示時、canvaswrap内でプレビューが中央に来るよう余白(margin)を調整する。
+   .viewerはinline-blockでcanvasの実寸に合わせて伸縮するため、
+   左右/上下の余白を均等にすることで見た目上センタリングされる。
+   ズームイン/アウト時はこの余白を再計算しない(既存のポインタ追従スクロール計算を崩さないため)。 */
+function centerViewer(cen, w, h){
+  const vw=$("#viewer"); if(!vw||!cen) return;
+  const mx=Math.max(18,(cen.clientWidth-w)/2), my=Math.max(18,(cen.clientHeight-h)/2);
+  vw.style.margin=`${my}px ${mx}px`;
 }
 /* オーバーレイ(バーコード枠)を描く。手入力照合後の再描画でも使う */
 function pbExtLinks(isbn){
@@ -1403,6 +1413,7 @@ function zoomFit(){
   if(selected>=0){ selectPage(selected); return; }
   zoom=1; applyZoom();
   const cen=$("#canvaswrap"); if(cen){cen.scrollLeft=0;cen.scrollTop=0;}
+  const vw=$("#viewer"); if(vw) vw.style.margin="18px";
 }
 function drawBox(g,box,cv,color,label){
   const x=box.x*cv.width,y=box.y*cv.height,w=box.w*cv.width,h=box.h*cv.height;

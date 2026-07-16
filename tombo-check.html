@@ -546,6 +546,7 @@ async function renderPg(n){
   });
   const viewer=$("#viewer");
   viewer.style.width=vp.width+'px'; viewer.style.height=vp.height+'px';
+  centerViewer(cw, vp.width, vp.height);
 
   await page.render({canvasContext:pC.getContext('2d'),viewport:vp}).promise;
 
@@ -553,6 +554,18 @@ async function renderPg(n){
   $("#zoomhint").textContent=Math.round(sc/bsc*100)+'%';
   $("#sbpg").textContent='ページ: '+(pgW*PT2MM).toFixed(1)+'×'+(pgH*PT2MM).toFixed(1)+'mm';
   setupIx();
+}
+/* 全体表示などで余白が余ったとき、.viewerに追加のmargin(センタリング分)を
+   JSで計算して足すことで見た目上センタリングする。flexboxのalign/justify:centerは
+   ズームして中身がcanvaswrapより大きくなった際にscrollLeft/scrollTopが0未満へ
+   動かせず左/上側が永久に見えなくなる問題があるため使わない。 */
+function centerViewer(cw, w, h){
+  const vw=$("#viewer"); if(!vw||!cw) return;
+  const padL=30, padR=30, padT=36, padB=110; // .cw-scrollの基準padding(EXTRA描画分の確保)
+  const extraX=Math.max(0,(cw.clientWidth-padL-padR-w)/2);
+  const extraY=Math.max(0,(cw.clientHeight-padT-padB-h)/2);
+  vw.style.marginLeft=extraX+'px';
+  vw.style.marginTop=extraY+'px';
 }
 
 /* ---------- LINE EXTRACTION via constructPath (PDF.js 3.11) ---------- */
@@ -1038,8 +1051,9 @@ function drawHandles(r,sc){
   const ix=$("#ixC");
   const ctx=ix.getContext('2d');
   ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
-  const EXTRA=parseInt(ix.style.top||'0')*-1;
-  ctx.save(); ctx.translate(0,EXTRA);
+  // h.sx/h.sy(getHandles)は既にEXTRA分のオフセット込みの絶対canvas座標なので、
+  // ここで追加のtranslateはしない(以前はここでも+EXTRAしていて二重加算になり、
+  // 見た目のハンドル位置が実際のクリック判定位置よりEXTRA分下にズレていた)
   for(const h of getHandles(r,sc)){
     const act=h.i===actIdx;
     const c=r.dims[h.i].color;
@@ -1055,7 +1069,6 @@ function drawHandles(r,sc){
     ctx.fillRect(h.sx-sq,h.sy-sq,sq*2,sq*2);
     ctx.strokeRect(h.sx-sq,h.sy-sq,sq*2,sq*2);
   }
-  ctx.restore();
 }
 
 /* ---------- INTERACT (ハンドル操作) ---------- */
