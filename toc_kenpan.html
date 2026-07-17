@@ -137,6 +137,24 @@ header .sp{flex:1}
 #drop .or{margin:10px 0;font-size:11.5px;color:var(--ink-faint)}
 #drop .pick{display:inline-block;background:var(--amber);color:#fff;
       border-radius:7px;padding:8px 22px;font-weight:700}
+/* ---- 処理中は画面中央に大きく進捗を表示（右下の小さな#statusだけでは
+   「止まっているように見える」ため、ドロップ枠自体を進捗表示に切り替える）---- */
+#drop.busy .ico,#drop.busy b,#drop.busy .or,#drop.busy .pick,
+#drop.busy #dropHint{display:none}
+#drop.busy{cursor:default}
+#dropProgress{display:none}
+#drop.busy #dropProgress{display:block}
+#dropProgress .plabel{color:var(--ink);font-size:16.5px;font-family:var(--mono);
+      margin-bottom:16px}
+#dropProgress .pbar{width:min(320px,80%);height:12px;border-radius:7px;
+      background:var(--line);margin:0 auto;overflow:hidden}
+#dropProgress .pbar-fill{height:100%;width:0%;background:var(--amber);
+      transition:width .15s ease}
+#dropProgress .ppct{margin-top:10px;font-size:13px;color:var(--ink-dim);
+      font-family:var(--mono)}
+#dropProgress .pspin{display:inline-block;width:9px;height:9px;border-radius:50%;
+      background:var(--amber);margin-right:7px;animation:pspin 1s ease-in-out infinite}
+@keyframes pspin{0%,100%{opacity:.25}50%{opacity:1}}
 
 /* 操作行：ヘッダ直下に密着した全幅ツールバー（プレビュー以外は白ベース） */
 #opts{display:flex;gap:14px;align-items:center;margin:0;flex-wrap:wrap;
@@ -265,8 +283,16 @@ details .inner{margin-top:8px}
    color:var(--ink);border-radius:5px;padding:3px 7px;font-family:var(--mono);
    font-size:12px}
 #cvwrap{flex:1;position:relative;overflow:auto;min-height:0;
-        cursor:grab}
-#cvwrap.fit{display:flex;align-items:center;justify-content:center}
+        cursor:grab;display:flex;align-items:safe center;justify-content:safe center}
+/* justify-content/align-items に safe を付けることで、版面（canvas）が
+   ビュー枠より小さい間は中央寄せ、大きくなって収まらなくなったら
+   自動的に開始位置基準へフォールバックしてスクロールで全体に到達できる
+   ようにする（safeなしのcenterだと拡大時に版面の先頭側が
+   スクロールで到達不能になる問題があった）。以前はzoom<=1.01の時だけ
+   .fitクラスで中央寄せしていたが、その結果、拡大後も版面がビュー枠より
+   小さい場合（例: 小さな矩形にフォーカスして軽くズームしたページ）に
+   中央寄せが外れ、版面が左上に寄って大きな余白ができる不具合があった。
+   常時centerを効かせることでこのケースも中央表示になる。*/
 #cvwrap.dragging{cursor:grabbing}
 #pgcanvas{display:block}
 #pgcanvas{background:#fff;border-radius:4px;
@@ -319,7 +345,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
           title="検出された目次ページだけを別ウィンドウでプレビュー">目次ページを表示</button>
   <label>見出しサイズ差 <input type="text" id="hdelta" value="0.6" style="width:52px"></label>
   <label>類似度しきい値 <input type="text" id="fuzzy" value="0.60" style="width:52px"></label>
-  <label>トンボ余白 <input type="text" id="tombo" value="0" style="width:46px"> mm</label>
+  <label title="通常は空欄のままでOK。塗り足し・トンボの余白は自動判定されます。判定結果を手動で上書きしたい場合のみmm数を入力してください。">仕上がり余白（通常は自動・手動指定は任意）<input type="text" id="tombo" value="" placeholder="自動" style="width:46px"> mm</label>
   <button id="rerun" disabled>再解析</button>
   <button class="hbtn" id="htmlReportBtn" onclick="exportHTML()"
           style="margin-left:auto">HTMLレポート</button>
@@ -332,7 +358,12 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     <b>本文PDFをここにドラッグ＆ドロップ</b>
     <div class="or">— または —</div>
     <span class="pick">PDFを選択</span><br><br>
-    <span style="font-size:11px">横組み・通しノンブルの組版済みPDF対応／データはブラウザ外に送信されません</span>
+    <span id="dropHint" style="font-size:11px">横組み・通しノンブルの組版済みPDF対応／データはブラウザ外に送信されません</span>
+    <div id="dropProgress">
+      <div class="plabel"><span class="pspin"></span><span id="pbigLabel">処理中…</span></div>
+      <div class="pbar"><div class="pbar-fill" id="pbarFill"></div></div>
+      <div class="ppct" id="pbarPct"></div>
+    </div>
   </div>
   <input type="file" id="file" accept="application/pdf" style="display:none">
 
@@ -586,10 +617,12 @@ def match_ratio(a: str, b: str) -> float:
 class PageInfo:
     __slots__ = ("index", "nombre", "nombre_raw", "nombre_sys", "hashira",
                  "headings", "body_size", "height", "width", "trim",
-                 "hashira_bbox", "nombre_bbox")
+                 "hashira_bbox", "nombre_bbox", "phys", "half", "x_offset")
 
     def __init__(self, index):
-        self.index = index          # 物理ページ index (0-based)
+        self.index = index          # 論理ページ index (0-based)。
+                                     # 見開き（1物理ページ=2論理ページ）で
+                                     # ないPDFでは物理ページindexと一致する。
         self.nombre = None          # int
         self.nombre_raw = None      # str
         self.nombre_sys = None      # "arabic" / "roman"
@@ -601,6 +634,14 @@ class PageInfo:
         self.trim = None            # (x0, y0, x1, y1) 仕上がり領域
         self.hashira_bbox = None    # 柱の外接矩形 [x0,y0,x1,y1]
         self.nombre_bbox = None     # ノンブルの外接矩形
+        self.phys = index           # 実PDFページ index (0-based)。
+                                     # 見開き分割時、左右の論理ページが同じ
+                                     # phys を共有する（プレビュー描画用）。
+        self.half = None            # None / "L" / "R"（見開き分割時のみ）
+        self.x_offset = 0.0         # この論理ページの版面が物理ページ内で
+                                     # 左からどれだけずれているか(pt)。
+                                     # bbox系座標を物理ページ座標へ戻す際に
+                                     # 加算する。
 
 
 def page_trim(r):
@@ -1095,7 +1136,9 @@ TRAILING_NUM_RE = re.compile(
 
 
 def group_lines_x(lines, tol=2.0):
-    """y近接（±tol）でグループ化し、(連結文字列, 最小x0) のリストを返す"""
+    """y近接（±tol）でグループ化し、(連結文字列, 最小x0, 外接bbox) のリストを返す。
+    bboxはこのグループが版面上に実際に描かれている位置（x0,y0,x1,y1）で、
+    ハイライト矩形の算出に使う。"""
     lines = sorted(lines, key=lambda l: l["y0"])
     groups, cur, cur_y = [], [], None
     for ln in lines:
@@ -1107,8 +1150,15 @@ def group_lines_x(lines, tol=2.0):
             cur, cur_y = [ln], ln["y0"]
     if cur:
         groups.append(cur)
-    return [(" ".join(c["text"] for c in sorted(g, key=lambda l: l["x0"])),
-             min(c["x0"] for c in g)) for g in groups]
+    out = []
+    for g in groups:
+        text = " ".join(c["text"] for c in sorted(g, key=lambda l: l["x0"]))
+        x0 = min(c["x0"] for c in g)
+        bbox = [min(c["x0"] for c in g), min(c["y0"] for c in g),
+                max(c.get("x1", c["x0"]) for c in g),
+                max(c.get("y1", c["y0"]) for c in g)]
+        out.append((text, x0, bbox))
+    return out
 
 
 def group_lines(lines, tol=2.0):
@@ -1186,6 +1236,7 @@ def parse_toc(raw, toc_page_indices, bands=(0.06, 0.94), debug=False):
         trim = page_trim(r)
         ty0, th = trim[1], trim[3] - trim[1]
         lines = [{"y0": round(ln["y0"], 1), "x0": ln["x0"],
+                  "x1": ln["x1"], "y1": round(ln["y1"], 1),
                   "text": ln["text"]}
                  for ln in r["lines"]
                  if in_trim(ln, trim)
@@ -1196,20 +1247,23 @@ def parse_toc(raw, toc_page_indices, bands=(0.06, 0.94), debug=False):
         # 章行マーカー(\x08)があるのに末尾数字が無い行は、
         # 直後の「著者名＋ノンブル」折り返し行と連結する
         joined, skip = [], False
-        for i, (t, x0) in enumerate(merged):
+        for i, (t, x0, bbox) in enumerate(merged):
             if skip:
                 skip = False
                 continue
             if "\x08" in t and not TRAILING_NUM_RE.match(t.strip()) \
                     and i + 1 < len(merged):
-                nxt = merged[i + 1][0].strip()
+                nxt_t, _, nxt_bbox = merged[i + 1]
+                nxt = nxt_t.strip()
                 if re.match(r"^\S{0,20}[\s\u3000]*\d{1,4}$", nxt):
                     t = t + " " + nxt
+                    bbox = [min(bbox[0], nxt_bbox[0]), min(bbox[1], nxt_bbox[1]),
+                            max(bbox[2], nxt_bbox[2]), max(bbox[3], nxt_bbox[3])]
                     skip = True
-            joined.append((t, x0))
+            joined.append((t, x0, bbox))
         merged = joined
 
-        for text, gx0 in merged:
+        for text, gx0, gbbox in merged:
             t = re.sub(r"[\ufeff]", "", text).strip()
             if not t or TOC_TITLE_RE.match(t) or SUBTITLE_RE.match(t):
                 continue
@@ -1221,7 +1275,8 @@ def parse_toc(raw, toc_page_indices, bands=(0.06, 0.94), debug=False):
             if not title or parse_pageno(title) is not None:
                 continue
             entries.append({"title": title, "page": num,
-                            "toc_page_index": pidx, "x0": round(gx0, 1)})
+                            "toc_page_index": pidx, "x0": round(gx0, 1),
+                            "bbox": [round(v, 1) for v in gbbox]})
             if debug:
                 print(f"[TOC] {title!r} -> {num}", file=sys.stderr)
     return entries
@@ -1324,12 +1379,16 @@ def check_toc_vs_headings(toc_entries, pages, nmap, main_offset,
         idx = physical_index_for_nombre(ent["page"], nmap, main_offset,
                                         len(pages))
         if idx is None:
-            issues.append({
+            iss = {
                 "id": "TOC-1", "severity": "error",
                 "page_index": ent["toc_page_index"],
                 "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」の記載ノンブル {ent['page']} に"
-                       f"対応するページが見つかりません。"})
+                       f"対応するページが見つかりません。"}
+            if ent.get("bbox"):
+                b = ent["bbox"]
+                iss["rects"] = [[b[0] - 10, b[1] - 6, b[2] + 10, b[3] + 6]]
+            issues.append(iss)
             continue
 
         # 当該ページ近傍の見出しと照合（改ページ位置の揺れを許容）
@@ -1784,55 +1843,177 @@ def collapse_cjk_spaces(s):
     return _CJK_SP_RE.sub("", s) if s else s
 
 
+def _is_bare_pageno_text(ct):
+    """列テキスト全体が単独のノンブル（算用数字／漢数字）とみなせるか。
+    章タイトルとノンブルが別列に分かれたデザインで、ノンブル列だけを
+    タイトル・柱・章立て構造から見分けるのに使う。"""
+    return bool(ct) and len(ct) <= 5 \
+        and all(ch in KANJI_DIGITS or ch.isdigit() for ch in ct) \
+        and parse_pageno(ct) is not None
+
+
+def _is_toc_description_text(ct):
+    """目次の内容紹介列（副題・トピックの列挙）らしいテキストか。
+    「Ａ／Ｂ／Ｃ」のような列挙は章タイトルではなく、項目化してはならない
+    （実例: 「最初のお金／銀餅との関連／十二銭以外にも銭が／…」を
+    誤って目次項目として登録し、含まれる漢数字「十二」までノンブルと
+    誤認していた）。"""
+    return ("／" in ct and len(ct) > 15) or len(ct) > 30
+
+
 def parse_toc_vertical(raw, toc_idx, debug=False):
     """縦組み目次を解析。
 
-    構造: 列ごとに「第N部見出し(大)」または「章タイトル(縦連結)＋ノンブル(小)」。
-    各列の末尾に小級数の算用数字（章ノンブル）が付く。
-    返す: [{title, page, toc_page_index, level}]  level: 0=部, 1=章
+    構造パターン:
+    ・「第N部見出し(大)」＋近傍の独立したノンブル列
+    ・「章タイトル(縦連結)＋ノンブル」が同一列内で連結
+    ・章タイトル列とノンブル列が、内容紹介列（副題の列挙）を挟んで
+      別々の列に分離しているデザイン
+    ノンブルは算用数字・漢数字（一四のように1桁ずつ並べる書き方）の
+    双方に対応する。
+    返す: [{title, page, toc_page_index, level, bbox}]  level: 0=部, 1=章
     """
     entries = []
     for pidx in toc_idx:
         r = raw[pidx]
         trim = page_trim(r)
+        th = trim[3] - trim[1]
+        top_y = trim[1] + th * 0.12
         cols = assemble_vertical([{"h": r["h"], "w": r["w"],
                                    "lines": [l for l in r["lines"]
                                              if in_trim(l, trim)]}])[0]["lines"]
+        # 版面最上部の帯（天柱・ノンブル。例:「3　目　次」）は目次ページ
+        # 自体の柱ノンブルであって目次項目ではない。この帯の横長ランを
+        # 項目候補に混ぜると、その広い版面幅ゆえに近傍ノンブル列の対応
+        # 付けを本来のタイトル列から奪ってしまうため、先に除外する。
+        cols = [c for c in cols if c["y1"] > top_y]
+        # 文字間隔が広い大見出し「目次」等は、同じ列（同x）内で縦の隙間が
+        # assemble_vertical の閾値を超え、「目」「次」のように1文字ずつ
+        # 複数ランへ分裂することがある。分裂したランを目次項目として誤登録
+        # しないよう、同x・上下に並ぶランを連結して見出しパターン
+        # （TOC_TITLE_RE）に一致すれば、まとめて除外する。
+        _heading_ids = set()
+        _by_x = {}
+        for c in cols:
+            _by_x.setdefault(round((c["x0"] + c["x1"]) / 2), []).append(c)
+        for _grp in _by_x.values():
+            if len(_grp) < 2:
+                continue
+            _grp_sorted = sorted(_grp, key=lambda c: c["y0"])
+            _joined = re.sub(r"[﻿\s]", "",
+                              clean_text("".join(g["text"] for g in _grp_sorted)))
+            if _joined and TOC_TITLE_RE.match(_joined):
+                _heading_ids.update(id(g) for g in _grp_sorted)
+        if _heading_ids:
+            cols = [c for c in cols if id(c) not in _heading_ids]
         # 列を版面右→左（x大→小）に並べ、読み順に処理
         cols.sort(key=lambda c: -((c["x0"] + c["x1"]) / 2))
+
+        # 内容紹介列（副題の列挙、／区切り）は1列に収まらず複数列へ折り返す
+        # ことがある。折り返し最終列は残り文字数が少なく「／」を含まない
+        # ことも多いため、_is_toc_description_text の長さ／記号条件に
+        # 掛からず目次項目として誤登録されていた（実例:「初瀬山は神仙の山」
+        # が「…神仙」列と「の山」列に分かれ、「の山」が独立項目扱いに
+        # なっていた）。直前列が内容紹介列（またはその継続）で、かつ次列が
+        # 「第N部/章」等の新しい見出しパターンでもノンブル単独列でもない
+        # 小さめ級数の短い列なら、その内容紹介の継続とみなして同様に除外する。
+        _cont_ids = set()
+        _prev_is_desc = False
+        _prev_vsize = None
+        for c in cols:
+            ct = clean_text(c["text"]).strip()
+            if not ct:
+                _prev_is_desc = False
+                _prev_vsize = None
+                continue
+            if _is_toc_description_text(ct):
+                _prev_is_desc = True
+                _prev_vsize = c.get("vsize", c["size"])
+                continue
+            if _prev_is_desc and not _is_bare_pageno_text(ct) \
+                    and not VERT_CHAP_HEAD_RE.match(ct) \
+                    and not VERT_PART_PREFIX_RE.match(ct) \
+                    and not VERT_PART_RE.match(ct) \
+                    and c.get("vsize", c["size"]) <= (_prev_vsize or 0) + 1.0:
+                _cont_ids.add(id(c))
+                _prev_is_desc = True
+                _prev_vsize = c.get("vsize", c["size"])
+            else:
+                _prev_is_desc = False
+                _prev_vsize = None
+        if _cont_ids:
+            cols = [c for c in cols if id(c) not in _cont_ids]
 
         # 部見出し（「第N部」単独・大級数）は、同列の数字グループが別ブロックに
         # 分かれてノンブルが付かないことがある。先に「部見出し列」と
         # 「その近傍(±同x)にある単独数字グループ」を対応付ける。
         part_cols = []
         num_only = []  # (x中心, 数字, col)
+        num_only_idx = {}   # id(col) -> num_only内index
+        titled_num = {}     # id(col) -> (前置テキスト, 数字)  著者名+記載ノンブル等
         for c in cols:
             ct = clean_text(c["text"]).strip()
             cx = (c["x0"] + c["x1"]) / 2
             if VERT_PART_RE.match(ct) or VERT_PART_PREFIX_RE.match(ct) \
                     or (c.get("vsize", c["size"]) >= 11.0 and "部" in ct):
                 part_cols.append((cx, c))
-            elif re.fullmatch(r"\d{1,4}", ct):
-                num_only.append((cx, int(ct), c))
-        part_page = {}
+            elif _is_bare_pageno_text(ct):
+                num_only_idx[id(c)] = len(num_only)
+                num_only.append((cx, parse_pageno(ct), c))
+            else:
+                # 「著者名＋記載ノンブル」等、本来のタイトルとは別の短い
+                # 付随列が、末尾に漢数字／算用数字のノンブルを連結したまま
+                # 1列になっていることがある（実例:「舘野和己二二七」＝
+                # 解説者名＋開始ノンブル。実際の項目タイトル「金子裕之
+                # 『平城京の精神生活』を読む」は上の別ランに分離）。
+                # この場合、項目タイトル列は末尾に数字を持たず対応ノンブル
+                # 不明のままになるため、末尾が妥当なノンブルで残りが短い
+                # （人名・肩書相当）列は、近傍の未解決タイトルへ数字だけを
+                # 提供できるよう num_only にも候補登録しておく
+                # （実際にどちらへ使うかは後段の2周目で確定する）。
+                mk = re.search(r"([0-9]{1,4}|[〇一二三四五六七八九十]{1,4})$", ct)
+                if mk and not _is_toc_description_text(ct):
+                    cand_n = parse_pageno(mk.group(1))
+                    pre = ct[:mk.start()].strip().strip(LEADER_CHARS)
+                    if cand_n is not None and pre and len(pre) <= 10 \
+                            and not VERT_CHAP_HEAD_RE.match(pre) \
+                            and not VERT_PART_PREFIX_RE.match(pre):
+                        num_only_idx[id(c)] = len(num_only)
+                        num_only.append((cx, cand_n, c))
+                        titled_num[id(c)] = (pre, cand_n)
         used_num = set()
-        for cx, pc in part_cols:
+
+        def _pop_nearest_num(cx, width):
             best = None
             for k, (nx, nv, nc) in enumerate(num_only):
                 if k in used_num:
                     continue
-                if abs(nx - cx) <= max(8.0, (pc["x1"] - pc["x0"]) * 0.8):
+                if abs(nx - cx) <= max(8.0, width * 0.8):
                     d = abs(nx - cx)
                     if best is None or d < best[0]:
                         best = (d, k, nv)
             if best:
-                part_page[id(pc)] = best[2]
                 used_num.add(best[1])
+                return best[2]
+            return None
 
+        part_page = {}
+        for cx, pc in part_cols:
+            n = _pop_nearest_num(cx, pc["x1"] - pc["x0"])
+            if n is not None:
+                part_page[id(pc)] = n
+
+        deferred_titled_num = []
         for col in cols:
             raw_t = clean_text(col["text"])
             t = re.sub(r"[\ufeff]", "", raw_t).strip()
             if not t:
+                continue
+            # 著者名＋記載ノンブル等の付随列は、他の未解決タイトルへ数字を
+            # 提供できる候補のため、他タイトルの処理が一通り終わってから
+            # （番号が消費済みかどうか確定してから）まとめて処理する。
+            if id(col) in titled_num:
+                deferred_titled_num.append(col)
                 continue
             # 部見出しに紐付いた単独数字があれば、それを記載ノンブルとする
             if id(col) in part_page:
@@ -1840,12 +2021,19 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
                 if title:
                     entries.append({"title": title, "page": part_page[id(col)],
                                     "toc_page_index": pidx, "level": 0,
-                                    "x0": round(col["x0"], 1)})
+                                    "x0": round(col["x0"], 1),
+                                    "bbox": [round(col["x0"], 1), round(col["y0"], 1),
+                                             round(col["x1"], 1), round(col["y1"], 1)]})
                 continue
-            # この列が、部に紐付け済みの単独数字そのものなら二重計上を防ぐ
-            if re.fullmatch(r"\d{1,4}", t) and any(
-                    part_page.get(id(pc)) == int(t)
-                    for _, pc in part_cols):
+            # 単独の数字列（部に紐付け済み／未対応いずれも）はそれ自体を
+            # 目次項目としては登録しない
+            if _is_bare_pageno_text(t):
+                continue
+            # 内容紹介列（副題の列挙）は章タイトルではないため登録しない
+            # （実例:「最初のお金／銀餅との関連／十二銭以外にも銭が／…」を
+            # 目次項目として誤登録し、中の漢数字「十二」までノンブルと
+            # 誤認していた）
+            if _is_toc_description_text(t):
                 continue
             # 末尾の算用数字（章ノンブル）を分離
             m = re.search(r"(\d{1,4})\s*$", t)
@@ -1854,16 +2042,49 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
             title = clean_toc_title(title)
             if not title:
                 continue
+            if num is None:
+                # タイトルとノンブルが別列に分離しているデザイン:
+                # 近傍の未使用ノンブル列を対応付ける
+                cx = (col["x0"] + col["x1"]) / 2
+                num = _pop_nearest_num(cx, col["x1"] - col["x0"])
+            # 「第N章/編」に明確に一致するタイトルは、級数(vsize)が大きくても
+            # 部見出しではなく章見出しとして扱う。部の無い（章のみの）本では
+            # 章見出しが本文より大きい級数で組まれることが多く、vsize>=11.0
+            # だけで部(level0)と誤判定すると、check_hashira_vertical の章境界
+            # 判定（level1前提）から章が丸ごと抜け落ちてしまうため。
             is_part = bool(VERT_PART_RE.match(title)) \
                 or bool(VERT_PART_PREFIX_RE.match(title)) \
-                or col["vsize"] >= 11.0
+                or (col["vsize"] >= 11.0 and not VERT_CHAP_HEAD_RE.match(title))
             entries.append({"title": title, "page": num,
                             "toc_page_index": pidx,
                             "level": 0 if is_part else 1,
-                            "x0": round(col["x0"], 1)})
+                            "x0": round(col["x0"], 1),
+                            "bbox": [round(col["x0"], 1), round(col["y0"], 1),
+                                     round(col["x1"], 1), round(col["y1"], 1)]})
             if debug:
                 print(f"[vTOC L{0 if is_part else 1}] {title!r} -> {num}",
                       file=sys.stderr)
+
+        # 著者名＋記載ノンブル等の付随列（deferred_titled_num）: 他の
+        # タイトル列が全て処理し終えた時点で、その数字が既に別タイトルへ
+        # 提供・消費済みなら二重登録を避けるため何もしない。誰にも使われて
+        # いなければ（対応するタイトル列が見つからない独立した項目である
+        # 可能性があるため）、これまで通り自列のテキスト＋数字で登録する。
+        for col in deferred_titled_num:
+            idx = num_only_idx.get(id(col))
+            if idx is not None and idx in used_num:
+                continue
+            pre, cand_n = titled_num[id(col)]
+            title = clean_toc_title(pre)
+            if not title:
+                continue
+            entries.append({"title": title, "page": cand_n,
+                            "toc_page_index": pidx, "level": 1,
+                            "x0": round(col["x0"], 1),
+                            "bbox": [round(col["x0"], 1), round(col["y0"], 1),
+                                     round(col["x1"], 1), round(col["y1"], 1)]})
+            if debug:
+                print(f"[vTOC L1*] {title!r} -> {cand_n}", file=sys.stderr)
     return entries
 
 
@@ -1906,7 +2127,14 @@ def _merge_horizontal_runs(items, tol=2.0, gap_factor=0.6):
         rows.append(cur)
 
     def _is_bare_num(it):
-        t = (it.get("text") or "").strip()
+        # clean_text() で制御文字・BOM(﻿)を除いてから判定する。
+        # pdf.js はノンブル断片の先頭にBOM等の不可視文字を残したまま
+        # 別アイテムとして返すことがあり、素の.strip()だけでは
+        # ﻿が残って parse_pageno が数値と認識できず、単独の
+        # ノンブル断片が誤って隣接テキストと結合されてしまう
+        # （実例:「﻿2」が地の帯で隣接する断片と結合され、
+        # 柱として「2の」のような無意味な文字列が生成された）。
+        t = clean_text(it.get("text") or "").strip()
         return bool(t) and parse_pageno(t) is not None
 
     out = []
@@ -1946,32 +2174,30 @@ def _merge_horizontal_runs(items, tol=2.0, gap_factor=0.6):
     return out
 
 
-def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0):
-    """縦組みページからノンブル・柱・部/章見出しを抽出。
+# 本文の文中・文末に現れがちな句読点・約物。天地帯の柱候補判定で、
+# 本文の行末（縦組み各列の最下部の文字が偶然水平に並んで拾われた
+# 「横長ラン」）を柱と誤認しないためのフィルタに使う。真の柱（章タイトル
+# 等）はこれらの記号を含まないことがほとんどのため。
+BODY_PUNCT_RE = re.compile(r"[、。，．！？!?「」『』（）()―─:：;；]")
 
-    ノンブル: 下端の小級数の算用数字（左右どちらの隅でも可）。
-    柱      : ノンブルと同じ下端帯にある、数字でない小級数テキスト。
-    見出し  : 版面上部に右寄せで現れる大きめの縦連結テキスト（部・章扉）。
+# 実質的な内容文字（漢字・かな・英数字）。柱候補が約物・記号・装飾罫
+# （☆＊等の場面転換マークや、段落冒頭の鉤括弧が版面最上部に来た場合など）
+# だけで構成されていないかを判定するのに使う。
+HASHIRA_CONTENT_RE = re.compile(
+    r"[一-鿿぀-ゟ゠-ヿa-zA-Z0-9０-９ー]")
 
-    foot_pct: 下端帯とみなすy位置（トリム高に対する比率、既定0.90）。
-    pdf.js抽出はPDFのTrimBoxを取得できないため、トンボ付きPDFで
-    トリムが未設定（版面全体=trim）だと、この比率基準では柱・ノンブルが
-    版面より下に外れてしまうことがある。extract_roles_vertical_auto は
-    この値を段階的に下げて再試行する。
-    foot_top_pct: 下端帯の下側の境界（既定1.0=ページ最下端まで）。
-    帯を広げて再試行する際、印刷所の検版用スラグ（版面外の作業注記）まで
-    帯に含めてしまわないよう、re-try時のみ少し手前で区切るために使う。
+
+def _hashira_top_signal(raw, body_size, foot_pct=0.90, foot_top_pct=1.0):
+    """天柱（版面上部に柱ノンブルがある）版面かどうかを判定する。
+
+    地に柱候補が乏しく、天に横組みの柱候補が多い版面＝天柱と判定する。
+    extract_roles_vertical_auto がノンブル抽出帯を段階的に広げて再試行する際、
+    広げた地帯には本文の文末などが大量に混入し「地にも柱が多い」という
+    誤判定を招く（天柱版面なのに foot_pct を下げるほど hashira_top が
+    False に転落し、地の本文断片が柱として誤収集されていた）。
+    この判定は常に既定帯（foot_pct=0.90, foot_top_pct=1.0）のみで1回行い、
+    再試行の帯拡大に影響されない安定した信号として扱う。
     """
-    pages = []
-    sizes = Counter()
-    for r in raw:
-        trim = page_trim(r)
-        for ln in r["lines"]:
-            if in_trim(ln, trim):
-                sizes[round(ln["size"], 1)] += len(clean_text(ln["text"]))
-    body_size = sizes.most_common(1)[0][0] if sizes else 9.9
-
-    # 天（頭）の横組みラン（数字でない複数文字・本文サイズ以下・横長）＝天柱候補
     def _head_hashira_runs(r, trim, th):
         out = []
         top_y = trim[1] + th * 0.12
@@ -1984,9 +2210,181 @@ def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0):
             if l["size"] > body_size + 0.5:
                 continue
             if (l["x1"] - l["x0"]) <= (l["y1"] - l["y0"]) * 1.3:
-                continue   # 横組みランのみ（縦組み本文の先頭文字を除外）
+                continue
             out.append(l)
         return out
+
+    def _foot_hashira_hits(r, trim, th):
+        fl = [l for l in r["lines"] if in_trim(l, trim)
+              and trim[1] + th * foot_pct <= l["y0"]
+              <= trim[1] + th * foot_top_pct]
+        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                   "lines": _merge_horizontal_runs(fl)}]
+                                  )[0]["lines"]
+        hits = 0
+        for c in cols:
+            ct = clean_text(c["text"])
+            if not ct or parse_pageno(ct) is not None:
+                continue
+            if c["size"] > body_size + 0.5:
+                continue
+            # 縦組み本文の各列末尾の1文字が、たまたま地帯で水平に隣接
+            # して1つの「横長ラン」に結合されただけの断片は、句読点・
+            # 約物を含むことが多い実在の柱と違い見分けにくいため、
+            # 句読点を含む場合は本文の行末とみなして柱候補から除外する。
+            if BODY_PUNCT_RE.search(ct):
+                continue
+            hits += 1
+        return hits
+
+    foot_hits = head_hits = 0
+    for r in raw:
+        trim = page_trim(r)
+        th = trim[3] - trim[1]
+        if th <= 0:
+            continue
+        if _foot_hashira_hits(r, trim, th):
+            foot_hits += 1
+        if _head_hashira_runs(r, trim, th):
+            head_hits += 1
+    return head_hits >= 3 and head_hits > foot_hits * 1.5
+
+
+def _nombre_top_signal(raw, body_size, foot_pct=0.90, foot_top_pct=1.0):
+    """ノンブル（ページ番号）が版面上部にある版面かどうかを判定する。
+
+    柱（hashira_top）とノンブルの位置は必ずしも一致しない。例えば
+    柱（章タイトル）は天にあってもノンブルは地の中央にある版面が
+    実在する（柱と一体で天に組まれる版面もある）。この判定を
+    hashira_top と混同すると、柱は天・ノンブルは地という版面で
+    地のノンブルを誤って無視してしまう。そのため独立に判定する。
+    """
+    def _head_nombre_hit(r, trim, th):
+        top_y = trim[1] + th * 0.12
+        # pdf.jsは天のノンブル＋柱を語単位の別アイテムで返すことがあり、
+        # ノンブル単独アイテム（例:「21」）は文字数が少なく正方形に近い
+        # 外接矩形になるため、下のアスペクト比フィルタ（縦組み本文の
+        # 先頭文字除外用）に誤って引っかかって除外されてしまう。まず
+        # 断片を結合してから判定する（地の帯と同じ _merge_horizontal_runs）。
+        cand = _merge_horizontal_runs(
+            [l for l in r["lines"] if in_trim(l, trim) and l["y1"] <= top_y])
+        for l in cand:
+            t = clean_text(l["text"]).strip()
+            if not t or len(t) > 40:
+                continue
+            if l["size"] > body_size + 0.5:
+                continue
+            is_num_frag = len(t) <= 5 and parse_pageno(t) is not None
+            if not is_num_frag \
+                    and (l["x1"] - l["x0"]) <= (l["y1"] - l["y0"]) * 1.3:
+                continue
+            if is_num_frag:
+                return True
+            m = MARGIN_SPLIT_RE2.match(t) or MARGIN_SPLIT_RE.match(t)
+            if m and parse_pageno(m.group("num")) is not None:
+                return True
+        return False
+
+    def _foot_nombre_hits(r, trim, th):
+        fl = [l for l in r["lines"] if in_trim(l, trim)
+              and trim[1] + th * foot_pct <= l["y0"]
+              <= trim[1] + th * foot_top_pct]
+        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                                   "lines": _merge_horizontal_runs(fl)}]
+                                  )[0]["lines"]
+        return sum(1 for c in cols if clean_text(c["text"])
+                   and parse_pageno(clean_text(c["text"])) is not None
+                   and len(clean_text(c["text"])) <= 5
+                   and c["size"] <= body_size + 0.5)
+
+    foot_hits = head_hits = 0
+    for r in raw:
+        trim = page_trim(r)
+        th = trim[3] - trim[1]
+        if th <= 0:
+            continue
+        if _foot_nombre_hits(r, trim, th):
+            foot_hits += 1
+        if _head_nombre_hit(r, trim, th):
+            head_hits += 1
+    return head_hits >= 3 and head_hits > foot_hits * 1.5
+
+
+def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0,
+                           hashira_top=None, nombre_top=False):
+    """縦組みページからノンブル・柱・部/章見出しを抽出。
+
+    ノンブル: 下端の小級数の算用数字（左右どちらの隅でも可）。
+              ただし天柱版面（hashira_top）では天のノンブルを優先する。
+    柱      : ノンブルと同じ帯にある、数字でない小級数テキスト。
+    見出し  : 版面上部に右寄せで現れる大きめの縦連結テキスト（部・章扉）。
+
+    foot_pct: 下端帯とみなすy位置（トリム高に対する比率、既定0.90）。
+    pdf.js抽出はPDFのTrimBoxを取得できないため、トンボ付きPDFで
+    トリムが未設定（版面全体=trim）だと、この比率基準では柱・ノンブルが
+    版面より下に外れてしまうことがある。extract_roles_vertical_auto は
+    この値を段階的に下げて再試行する（天柱版面ではこの再試行は行わない）。
+    foot_top_pct: 下端帯の下側の境界（既定1.0=ページ最下端まで）。
+    帯を広げて再試行する際、印刷所の検版用スラグ（版面外の作業注記）まで
+    帯に含めてしまわないよう、re-try時のみ少し手前で区切るために使う。
+    hashira_top: 天柱判定を外部から固定して渡す場合に指定する（省略時は
+    既定帯で内部判定＝従来どおり）。extract_roles_vertical_auto は
+    帯拡大の影響を避けるため、この値を毎回明示的に渡す。
+    nombre_top: ノンブルが天にあると外部判定された場合に True を渡す
+    （既定False＝ノンブルは地から抽出＝従来どおり）。柱位置(hashira_top)
+    とは独立に扱う（柱は天・ノンブルは地の版面があるため）。
+    """
+    pages = []
+    sizes = Counter()
+    for r in raw:
+        trim = page_trim(r)
+        for ln in r["lines"]:
+            if in_trim(ln, trim):
+                sizes[round(ln["size"], 1)] += len(clean_text(ln["text"]))
+    body_size = sizes.most_common(1)[0][0] if sizes else 9.9
+
+    # 天（頭）の横組みラン（本文サイズ以下・横長）。ノンブル単独／柱単独／
+    # 「ノンブル＋柱」の全パターンを対象とする（数字ランの除外はしない）。
+    def _head_runs(r, trim, th):
+        out = []
+        top_y = trim[1] + th * 0.12
+        cand = [l for l in r["lines"]
+                if in_trim(l, trim) and l["y1"] <= top_y]
+        # pymupdf は「15　　第一章　神のみやこ」のような天のノンブル＋柱を
+        # 1つのspanで返すが、pdf.jsは語（span生成単位）ごとに別アイテムの
+        # まま返すことがある。結合せずにそのまま個別判定すると、ノンブルの
+        # 直後に続く柱本体（例:「神のみやこ」）だけが別アイテムのため
+        # 拾われず、柱が「第一章」のみに欠落する（本来の全文と食い違い、
+        # 章タイトルとの類似度不足で誤ってHSR-2判定される）。地の帯と同様、
+        # ここでも先に同一ベースライン・近接x の断片を結合してから
+        # 判定する（_merge_horizontal_runs はノンブルらしい断片を結合対象
+        # から除外するため、ノンブルと柱本体が誤って1本にまとまる心配はない）。
+        cand = _merge_horizontal_runs(cand)
+        for l in cand:
+            t = clean_text(l["text"]).strip()
+            if len(t) < 1 or len(t) > 40:
+                continue
+            if l["size"] > body_size + 0.5:
+                continue
+            # 横組みランのみ対象（縦組み本文の先頭文字を除外）とする
+            # アスペクト比フィルタだが、数字1〜4桁の妥当なノンブル断片は
+            # 除外しない。pymupdf はノンブル＋柱を1つの横長spanで返すため
+            # 元々このフィルタに掛からなかったが、pdf.jsは断片を語単位の
+            # 別アイテムで返すため、_merge_horizontal_runsで柱本体と
+            # 分離された後のノンブル単独アイテム（例:「21」）は文字数が
+            # 少なく正方形に近い外接矩形になり、このフィルタに誤って
+            # 引っかかって除外され、ノンブルが天から拾えなくなっていた。
+            is_num_frag = len(t) <= 5 and parse_pageno(t) is not None
+            if not is_num_frag \
+                    and (l["x1"] - l["x0"]) <= (l["y1"] - l["y0"]) * 1.3:
+                continue
+            out.append(l)
+        return out
+
+    # 天の柱候補（数字ランを除いたテキストのみ）。天柱判定にのみ使う。
+    def _head_hashira_runs(r, trim, th):
+        return [l for l in _head_runs(r, trim, th)
+                if parse_pageno(clean_text(l["text"]).strip()) is None]
 
     # 地（下端帯）の柱候補数
     def _foot_hashira_hits(r, trim, th):
@@ -2001,20 +2399,29 @@ def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0):
                    and c["size"] <= body_size + 0.5)
 
     # 柱位置（天/地）を文書全体から推定。地に柱が乏しく天に横組み柱が多い版面＝天柱。
-    foot_hits = head_hits = 0
-    for r in raw:
-        trim = page_trim(r)
-        th = trim[3] - trim[1]
-        if th <= 0:
-            continue
-        if _foot_hashira_hits(r, trim, th):
-            foot_hits += 1
-        if _head_hashira_runs(r, trim, th):
-            head_hits += 1
-    hashira_top = head_hits >= 3 and head_hits > foot_hits * 1.5
+    if hashira_top is None:
+        hashira_top = _hashira_top_signal(raw, body_size, foot_pct, foot_top_pct)
 
     def _merge_hashira(pi, t, bbox):
         t = collapse_cjk_spaces(t)
+        # 数字で始まるのに妥当なノンブルとして解釈できない極短い文字列
+        # （例:「2の」）は柱として登録しない。実際の柱テキストが数字で
+        # 始まることは通常なく、こうした断片はフォント/抽出系のグリフ
+        # 誤認識由来の破損ノンブルである可能性が高い（実例: pdf.js経路で
+        # 特定フォントの"0"が"の"と誤認識され、"20"というノンブルが
+        # "2の"という無意味な文字列に化け、章タイトルとの不一致で
+        # 誤検知が発生した）。
+        if len(t) <= 3 and re.match(r"^[0-9０-９]", t):
+            return
+        # 約物・記号・装飾罫（場面転換の☆＊、段落冒頭の鉤括弧等）だけの
+        # 断片は柱として登録しない。実際の柱（章タイトル等）は最低限の
+        # 内容文字（漢字・かな・英数字）を含むのが通例で、内容文字が
+        # 1文字以下の断片は版面最上部にたまたま来た本文側の記号である
+        # 可能性が高い（実例: pdf.js経路で「（ （」「☆＊ （」「す『」
+        # のような断片が柱として誤登録され、章タイトルとの不一致で
+        # HSR-2誤検知が発生した）。
+        if len(HASHIRA_CONTENT_RE.findall(t)) < 2:
+            return
         pi.hashira = (pi.hashira + " / " + t) if pi.hashira else t
         if pi.hashira_bbox is None:
             pi.hashira_bbox = list(bbox)
@@ -2044,18 +2451,46 @@ def extract_roles_vertical(raw, debug=False, foot_pct=0.90, foot_top_pct=1.0):
                 continue
             bbox = [col["x0"], col["y0"], col["x1"], col["y1"]]
             n = parse_pageno(t)
+            # ノンブルが天にあると判定された版面では地の数字は信用しない
+            # （本文の脚注番号等を誤検出しやすいため）。柱の天地判定
+            # (hashira_top) とは独立に扱う（柱は天・ノンブルは地の版面が
+            # あるため、hashira_top で地のノンブルまで無視すると
+            # そちらの版面を壊してしまう）。
             if n is not None and len(t) <= 5 and col["size"] <= body_size + 0.5:
-                if pi.nombre is None:
+                if pi.nombre is None and not nombre_top:
                     pi.nombre, pi.nombre_raw, pi.nombre_sys = n, t, "arabic"
                     pi.nombre_bbox = bbox
             elif (not hashira_top) and col["size"] <= body_size + 0.5:
                 _merge_hashira(pi, t, bbox)
-        # 天柱版面: 上端帯の横組みランを柱とする
-        if hashira_top:
-            for l in _head_hashira_runs(r, trim, th):
+        # 天のランからノンブル・柱を抽出する（hashira_top / nombre_top は
+        # 独立に効く）。「ノンブル＋柱」（例: 7　まえがき）／「柱＋ノンブル」／
+        # ノンブル単独（例: 8）／柱単独の4パターンに対応する。
+        if hashira_top or nombre_top:
+            for l in _head_runs(r, trim, th):
                 t = clean_text(l["text"]).strip()
-                _merge_hashira(pi, t,
-                               [l["x0"], l["y0"], l["x1"], l["y1"]])
+                if not t:
+                    continue
+                bbox = [l["x0"], l["y0"], l["x1"], l["y1"]]
+                n_all = parse_pageno(t)
+                if n_all is not None and len(t) <= 5:
+                    if nombre_top and pi.nombre is None:
+                        pi.nombre, pi.nombre_raw, pi.nombre_sys = n_all, t, "arabic"
+                        pi.nombre_bbox = bbox
+                    continue   # 数字単独ランは柱としては扱わない
+                m = MARGIN_SPLIT_RE2.match(t) or MARGIN_SPLIT_RE.match(t)
+                if m:
+                    num_s, rest = m.group("num"), m.group("hashira").strip()
+                    n = parse_pageno(num_s)
+                    if n is not None and rest:
+                        if nombre_top and pi.nombre is None:
+                            pi.nombre, pi.nombre_raw, pi.nombre_sys = \
+                                n, num_s, "arabic"
+                            pi.nombre_bbox = bbox
+                        if hashira_top:
+                            _merge_hashira(pi, rest, bbox)
+                        continue
+                if hashira_top:
+                    _merge_hashira(pi, t, bbox)
         # 見出し（部・章扉）: 上部の大きめ縦列
         vcols = assemble_vertical([{"h": r["h"], "w": r["w"],
                                     "lines": [l for l in r["lines"]
@@ -2092,7 +2527,43 @@ def extract_roles_vertical_auto(raw, debug=False):
     ノンブル検出率が極端に低い場合のみ帯を段階的に広げて再試行し、
     最も検出できた設定を採用する。通常ケースでは1回目（0.90）で
     十分な検出率に達するため、挙動は変わらない。
+
+    ノンブルが天にある版面（nombre_top、詳細は_nombre_top_signal参照）
+    では、この帯拡大は行わない。ノンブル・柱それぞれの天地判定は既定帯
+    （0.90）のみで1回行う安定した信号であり、地の帯を広げるほど本文の
+    文末などが大量に混入して判定そのものが崩れ、ノンブル・柱ともに
+    本文の断片を誤検出するようになるため（柱の天地とノンブルの天地は
+    独立：柱は天でもノンブルは地の中央にある版面が実在する）。
     """
+    sizes = Counter()
+    for r in raw:
+        trim = page_trim(r)
+        for ln in r["lines"]:
+            if in_trim(ln, trim):
+                sizes[round(ln["size"], 1)] += len(clean_text(ln["text"]))
+    body_size0 = sizes.most_common(1)[0][0] if sizes else 9.9
+
+    hashira_top = _hashira_top_signal(raw, body_size0)
+    nombre_top = _nombre_top_signal(raw, body_size0)
+    # ノンブルが天のランに乗っている（nombre_top）版面では、同じランの
+    # 残り（数字を除いた部分）が柱である。地の帯は本文行末の偶然の
+    # 横長ラン混入で _hashira_top_signal がFalseに振れやすく
+    # （地帯には句読点を含まない断片も残るため）、天にノンブルがある
+    # 事実そのものを柱も天にある強い根拠として扱う。
+    if nombre_top:
+        hashira_top = True
+
+    if nombre_top:
+        pages, body_size = extract_roles_vertical(
+            raw, debug=False, foot_pct=0.90, foot_top_pct=1.0,
+            hashira_top=hashira_top, nombre_top=True)
+        if debug:
+            cov = (sum(1 for p in pages if p.nombre is not None)
+                   / len(pages)) if pages else 0.0
+            print(f"[vAUTO] nombre_top=True hashira_top={hashira_top} "
+                  f"nombre_coverage={cov:.2f}", file=sys.stderr)
+        return pages, body_size
+
     best = None
     for pct in (0.90, 0.85, 0.80, 0.75, 0.70, 0.65):
         # 既定(0.90)以外への再試行時は、版面下端帯の探索を0.965までに区切り、
@@ -2101,7 +2572,9 @@ def extract_roles_vertical_auto(raw, debug=False):
         top_pct = 1.0 if pct >= 0.90 else 0.965
         pages, body_size = extract_roles_vertical(raw, debug=False,
                                                    foot_pct=pct,
-                                                   foot_top_pct=top_pct)
+                                                   foot_top_pct=top_pct,
+                                                   hashira_top=hashira_top,
+                                                   nombre_top=False)
         n = len(pages)
         cov = (sum(1 for p in pages if p.nombre is not None) / n) if n else 0.0
         if best is None or cov > best[0] + 0.02:
@@ -2110,9 +2583,41 @@ def extract_roles_vertical_auto(raw, debug=False):
             break
     cov, pages, body_size, pct = best
     if debug:
-        print(f"[vAUTO] foot_pct={pct} nombre_coverage={cov:.2f}",
-              file=sys.stderr)
+        print(f"[vAUTO] foot_pct={pct} hashira_top={hashira_top} "
+              f"nombre_coverage={cov:.2f}", file=sys.stderr)
     return pages, body_size
+
+
+def _vtoc_has_titled_num(c):
+    """列の末尾がタイトルらしき文字列＋ノンブル（算用数字／漢数字）か。
+    本文段落が列の末尾でたまたま年号などの漢数字で終わる場合
+    （例:「…北魏（四四一」）を誤検知しないよう、列の長さに上限を設ける。"""
+    t = clean_text(c["text"])
+    if len(t) > 30:
+        return False
+    m = re.search(r"[\d〇一二三四五六七八九十]{1,4}\s*$", t)
+    if not m or len(t[:m.start()].strip()) < 2:
+        return False
+    return parse_pageno(m.group(0).strip()) is not None
+
+
+def _vtoc_is_bare_pageno_col(c):
+    """列全体が単独のノンブル（算用数字／漢数字）だけの列か。"""
+    ct = clean_text(c["text"]).strip()
+    return bool(ct) and len(ct) <= 4 \
+        and all(ch in KANJI_DIGITS or ch.isdigit() for ch in ct) \
+        and parse_pageno(ct) is not None
+
+
+def _vtoc_page_cols(r):
+    """目次ページ判定用に、版面最上部の柱ノンブル帯を除いた列を返す。"""
+    trim = page_trim(r)
+    th = trim[3] - trim[1]
+    top_y = trim[1] + th * 0.12 if th > 0 else trim[1]
+    cols = assemble_vertical([{"h": r["h"], "w": r["w"],
+                               "lines": [l for l in r["lines"]
+                                         if in_trim(l, trim)]}])[0]["lines"]
+    return [c for c in cols if c["y1"] > top_y]
 
 
 def find_toc_pages_vertical(raw, pages):
@@ -2120,10 +2625,7 @@ def find_toc_pages_vertical(raw, pages):
     見出しがタイトルと連結している版面（例「第１章土俵の…」）にも対応。"""
     cand = []
     for pidx, r in enumerate(raw[:25]):
-        trim = page_trim(r)
-        cols = assemble_vertical([{"h": r["h"], "w": r["w"],
-                                   "lines": [l for l in r["lines"]
-                                             if in_trim(l, trim)]}])[0]["lines"]
+        cols = _vtoc_page_cols(r)
         parts = sum(1 for c in cols
                     if VERT_TOC_HEAD_RE.match(clean_text(c["text"]).strip()))
         # 末尾が1〜4桁の数字であるだけでなく、その手前にタイトルらしい
@@ -2133,14 +2635,33 @@ def find_toc_pages_vertical(raw, pages):
         # 伴わない裸数字列が複数拾われ、章見出しと組み合わさって誤って
         # 目次ページと判定されることがあった
         # （実例: pdf.js経路でグラフ入りの章扉ページを目次ページと誤認）。
-        def _has_titled_num(c):
-            t = clean_text(c["text"])
-            m = re.search(r"\d{1,4}\s*$", t)
-            return bool(m) and len(t[:m.start()].strip()) >= 2
-        nums = sum(1 for c in cols if _has_titled_num(c))
+        # タイトルとノンブルが別列に分かれたデザイン（内容紹介列を挟んで
+        # 離れる等）では、ノンブルが「裸の数字だけの列」として現れる。
+        # parts>=1（実在する章見出しパターン）を既に要求しているため、
+        # 裸数字列を合わせて数えてもグラフ等の誤検知リスクは低い。
+        nums = sum(1 for c in cols
+                  if _vtoc_has_titled_num(c) or _vtoc_is_bare_pageno_col(c))
         if parts >= 1 and nums >= 3:
             cand.append(pidx)
-    return cand
+
+    # 目次が複数ページにまたがる場合、末尾のページ（あとがき・索引等、
+    # 「第N部/章」パターンを持たない項目のみのページ）は parts>=1 を
+    # 満たさず単独では検出できない。既に確定した候補ページに直接続く
+    # ページが、目次らしい「タイトル＋ノンブル」列を十分含む場合は
+    # 続きとして拾う（章扉ページ等は通常こう複数のノンブル列を持たない
+    # ため、誤って本文ページを拾うリスクは低い）。
+    extended = set(cand)
+    for pidx in list(cand):
+        nxt = pidx + 1
+        while nxt < min(len(raw), 25) and nxt not in extended:
+            cols2 = _vtoc_page_cols(raw[nxt])
+            nums2 = sum(1 for c in cols2 if _vtoc_has_titled_num(c)
+                       or _vtoc_is_bare_pageno_col(c))
+            if nums2 < 2:
+                break
+            extended.add(nxt)
+            nxt += 1
+    return sorted(extended)
 
 
 def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
@@ -2309,12 +2830,16 @@ def check_toc_vertical(toc_entries, pages, nmap, main_offset, raw,
             continue
         idx = find_idx(ent["page"])
         if idx is None:
-            issues.append({
+            iss = {
                 "id": "TOC-1", "severity": "error",
                 "page_index": ent["toc_page_index"],
                 "expected": ent["title"], "actual": None,
                 "msg": f"目次項目「{ent['title']}」の記載ノンブル "
-                       f"{ent['page']} に対応するページがありません。"})
+                       f"{ent['page']} に対応するページがありません。"}
+            if ent.get("bbox"):
+                b = ent["bbox"]
+                iss["rects"] = [[b[0] - 10, b[1] - 6, b[2] + 10, b[3] + 6]]
+            issues.append(iss)
             continue
 
         # 近傍ページの柱（部名でないもの）を候補に
@@ -2530,11 +3055,217 @@ def analyze_vertical(raw, toc_pages=None, fuzzy=0.60, debug=False):
             "toc_found": bool(toc_idx), "vertical": True}
 
 
+def _detect_and_split_spreads(raw):
+    """見開き（1物理ページに論理2ページが左右に並ぶ）を検出し、各物理ページを
+    左右2つの論理ページへ分割する。以降の解析は既存どおり「1論理ページ＝
+    1配列要素」の前提で動くため、ここで分割してしまえば柱・ノンブル・
+    目次照合ロジックは一切変更不要になる。
+
+    検出は版面サイズのみで行う（raw はテキストのみでトンボ等のベクター
+    情報を持たないため）。単ページ本の判型（縦長）に対し、明らかに横長
+    かつ幅がその約2倍の物理ページを見開きとみなす。単ページのみの
+    PDFでは何も検出されず、元の raw をそのまま返す（既存回帰に影響しない）。
+
+    縦組み優勢の文書（右→左に読む）では、右半分を先（若い論理index）、
+    左半分を後にする（実データで確認: 物理見開きページの右側に若い
+    ノンブル、左側に次のノンブルが来る）。横組み文書は左→右のまま。
+
+    戻り値: (raw2, phys_list, offset_list, half_list)
+      raw2[i] に対応する物理ページ index が phys_list[i]、
+      その論理ページの版面が物理ページ内で左からずれている量(pt)が
+      offset_list[i]、左右種別が half_list[i]（見開きでなければ None）。
+    """
+    n = len(raw)
+    if n == 0:
+        return raw, [], [], []
+    hs = [r["h"] for r in raw if r.get("h")]
+    if not hs:
+        return raw, list(range(n)), [0.0] * n, [None] * n
+    med_h = sorted(hs)[len(hs) // 2]
+    portrait_ws = [r["w"] for r in raw if r.get("w") and r.get("h")
+                   and r["w"] < r["h"] * 0.98]
+    single_w = sorted(portrait_ws)[len(portrait_ws) // 2] if portrait_ws \
+        else None
+    vcount = sum(1 for r in raw if r.get("wmode") == 1)
+    rtl = vcount * 2 >= n  # 縦組み優勢なら右→左の読み順
+
+    def _is_spread(r):
+        w, h = r.get("w") or 0, r.get("h") or 0
+        if not w or not h or w <= h * 1.05:
+            return False
+        if med_h and abs(h - med_h) > med_h * 0.08:
+            return False
+        if single_w:
+            ratio = w / single_w
+            return 1.55 <= ratio <= 2.45
+        return True
+
+    if not any(_is_spread(r) for r in raw):
+        return raw, list(range(n)), [0.0] * n, [None] * n
+
+    raw2, phys_list, offset_list, half_list = [], [], [], []
+    for pidx, r in enumerate(raw):
+        if not _is_spread(r):
+            raw2.append(r)
+            phys_list.append(pidx)
+            offset_list.append(0.0)
+            half_list.append(None)
+            continue
+        w, h = r["w"], r["h"]
+        mid = w / 2.0
+
+        def _split_trim(off):
+            t = r.get("trim")
+            if not t:
+                return None
+            tx0, ty0, tx1, ty1 = t
+            nx0, nx1 = max(tx0, off) - off, min(tx1, off + mid) - off
+            if nx1 <= nx0:
+                return None
+            return [nx0, ty0, nx1, ty1]
+
+        left_lines, right_lines = [], []
+        for l in r["lines"]:
+            cx = (l["x0"] + l["x1"]) / 2.0
+            if cx < mid:
+                left_lines.append(l)
+            else:
+                l2 = dict(l)
+                l2["x0"] = l["x0"] - mid
+                l2["x1"] = l["x1"] - mid
+                right_lines.append(l2)
+        left_page = {"h": h, "w": mid, "lines": left_lines,
+                    "wmode": r.get("wmode", 0), "trim": _split_trim(0.0)}
+        right_page = {"h": h, "w": mid, "lines": right_lines,
+                     "wmode": r.get("wmode", 0), "trim": _split_trim(mid)}
+        order = [("R", right_page, mid), ("L", left_page, 0.0)] if rtl \
+            else [("L", left_page, 0.0), ("R", right_page, mid)]
+        for half, page, off in order:
+            raw2.append(page)
+            phys_list.append(pidx)
+            offset_list.append(off)
+            half_list.append(half)
+    return raw2, phys_list, offset_list, half_list
+
+
+def _apply_spread_mapping(result, phys_list, offset_list, half_list):
+    """見開き分割で得た論理ページの解析結果を、物理ページ座標へ戻す。
+    分割していれば pages[].phys/half/x_offset を設定し、bbox系の
+    x座標をすべて物理ページ基準へシフトする（ブラウザ側は常にpdf.jsで
+    "物理ページ"を丸ごとレンダリングするため、ハイライト矩形は物理
+    ページ座標でなければ表示位置がずれる）。分割が発生していない
+    （phys_listが空 or 全てNone/オフセット0）場合は何もしない。"""
+    if not phys_list or not any(half_list):
+        for pi in result.get("pages", []):
+            pi.phys, pi.half, pi.x_offset = pi.index, None, 0.0
+        return result
+
+    def _shift(b, off):
+        return [b[0] + off, b[1], b[2] + off, b[3]] if b else b
+
+    for pi in result.get("pages", []):
+        pi.phys = phys_list[pi.index]
+        pi.half = half_list[pi.index]
+        pi.x_offset = offset_list[pi.index]
+        off = pi.x_offset
+        if off:
+            pi.hashira_bbox = _shift(pi.hashira_bbox, off)
+            pi.nombre_bbox = _shift(pi.nombre_bbox, off)
+            for hd in pi.headings:
+                if hd.get("bbox"):
+                    hd["bbox"] = _shift(hd["bbox"], off)
+
+    for e in result.get("toc_entries", []):
+        tpi = e.get("toc_page_index")
+        if tpi is not None and offset_list[tpi] and e.get("bbox"):
+            e["bbox"] = _shift(e["bbox"], offset_list[tpi])
+        mpi = e.get("matched_page_index")
+        if mpi is not None and offset_list[mpi] and e.get("matched_rect"):
+            e["matched_rect"] = _shift(e["matched_rect"], offset_list[mpi])
+
+    for iss in result.get("issues", []):
+        off = offset_list[iss["page_index"]]
+        if off and iss.get("rects"):
+            iss["rects"] = [_shift(r, off) for r in iss["rects"]]
+
+    return result
+
+
+def _auto_detect_bleed_inset(raw):
+    """印刷用の塗り足し・トンボ分の余白（仕上がりtrimと版面全体の差）を
+    自動推定する。pymupdf（CLI）は page.trimbox から常に正しい trim を
+    raw に含めて渡してくるため、ここでは何もしない。ブラウザ（pdf.js）は
+    TrimBox を取得できず、ユーザーが「トンボ余白」欄に手動でmm数を
+    入力しない限り raw に trim が付かない。無トンボ前提（inset=0）の
+    まま解析すると、実際には十数mmの余白がある版面で天地の帯判定が
+    数%単位でずれ、柱・ノンブルの抽出全体が破綻することがある
+    （実例: 見開き.pdf/aruku_hon_0608new.pdfは実測13mm相当の塗り足しが
+    あり、inset=0のままだと1000件超の誤検知になった）。
+
+    そこで、trim情報が全く無い（＝ユーザー未入力のpdf.js既定状態）場合に
+    限り、日本のDTPで典型的な余白量をいくつか試し、それぞれの余白を
+    仮定してページ役割抽出（ノンブル検出率）を行い、最も安定してノンブルを
+    検出できた余白量を採用する。既にtrim情報がある（CLI、またはユーザーが
+    明示的にトンボ余白を入力した場合）は一切変更しない。"""
+    if not raw or any(r.get("trim") for r in raw):
+        return 0.0
+    candidates_mm = (0, 3, 5, 8, 10, 13, 15, 18, 20)
+    sample = raw[: min(len(raw), 60)]
+    vertical = is_vertical(sample)
+    best_mm, best_score = 0, -1
+    for mm in candidates_mm:
+        inset = mm * 72 / 25.4
+        trial = ([dict(r, trim=[inset, inset, r["w"] - inset, r["h"] - inset])
+                  for r in sample] if inset else sample)
+        try:
+            if vertical:
+                pages, _ = extract_roles_vertical_auto(trial, debug=False)
+            else:
+                pages, _, _ = extract_roles(trial, debug=False)
+        except Exception:
+            continue
+        score = sum(1 for p in pages if p.nombre is not None)
+        if score > best_score:
+            best_score, best_mm = score, mm
+    return best_mm * 72 / 25.4
+
+
 def analyze(raw, toc_pages=None, fuzzy=0.60, heading_delta=0.6,
             margin_ratio=0.085, assemble=False, debug=False):
+    """全チェックの公開エントリポイント。見開き（1物理ページ=2論理ページ）を
+    自動検出して左右分割してから _analyze_core に渡し、結果のページ・
+    座標を物理ページ基準へ戻して返す。単ページのみのPDFでは分割が
+    発生せず、既存の挙動と完全に同じになる。
+
+    toc_pages: 呼び出し側（CLI/ブラウザUI）から見た「物理ページ index
+    (0始まり)」のリスト。見開き分割時は、それぞれの物理ページに対応する
+    論理ページ（分割していれば左右2つとも）へ変換してから _analyze_core
+    に渡す。"""
+    auto_inset = _auto_detect_bleed_inset(raw)
+    if auto_inset:
+        raw = [dict(r, trim=[auto_inset, auto_inset,
+                             r["w"] - auto_inset, r["h"] - auto_inset])
+              for r in raw]
+    raw2, phys_list, offset_list, half_list = _detect_and_split_spreads(raw)
+    logical_toc_pages = None
+    if toc_pages:
+        wanted = set(toc_pages)
+        logical_toc_pages = [i for i, ph in enumerate(phys_list)
+                             if ph in wanted]
+    result = _analyze_core(raw2, toc_pages=logical_toc_pages, fuzzy=fuzzy,
+                           heading_delta=heading_delta,
+                           margin_ratio=margin_ratio, assemble=assemble,
+                           debug=debug)
+    result = _apply_spread_mapping(result, phys_list, offset_list, half_list)
+    result["auto_bleed_mm"] = round(auto_inset * 25.4 / 72, 1)
+    return result
+
+
+def _analyze_core(raw, toc_pages=None, fuzzy=0.60, heading_delta=0.6,
+                  margin_ratio=0.085, assemble=False, debug=False):
     """生データ → 全チェック実行。抽出器（pymupdf / pdf.js）非依存。
 
-    raw: extract_roles と同形式。
+    raw: extract_roles と同形式（見開き分割済みの場合は論理ページ単位）。
     toc_pages: 目次ページ index(0始まり) のリスト。None なら自動検出。
     """
     if is_vertical(raw):
@@ -2593,7 +3324,11 @@ def page_to_dict(pi):
             "nombre_raw": pi.nombre_raw, "nombre_sys": pi.nombre_sys,
             "hashira": pi.hashira,
             "headings": pi.headings,
-            "height": pi.height, "width": pi.width}
+            "height": pi.height, "width": pi.width,
+            # 見開き分割時のみ意味を持つ。ブラウザ側は phys を使って
+            # 実PDFページ（pdfDoc.getPage）を描画する。分割が無ければ
+            # phys は index と同じ値になる。
+            "phys": pi.phys, "half": pi.half}
 
 
 def analyze_json(raw_json: str, options_json: str = "{}") -> str:
@@ -2615,6 +3350,7 @@ def analyze_json(raw_json: str, options_json: str = "{}") -> str:
            "issues": sorted(res["issues"],
                             key=lambda x: (x["page_index"], x["id"])),
            "offset": res["offset"], "toc_found": res["toc_found"],
+           "auto_bleed_mm": res.get("auto_bleed_mm", 0),
            "summary": {"errors": n_err, "warnings": n_warn}}
     return json.dumps(out, ensure_ascii=False)
 
@@ -2638,6 +3374,26 @@ let viewPage = 0, viewRects = [];
 const $ = id => document.getElementById(id);
 const status = (msg, on) => { $("status").innerHTML = on ? `<span class="on">${msg}</span>` : msg; };
 
+// ---- 処理中の大きな進捗表示（ドロップ枠を差し替える）。
+// 右下の小さな#statusだけでは処理中かどうか一見わからず「止まって
+// いるように見える」との指摘があったため、ファイル読込〜解析中は
+// ドロップ枠自体を進捗（ラベル＋バー＋%）に切り替えて目立たせる。
+// ratio: 0〜1の割合。null なら不定（バーは動かさずラベルだけ更新）。
+function setProgress(label, ratio) {
+  $("drop").style.display = "block";
+  $("drop").classList.add("busy");
+  $("pbigLabel").textContent = label;
+  if (ratio == null) return;
+  const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+  $("pbarFill").style.width = pct + "%";
+  $("pbarPct").textContent = pct + "%";
+}
+function clearProgress() {
+  $("drop").classList.remove("busy");
+  $("pbarFill").style.width = "0%";
+  $("pbarPct").textContent = "";
+}
+
 // ---- テーマ切替（ライト既定）
 $("themeBtn").addEventListener("click", () => {
   const root = document.documentElement;
@@ -2656,13 +3412,14 @@ $("resetBtn").addEventListener("click", () => {
   $("results").classList.remove("show");
   $("banner").style.display = "none";
   $("drop").style.display = "block";
+  clearProgress();
   $("rerun").disabled = true; $("resetBtn").disabled = true;
   $("tocPages").value = ""; $("file").value = "";
   status(pyodide ? "解析エンジン準備完了。PDFをドロップしてください。"
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "07101245";
+document.getElementById("buildId").textContent = "071715";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
@@ -2675,7 +3432,12 @@ document.getElementById("buildId").textContent = "07101245";
   async function captureIssueThumb(iss){
     try{
       if(!pdfDoc || !iss || !(iss.rects && iss.rects.length)) return "";
-      const page = await pdfDoc.getPage(iss.page_index + 1);
+      // rects は物理ページ座標（見開き分割時もtoc_core側で戻し済み）のため、
+      // 取得するPDFページも論理indexではなく物理ページ(phys)を使う。
+      const physIdx = (result && result.pages[iss.page_index]
+                      && result.pages[iss.page_index].phys != null)
+                      ? result.pages[iss.page_index].phys : iss.page_index;
+      const page = await pdfDoc.getPage(physIdx + 1);
       const scale = 1.6;
       const vp = page.getViewport({ scale });
       const off = document.createElement("canvas");
@@ -3056,6 +3818,7 @@ async function loadPDF(file) {
   fileName = file.name;
   $("results").classList.remove("show");
   status(`読込中: ${fileName}`, true);
+  setProgress(`読込中: ${fileName}`, 0);
   const buf = await file.arrayBuffer();
   // 日本語(CID)フォントの描画には cMap / 標準フォントの指定が必須
   // cMap/標準フォントは npm 完全ミラーの jsDelivr から取得（.bcmap配信が確実）
@@ -3134,29 +3897,36 @@ async function loadPDF(file) {
     // テキストがほぼ無く、ページに画像があれば OCR 対象（スキャン頁）
     if (textLen < OCR.TEXT_THRESHOLD && await pageHasImage(page))
       scanPages.push(p);
+    setProgress(`テキスト抽出中… ${p} / ${N} ページ`, p / N);
     if (p % 10 === 0 || p === N) status(`テキスト抽出中… ${p} / ${N} ページ`, true);
   }
 
   // ---- スキャン画像ページの OCR フォールバック
   if (scanPages.length) {
     status(`OCRエンジン起動中…（初回は数MB取得） 対象 ${scanPages.length} ページ`, true);
+    setProgress(`OCRエンジン起動中…（初回は数MB取得）`, 0);
     try {
       await OCR.init();
       for (let k = 0; k < scanPages.length; k++) {
         const p = scanPages[k];
         status(`OCR解析中… ${k + 1} / ${scanPages.length}（p.${p}）`, true);
+        setProgress(`OCR解析中… ${k + 1} / ${scanPages.length}（p.${p}）`,
+                    (k + 1) / scanPages.length);
         const page = await pdfDoc.getPage(p);
         rawData[p - 1] = await OCR.recognizePage(page);
       }
       await OCR.terminate();
     } catch (e) {
       status("⚠ OCRに失敗しました（要ネットワーク）: " + e, false);
+      setProgress("⚠ OCRに失敗しました（要ネットワーク）", null);
     }
   }
 
-  $("drop").style.display = "none";
+  setProgress("整合チェック実行中…", null);
   $("resetBtn").disabled = false;
   await runAnalyze();
+  $("drop").style.display = "none";
+  clearProgress();
 }
 
 // ページに画像描画があるか（スキャン頁判定）
@@ -3175,9 +3945,11 @@ async function pageHasImage(page) {
 // ---- 解析（toc_core を Pyodide で実行）
 async function runAnalyze() {
   status("解析エンジン待機中…", true);
+  setProgress("解析エンジン待機中…", null);
   await pyReady;
   if (!pyodide) return;
   status("整合チェック実行中…", true);
+  setProgress("整合チェック実行中…", null);
   // 縦組みページが主体なら横用assembleは無効化（コアが縦処理に分岐）
   const vpages = rawData.filter(p => p.wmode === 1).length;
   const opts = { assemble: vpages <= rawData.length / 2 };
@@ -3197,6 +3969,14 @@ async function runAnalyze() {
   const out = pyodide.runPython("analyze_json(raw_json, opts_json)");
   result = JSON.parse(out);
   $("rerun").disabled = false;
+  // 初回読込（loadPDF）・「再解析」ボタン（rerun、runAnalyzeを直接呼ぶ）の
+  // どちらの経路でも、解析完了時に必ず進捗表示（ドロップ枠の大きな
+  // プログレスバー）を閉じる。以前はloadPDF側でしか閉じておらず、
+  // 「再解析」で呼んだ場合はsetProgressで再表示された枠が閉じないまま
+  // 残り、結果が出ているのに「整合チェック実行中…」の表示が固まって
+  // 見える不具合があった。
+  clearProgress();
+  $("drop").style.display = "none";
   render();
 }
 
@@ -3205,6 +3985,7 @@ function render() {
   const s = result.summary;
   status(`完了: ${fileName} ｜ ${result.pages.length}ページ ｜ ` +
          `目次${result.toc_entries.length}項目 ｜ オフセット ${result.offset}` +
+         (result.auto_bleed_mm ? ` ｜ 塗り足し余白 自動判定 ${result.auto_bleed_mm}mm` : "") +
          (result.toc_found ? "" : " ｜ ⚠目次ページ未検出（手動指定してください）"));
   $("results").classList.add("show");
   if (typeof fbAfterResults === "function") fbAfterResults();
@@ -3256,7 +4037,7 @@ function render() {
   if (!navItems.length) {
     L.innerHTML = `<div class="issue okmsg">
       <div class="top"><span class="badge b-ok">OK</span></div>
-      <div class="msg">すべての照合に成功しました。右のビューアでページを確認できます。</div></div>`;
+      <div class="msg">すべての照合に成功しました。左のビューアでページを確認できます。</div></div>`;
   } else {
     const sevName = { error: "エラー", warning: "警告", info: "参考", check: "要確認" };
     const sevCls = { error: "", warning: " warn", info: " info", check: " check" };
@@ -3306,7 +4087,9 @@ function render() {
     const sev = sevMap[p.index];
     const cls = sev === "error" ? "cell err" : sev === "warning" ? "cell warn"
       : (p.nombre === null ? "cell hid" : "cell");
-    const tip = [`物理 ${p.index + 1}`,
+    const physN = (p.phys != null ? p.phys : p.index) + 1;
+    const halfSfx = p.half === "L" ? "-左" : p.half === "R" ? "-右" : "";
+    const tip = [`物理 ${physN}${halfSfx}`,
       p.nombre !== null ? `ノンブル ${p.nombre_raw ?? p.nombre}` : "ノンブルなし",
       p.hashira ? `柱: ${p.hashira}` : "",
       ...p.headings.slice(0, 2).map(h => `見出し: ${h.text}`)].filter(Boolean).join(" ｜ ");
@@ -3332,11 +4115,17 @@ function gotoTocEntry(i) {
 // 「目次ページを表示」→ 検出された目次ページだけを別ウィンドウでプレビュー
 async function openTocPreview() {
   if (!result || !pdfDoc) return;
-  const idxs = (result.toc_pages || []).slice().sort((a, b) => a - b);
-  if (!idxs.length) {
+  const logicalIdxs = (result.toc_pages || []).slice().sort((a, b) => a - b);
+  if (!logicalIdxs.length) {
     alert("目次ページが検出されていません。上部の「目次ページ」に物理番号を入力して再解析してください。");
     return;
   }
+  // toc_pages は論理ページindex。見開き分割時は左右2つの論理ページが同じ
+  // 物理ページを共有するため、実際にレンダリングする物理ページ番号へ
+  // 変換したうえで重複を除く（同じ物理ページを2回表示しないように）。
+  const idxs = [...new Set(logicalIdxs.map(i =>
+    (result.pages[i] && result.pages[i].phys != null) ? result.pages[i].phys : i
+  ))].sort((a, b) => a - b);
   const w = window.open("", "tocPreview",
     "width=900,height=1000,scrollbars=yes,resizable=yes");
   if (!w) {
@@ -3434,8 +4223,13 @@ function markMapSelection(idx) {
 
 function pageLabel(idx) {
   const p = result.pages[idx];
-  return p.nombre !== null ? `物理 ${idx + 1} / ノンブル ${p.nombre}`
-                           : `物理 ${idx + 1}（ノンブル非表示）`;
+  // 見開き分割時は物理ページ番号＋左右（例: 物理15-右）で示す。
+  // 単ページ本では p.half が無い/nullのため従来どおり物理番号のみ。
+  const physN = (p.phys != null ? p.phys : idx) + 1;
+  const suffix = p.half === "L" ? "-左" : p.half === "R" ? "-右" : "";
+  const loc = `物理 ${physN}${suffix}`;
+  return p.nombre !== null ? `${loc} / ノンブル ${p.nombre}`
+                           : `${loc}（ノンブル非表示）`;
 }
 
 // ---- 統合ナビゲーション（エラー / 警告 / 参考 / 要確認 を1本のリストで巡回）
@@ -3456,6 +4250,12 @@ function buildNavItems() {
     items.push({ type: "check", entryIndex: i,
       page_index: (e.matched_page_index != null) ? e.matched_page_index : null,
       nombre: e.page, title: e.title,
+      // 本文見出しと対応せず（matched_page_indexなし）、記載ノンブルからも
+      // 本文ページを特定できない（nombreなし／該当ノンブルの本文ページが
+      // 見つからない）項目は、これまでプレビューが一切移動しなかった。
+      // 最後の手段として、この目次項目自体が載っている目次ページへは
+      // 必ず移動できるようにする（該当箇所を目次側で確認できる）。
+      toc_page_index: e.toc_page_index,
       matched: e.matched_heading, similarity: e.similarity,
       rects: e.matched_rect ? [e.matched_rect] : [] });
   });
@@ -3494,11 +4294,26 @@ function selectNav(k) {
     viewRects = iss.rects || [];
     gotoPage(iss.page_index, true, false, true);
   } else {
-    // 要確認: 該当見出し・柱の矩形があればハイライトしつつ該当ページへ移動
+    // 要確認: 該当見出し・柱の矩形があればハイライトしつつ該当ページへ移動。
+    // 本文側で対応が全く取れていない項目（matched_page_indexも記載
+    // ノンブルの該当本文ページも無い）は、以前はどこにも移動できず
+    // クリックしても反応が無いように見えていた。最後の手段として、
+    // この目次項目が載っている目次ページへは必ず移動できるようにする。
+    const hit = (n.nombre != null)
+      ? result.pages.findIndex(p => String(p.nombre) === String(n.nombre)
+          || (p.nombre_raw && String(p.nombre_raw).toLowerCase()
+              === String(n.nombre).toLowerCase()))
+      : -1;
     if (n.page_index != null) {
       viewRects = n.rects || [];
       gotoPage(n.page_index, true, false, true);
-    } else if (n.nombre != null) jumpToNombre(String(n.nombre));
+    } else if (hit >= 0) {
+      gotoPage(hit, false, false, true);
+    } else if (n.toc_page_index != null) {
+      gotoPage(n.toc_page_index, false, false, true);
+    } else if (n.nombre != null) {
+      jumpToNombre(String(n.nombre));
+    }
   }
 }
 
@@ -3522,7 +4337,7 @@ function doJump() {
   if (!raw) return;
   let m;
   if ((m = raw.match(/^[pP]\.?\s*(\d+)$/))) {
-    return gotoPage(parseInt(m[1], 10) - 1);
+    return gotoPhysPage(parseInt(m[1], 10) - 1);
   }
   if ((m = raw.match(/^[nN#]\.?\s*([ivxlcIVXLC]+|\d+)$/))) {
     return jumpToNombre(m[1]);
@@ -3531,7 +4346,7 @@ function doJump() {
   if (/^\d+$/.test(raw)) {
     const hit = result.pages.findIndex(p => String(p.nombre) === raw);
     if (hit >= 0) return gotoPage(hit);
-    return gotoPage(parseInt(raw, 10) - 1);
+    return gotoPhysPage(parseInt(raw, 10) - 1);
   }
   // ローマ数字のみ
   jumpToNombre(raw);
@@ -3564,6 +4379,24 @@ let zoom = 1;            // 1 = 画面フィット。ホイールで拡縮
 let fitScale = 1;       // フィット時の実スケール
 let curPageObj = null;  // 現在ページの pdf.js page
 
+// 論理ページindex → 実PDF物理ページindex。見開き分割時、左右2つの論理
+// ページは同じ物理ページ(phys)を共有する（プレビューは常に物理ページを
+// 丸ごとレンダリングする。矩形座標は物理ページ基準に変換済み）。
+function physOf(idx) {
+  const p = result && result.pages && result.pages[idx];
+  return (p && p.phys != null) ? p.phys : idx;
+}
+
+// 物理ページ番号(0-based)を指定してジャンプ。見開き分割時は同じ物理
+// ページを共有する論理ページが2つあるため、先に見つかった方（読み順で
+// 先の論理ページ）へ移動する。
+function gotoPhysPage(physIdx) {
+  if (!result) return;
+  const hit = result.pages.findIndex(p => (p.phys != null ? p.phys : p.index) === physIdx);
+  if (hit >= 0) return gotoPage(hit);
+  return gotoPage(physIdx);
+}
+
 async function renderPage(anchor) {
   // anchor: {relX, relY, clientX, clientY} カーソル基準アンカー（任意）
   if (!pdfDoc || !result) return;
@@ -3574,7 +4407,7 @@ async function renderPage(anchor) {
   // ばらつく。await の間に別の指摘クリック等で新しいrenderPageが走ると、
   // 後から解決した“古い”呼び出しがcanvasを上書きしてしまうため、
   // await直後に必ずtok(renderToken)を確認し、古ければcanvasに一切触れず中断する。
-  const page = curPageObj || await pdfDoc.getPage(targetPage + 1);
+  const page = curPageObj || await pdfDoc.getPage(physOf(targetPage) + 1);
   if (tok !== renderToken) return;  // 待っている間に新しいページ移動が発生＝この結果は破棄
   curPageObj = page;
   const v1 = page.getViewport({ scale: 1 });
@@ -3716,8 +4549,10 @@ function exportCSV() {
   const rows = [["ID", "判定", "物理ページ", "ノンブル", "内容"]];
   for (const i of result.issues) {
     const p = result.pages[i.page_index];
+    const physN = (p.phys != null ? p.phys : i.page_index) + 1;
+    const suffix = p.half === "L" ? "-左" : p.half === "R" ? "-右" : "";
     rows.push([i.id, i.severity === "error" ? "エラー" : "警告",
-               i.page_index + 1, p.nombre ?? "", i.msg]);
+               physN + suffix, p.nombre ?? "", i.msg]);
   }
   const csv = "\uFEFF" + rows.map(r =>
     r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
@@ -3728,7 +4563,7 @@ async function exportHTML() {
   const clips = [];
   for (const iss of result.issues.slice(0, 60)) {
     const imgs = [];
-    const page = await pdfDoc.getPage(iss.page_index + 1);
+    const page = await pdfDoc.getPage(physOf(iss.page_index) + 1);
     const vp1 = page.getViewport({ scale: 1.6 });
     const off = document.createElement("canvas");
     off.width = vp1.width; off.height = vp1.height;
