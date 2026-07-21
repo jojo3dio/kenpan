@@ -1852,13 +1852,39 @@ def _is_bare_pageno_text(ct):
         and parse_pageno(ct) is not None
 
 
+_NAME_SPACED_RE = re.compile(r"^[^\s\d　](?:[ 　][^\s\d　]){1,5}$")
+_TOC_HEADING_WORD_RE = re.compile(
+    r"第|部|章|編|コラム|はじめに|おわりに|付録|あとがき|系図|リスト|"
+    r"機構図|目次|序論|凡例|解説|索引|序章|終章")
+
+
+def _looks_like_toc_credit_name(ct):
+    """目次の項目タイトルではなく、章の執筆者・解説者名のクレジット行らしいか
+    を判定する。学術書等の目次デザインでは、章タイトルの傍らに執筆者名を
+    1文字ずつ全角/半角スペースで区切って組む（字間を空ける）ことがあり
+    （実例:「河 西 秀 哉」「田 中 俊 雄」）、この区切り方は通常の章・節見出し
+    には使われない。見出しを示す語（第／章／コラム／はじめに 等）を含む
+    場合は、たとえ区切りパターンに一致してもクレジット行とは判定しない
+    （誤って本物の見出しを除外しないための安全策）。"""
+    if not ct or _TOC_HEADING_WORD_RE.search(ct):
+        return False
+    return bool(_NAME_SPACED_RE.match(ct))
+
+
 def _is_toc_description_text(ct):
     """目次の内容紹介列（副題・トピックの列挙）らしいテキストか。
     「Ａ／Ｂ／Ｃ」のような列挙は章タイトルではなく、項目化してはならない
     （実例: 「最初のお金／銀餅との関連／十二銭以外にも銭が／…」を
     誤って目次項目として登録し、含まれる漢数字「十二」までノンブルと
-    誤認していた）。"""
-    return ("／" in ct and len(ct) > 15) or len(ct) > 30
+    誤認していた）。「／」を1個だけ含む文字列は、複数トピックの列挙では
+    なく単一の章タイトル内でのスタイリッシュな並列表現（例:「第6章
+    映画をみた／映画になった天皇と皇族」）であることが多いため、「／」が
+    2個以上（＝3項目以上の列挙）ある場合に限って内容紹介列とみなす
+    （実例: 上の「第6章映画をみた／映画になった天皇と皇族」を「／」1個
+    だけで内容紹介列と誤判定し、章タイトルごと目次項目から除外していた
+    ため、柱検査(HSR-2)がその章の範囲を1つ前の節見出しのまま扱い、
+    大量に誤検知していた）。"""
+    return (ct.count("／") >= 2 and len(ct) > 15) or len(ct) > 30
 
 
 def parse_toc_vertical(raw, toc_idx, debug=False):
@@ -1917,6 +1943,16 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
         # なっていた）。直前列が内容紹介列（またはその継続）で、かつ次列が
         # 「第N部/章」等の新しい見出しパターンでもノンブル単独列でもない
         # 小さめ級数の短い列なら、その内容紹介の継続とみなして同様に除外する。
+        #
+        # ただし「◆コラムN」等、記号（◆■●○◇□▲）で始まる列やコラム見出しは、
+        # 直前の長い副題列（例: 前のコラムの副題）とたまたま級数が近くても
+        # 独立した新しい目次項目（次のコラム）であり、内容紹介の継続では
+        # ない。これを除外し損なうと、その項目自体（＋直後に続く執筆者名・
+        # 記載ノンブル対応列）まで丸ごと誤って消え、記載ノンブルを持つ
+        # 正しい章境界が1つ欠落する（実例: tt001-008本、「◆コラム②」が
+        # 直前の「◆コラム①」の長い副題に巻き込まれて消え、本文が実際には
+        # コラム②に入っているページでも柱照合上は「◆コラム①」のまま扱われ
+        # HSR-2が誤検知になっていた）。
         _cont_ids = set()
         _prev_is_desc = False
         _prev_vsize = None
@@ -1930,10 +1966,12 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
                 _prev_is_desc = True
                 _prev_vsize = c.get("vsize", c["size"])
                 continue
+            is_new_marker = ct[0] in "◆■●○◇□▲△" or "コラム" in ct
             if _prev_is_desc and not _is_bare_pageno_text(ct) \
                     and not VERT_CHAP_HEAD_RE.match(ct) \
                     and not VERT_PART_PREFIX_RE.match(ct) \
                     and not VERT_PART_RE.match(ct) \
+                    and not is_new_marker \
                     and c.get("vsize", c["size"]) <= (_prev_vsize or 0) + 1.0:
                 _cont_ids.add(id(c))
                 _prev_is_desc = True
@@ -1943,6 +1981,43 @@ def parse_toc_vertical(raw, toc_idx, debug=False):
                 _prev_vsize = None
         if _cont_ids:
             cols = [c for c in cols if id(c) not in _cont_ids]
+
+        # 執筆者名等のクレジット行（「河 西 秀 哉」のように1文字ずつ空けて
+        # 組む人名）は章タイトルではないため、目次項目として登録しない。
+        # これを普通に処理させると、近傍の記載ノンブル（例:「1」）を本来の
+        # 章タイトル（例:「序論」）より先に奪ってしまい、章タイトル側が
+        # 「記載ノンブルなし」になる／クレジット行が章と誤認され柱と
+        # 照合されて誤検知になる（実例: tt001-008本、「河 西 秀 哉」が
+        # 「序論」のノンブル1を横取りしHSR-2が3件誤検知）。
+        _credit_ids = {id(c) for c in cols
+                       if _looks_like_toc_credit_name(clean_text(c["text"]).strip())}
+        # 人名が抽出器の都合で2ランに分裂し（例:「森」と「暢 平195」）、
+        # 姓側の断片だけが1文字で残ると上のスペース区切り判定に掛からない。
+        # 直後（小さいyギャップ・同x帯）に記載ノンブル付きの短い断片が
+        # 続く単独の1文字断片は、同様にクレジット行の一部とみなして除外する
+        # （実例: 上と同じ本で「森」が章「第7章…」のノンブル195を横取り）。
+        for c in cols:
+            if id(c) in _credit_ids:
+                continue
+            ct = clean_text(c["text"]).strip()
+            if len(ct) != 1 or _is_bare_pageno_text(ct) \
+                    or _TOC_HEADING_WORD_RE.search(ct):
+                continue
+            cx, width = (c["x0"] + c["x1"]) / 2, c["x1"] - c["x0"]
+            for other in cols:
+                if other is c:
+                    continue
+                ot = clean_text(other["text"]).strip()
+                if not re.search(r"[0-9]", ot):
+                    continue
+                ocx = (other["x0"] + other["x1"]) / 2
+                if abs(ocx - cx) > max(8.0, width * 0.8):
+                    continue
+                if 0 < other["y0"] - c["y1"] <= 40.0:
+                    _credit_ids.add(id(c))
+                    break
+        if _credit_ids:
+            cols = [c for c in cols if id(c) not in _credit_ids]
 
         # 部見出し（「第N部」単独・大級数）は、同列の数字グループが別ブロックに
         # 分かれてノンブルが付かないことがある。先に「部見出し列」と
@@ -3212,7 +3287,7 @@ def _auto_detect_bleed_inset(raw):
     candidates_mm = (0, 3, 5, 8, 10, 13, 15, 18, 20)
     sample = raw[: min(len(raw), 60)]
     vertical = is_vertical(sample)
-    best_mm, best_score = 0, -1
+    best_mm, best_score = 0, (-1, -1)
     for mm in candidates_mm:
         inset = mm * 72 / 25.4
         trial = ([dict(r, trim=[inset, inset, r["w"] - inset, r["h"] - inset])
@@ -3224,7 +3299,29 @@ def _auto_detect_bleed_inset(raw):
                 pages, _, _ = extract_roles(trial, debug=False)
         except Exception:
             continue
-        score = sum(1 for p in pages if p.nombre is not None)
+        # 単純な「ノンブルが読めたページ数」だけをスコアにすると、版面外の
+        # スリップ（版面寸法・書体・Q数などの印刷仕様の書き込み）に含まれる
+        # 数字（例: 天のルーラー "20/15/10/5/1" 目盛り）が毎ページ同じ値を
+        # 「ノンブル検出」として量産し、実際のノンブル（1,2,3,...と連番で
+        # 増える）と検出数で同点になってしまう。同点になった場合は候補の
+        # 中で最小のmm（≒トリミング無し）が選ばれるため、こうした artifact
+        # を trim せずに採用してしまい、ノンブルが1つの値に固定される・
+        # 目次照合が破綻する、という大量誤検知（実例: tt001-008本、754件）
+        # を引き起こしていた。
+        # そこで一次スコアを「隣接する物理ページ間でノンブルが+1ずつ連番に
+        # なっている数」（seq_score）にする。ルーラー等のartifactは全ページ
+        # 同一値を返すため差分は0になりseq_scoreに寄与しない一方、本物の
+        # ノンブルは連番なのでseq_scoreが大きくなり、artifactとの同点を
+        # 解消できる。raw検出数（hit_score）はseq_scoreが同点の場合のみの
+        # 二次スコアとして残す。
+        detected = [(p.index, p.nombre) for p in pages if p.nombre is not None]
+        seq_score = 0
+        for i in range(1, len(detected)):
+            gap = detected[i][0] - detected[i - 1][0]
+            if gap > 0 and detected[i][1] - detected[i - 1][1] == gap:
+                seq_score += 1
+        hit_score = len(detected)
+        score = (seq_score, hit_score)
         if score > best_score:
             best_score, best_mm = score, mm
     return best_mm * 72 / 25.4
@@ -3419,7 +3516,7 @@ $("resetBtn").addEventListener("click", () => {
                  : "解析エンジン（Pyodide）を準備中…");
 });
 
-document.getElementById("buildId").textContent = "071715";
+document.getElementById("buildId").textContent = "072115";
 
 // ====== フィードバック（差分チェッカーと同方式） ======
 (function(){
