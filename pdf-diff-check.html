@@ -739,6 +739,128 @@ function pickBox(boxes, mode){
   if(mode==="page")  return boxes.crop || boxes.media;
   return null;
 }
+// 画像からトンボ（角の位置合わせクロス）を検出し仕上がり矩形(px, ページ内座標)を返す。無ければnull。
+// PDFのTrimBox/BleedBoxがMediaBoxと同一（トンボ情報が実質無い）ファイルの位置合わせ救済用。
+// 各コーナーの70mm四方の窓内で、細い直線（トンボの線）だけを抽出しX/Y交点を推定する。
+// 写真・文字などの塊はthick(太さ)判定で除外する。
+function detectTomboRect(imgData, W, H, dpi){
+  if(!imgData||!W||!H||!dpi) return null;
+  const data=imgData.data;
+  const isDark=(x,y)=>{
+    if(x<0||y<0||x>=W||y>=H) return false;
+    const i=(y*W+x)*4;
+    return (data[i]+data[i+1]+data[i+2])/3 < 150;
+  };
+  const win = Math.round(70/25.4*dpi);
+  const minLen = Math.round(2.5/25.4*dpi);
+  const maxThick = 4;
+  if(win*2>=W || win*2>=H) return null;   // ページが小さすぎて窓が確保できない
+  function rowMostlyDark(x0,x1,y){
+    let cnt=0; const total=x1-x0; if(total<=0) return false;
+    for(let x=x0;x<x1;x++) if(isDark(x,y)) cnt++;
+    return cnt/total>0.5;
+  }
+  function colMostlyDark(y0,y1,x){
+    let cnt=0; const total=y1-y0; if(total<=0) return false;
+    for(let y=y0;y<y1;y++) if(isDark(x,y)) cnt++;
+    return cnt/total>0.5;
+  }
+  function mergeLines(lines){
+    lines.sort((p,q)=>p[0]-q[0]);
+    const out=[];
+    for(const l of lines){
+      const last=out[out.length-1];
+      if(last && Math.abs(l[0]-last[0])<=3){ last[1]=Math.min(last[1],l[1]); last[2]=Math.max(last[2],l[2]); }
+      else out.push(l.slice());
+    }
+    return out;
+  }
+  function findLines(y0,y1,x0,x1){
+    const hlines=[], vlines=[];
+    for(let y=y0;y<y1;y++){
+      let x=x0;
+      while(x<x1){
+        if(isDark(x,y)){
+          let x2=x; while(x2<x1 && isDark(x2,y)) x2++;
+          const len=x2-x;
+          if(len>=minLen){
+            let thick=1;
+            for(let dy=1;dy<=maxThick;dy++){
+              if(rowMostlyDark(x,x2,y-dy)) thick++;
+              if(rowMostlyDark(x,x2,y+dy)) thick++;
+            }
+            if(thick<=maxThick) hlines.push([y,x,x2]);
+          }
+          x=x2;
+        } else x++;
+      }
+    }
+    for(let x=x0;x<x1;x++){
+      let y=y0;
+      while(y<y1){
+        if(isDark(x,y)){
+          let y2=y; while(y2<y1 && isDark(x,y2)) y2++;
+          const len=y2-y;
+          if(len>=minLen){
+            let thick=1;
+            for(let dx=1;dx<=maxThick;dx++){
+              if(colMostlyDark(y,y2,x-dx)) thick++;
+              if(colMostlyDark(y,y2,x+dx)) thick++;
+            }
+            if(thick<=maxThick) vlines.push([x,y,y2]);
+          }
+          y=y2;
+        } else y++;
+      }
+    }
+    return {hlines:mergeLines(hlines), vlines:mergeLines(vlines)};
+  }
+  function cornerPoint(hlines, vlines, tol){
+    const cands=[];
+    for(const [hy,hx0,hx1] of hlines){
+      for(const [vx,vy0,vy1] of vlines){
+        let nearX=null;
+        if(Math.abs(hx0-vx)<=tol) nearX=hx0; else if(Math.abs(hx1-vx)<=tol) nearX=hx1;
+        if(nearX===null) continue;
+        let nearY=null;
+        if(Math.abs(vy0-hy)<=tol) nearY=vy0; else if(Math.abs(vy1-hy)<=tol) nearY=vy1;
+        if(nearY===null) continue;
+        cands.push([vx,hy]);
+      }
+    }
+    if(!cands.length) return null;
+    let sx=0,sy=0; for(const c of cands){ sx+=c[0]; sy+=c[1]; }
+    return [sx/cands.length, sy/cands.length];
+  }
+  const cornersDef = {
+    TL:[0,win,0,win], TR:[0,win,W-win,W], BL:[H-win,H,0,win], BR:[H-win,H,W-win,W]
+  };
+  const pts={};
+  for(const key in cornersDef){
+    const [y0,y1,x0,x1]=cornersDef[key];
+    const {hlines,vlines}=findLines(y0,y1,x0,x1);
+    pts[key]=cornerPoint(hlines,vlines,6);
+  }
+  const foundN=Object.values(pts).filter(Boolean).length;
+  if(foundN<3) return null;   // 4隅のうち3隅未満しか見つからなければ信頼できない
+  const avg=arr=>arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const left = avg([pts.TL,pts.BL].filter(Boolean).map(p=>p[0]));
+  const right= avg([pts.TR,pts.BR].filter(Boolean).map(p=>p[0]));
+  const top  = avg([pts.TL,pts.TR].filter(Boolean).map(p=>p[1]));
+  const bot  = avg([pts.BL,pts.BR].filter(Boolean).map(p=>p[1]));
+  if(left==null||right==null||top==null||bot==null) return null;
+  if((right-left)<10 || (bot-top)<10) return null;
+  return {x:left, y:top, w:right-left, h:bot-top};
+}
+// A/B双方からトンボを検出し、仕上がり矩形の中心を合わせるオフセットを返す。検出できなければnull。
+function tryTomboAlign(a,b){
+  if(!a||!b||!S.aData||!S.bData) return null;
+  const ta=detectTomboRect(S.aData,S.aW,S.aH,S.dpi);
+  const tb=detectTomboRect(S.bData,S.bW,S.bH,S.dpi);
+  if(!ta||!tb) return null;
+  const acx=ta.x+ta.w/2, acy=ta.y+ta.h/2, bcx=tb.x+tb.w/2, bcy=tb.y+tb.h/2;
+  return { offX:Math.round(acx-bcx), offY:Math.round(acy-bcy), aRect:ta };
+}
 // ボックス左上をレンダリングpx座標（左上原点）に変換。view=[x0,y0,x1,y1]（cropbox, pt）
 function boxTopLeftPx(view, box, scale){
   return { x:(box.x - view[0])*scale, y:(view[3] - (box.y + box.h))*scale };
@@ -765,15 +887,25 @@ function boxPxForLogical(r, boxes, mode){
   if(r.crop){ w=w/2; x = (r.crop==='R') ? (tl.x + box.w*S.scale/2 - r.sx) : tl.x; }
   return {x,y,w,h};
 }
+// trim/bleedボックスがmedia(用紙)と実質同一＝トンボ情報が無い/信頼できない場合はtrue
+function boxIsTrivial(boxes){
+  if(!boxes||!boxes.media) return true;
+  const b=boxes.trim||boxes.bleed; if(!b) return true;
+  const eps=1; // pt
+  return (boxes.media.w-b.w)<=eps && (boxes.media.h-b.h)<=eps;
+}
 // 起点モードに従いS.offX/offYを設定。合わせられたらtrue。
 // 見開き分割が絡む場合は綴じ位置（ノド）の断ち代差を吸収するため必ず仕上がり(trim)基準。
+// ただしtrim/bleedがmediaと同一（トンボ情報なし）の場合は無意味な角合わせになるため中央そろえへ自動フォールバック。
 function applyAlignment(a,b){
   if(!a || !b) return false;
   const ma=S.aLogical?S.planA[S.aLogical-1]:null, mb=S.bLogical?S.planB[S.bLogical-1]:null;
   if(!ma||!mb) return false;
   // 見開きモード中は、単ページ（最初/最後）も含め全ページを仕上がり(trim)基準で統一
   const spreadActive = S.spreadA || S.spreadB;
-  const mode = (ma.crop || mb.crop || spreadActive) ? "trim" : S.originMode;
+  const forcedTrim = ma.crop || mb.crop || spreadActive;
+  const trimUsable = !boxIsTrivial(S.boxesA[ma.src-1]) && !boxIsTrivial(S.boxesB[mb.src-1]);
+  const mode = forcedTrim ? (trimUsable ? "trim" : "center") : S.originMode;
   if(mode==="center") return false;
   const aC=logicalBoxCornerPx(a, S.boxesA[ma.src-1], mode);
   const bC=logicalBoxCornerPx(b, S.boxesB[mb.src-1], mode);
@@ -805,8 +937,15 @@ async function getTextItems(doc, pageNum, scale){
       const fsz=Math.hypot(tx[2],tx[3])||Math.abs(tx[3])||10;   // 文字サイズ
       let x, y, w, h;
       if(it.dir==="ttb"){              // 縦書き：tx4=水平中心・tx5≈先頭字の上端。下方向に文字数ぶん伸びる
-        const n=[...it.str].length||1;
-        w=fsz; h=Math.max(fsz, n*fsz);
+        // 高さはPDF.jsが実際の字送り(グリフ間隔)から計算するit.heightをそのまま使う（scale倍）。
+        // これが取れない場合のみ、可視文字数×文字サイズで概算する（フォールバック）。
+        // 過去の実装ではit.heightを使わず「可視文字数×fsz」で概算していたが、字送りが
+        // フォントの実寸(fsz)より広いケース（今回の実データで約1.12倍）があり、位置変更の
+        // 囲みが実際の描画範囲より短くなって末尾がはみ出し、そこだけ別の差分として
+        // 二重検出される不具合があった（it.heightは字送りの実測値なのでこのズレが出ない）。
+        const hgt=(it.height||0)*scale;
+        const n=[...it.str].filter(ch=>ch.trim()).length||1;
+        w=fsz; h = hgt>0 ? Math.max(fsz,hgt) : Math.max(fsz, n*fsz);
         x=tx[4]-fsz/2; y=tx[5];
       }else{                            // 横書き：tx4=左端・tx5=ベースライン
         w=(it.width||0)*scale; h=fsz;
@@ -1114,15 +1253,22 @@ async function refreshPage(suggestCenter){
 
     // 位置合わせ：起点モード/見開き分割ならボックス(=仕上がり)基準でそろえる
     const aligned=applyAlignment(a,b);
+    let tomboRect=null;
     if(aligned){
       /* trim/bleed/背 基準でそろえた */
-    } else if(S.originMode!=="center"){
-      if(a && b && (a.w!==b.w||a.h!==b.h)){ S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2); }
-    } else if(suggestCenter && a && b && (a.w!==b.w || a.h!==b.h) && S.offX===0 && S.offY===0){
-      S.offX = Math.round((a.w-b.w)/2);
-      S.offY = Math.round((a.h-b.h)/2);
+    } else {
+      // PDFのボックス情報が使えない（トンボ無し等）場合、画像からトンボを検出して仕上がり基準でそろえる
+      const auto=tryTomboAlign(a,b);
+      if(auto){ S.offX=auto.offX; S.offY=auto.offY; tomboRect=auto.aRect; }
+      else if(S.originMode!=="center"){
+        if(a && b && (a.w!==b.w||a.h!==b.h)){ S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2); }
+      } else if(suggestCenter && a && b && (a.w!==b.w || a.h!==b.h) && S.offX===0 && S.offY===0){
+        S.offX = Math.round((a.w-b.w)/2);
+        S.offY = Math.round((a.h-b.h)/2);
+      }
     }
-    setCompareRects(a, aligned);
+    if(tomboRect){ S.alignedByBox=true; S.aTrimPx=tomboRect; S.aBleedPx=null; }
+    else setCompareRects(a, aligned);
     computeDiff(); buildContent(); fitView(); draw(); updatePanel(); updatePageLabel();
     if(S.docA && S.docB && window.fbAfterResults) window.fbAfterResults();
   }catch(err){ console.error(err); toast("レンダリングに失敗しました"); }
@@ -1511,6 +1657,18 @@ function regionText(items, rx,ry,rw,rh){
   });
   return hit.map(t=>t.str).join("").replace(/\s+/g," ").trim();
 }
+// regionTextと同じ抽出条件で、一致した文字片の実バウンディングボックスを返す（位置変更判定用）。
+// ノンブル等が写真/配置画像の上に乗る場合、画素の連結成分は「そこにインクがある/ない」でしか
+// 領域を作れずbuildLines側の行単位の位置変更検出とは独立に処理される。classifyRegionでは
+// 同一文字列(aStr===bStr)を検出した時点でこのbboxを使い、実座標のズレを直接測る。
+function regionTextBBox(items, rx,ry,rw,rh){
+  if(!items||!items.length) return null;
+  const hit=items.filter(t=> t.x < rx+rw && t.x+t.w > rx && t.y < ry+rh && t.y+t.h > ry);
+  if(!hit.length) return null;
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  for(const t of hit){ x0=Math.min(x0,t.x); y0=Math.min(y0,t.y); x1=Math.max(x1,t.x+t.w); y1=Math.max(y1,t.y+t.h); }
+  return {x:x0,y:y0,w:x1-x0,h:y1-y0};
+}
 // 領域内のエッジ（輝度勾配）構造がA/Bで一致しているか（=同じ図版で色だけ違う、を判定）
 function edgeSimilarity(p, x0,y0,x1,y1){
   const aD=S.aData.data,bD=S.bData.data,aw=S.aW,bw=S.bW;
@@ -1567,6 +1725,23 @@ function classifyRegion(rg){
     // （文字コードは同じでも字形/フォントだけ変わるケース＝画素解析側の結果に注記を付ける）
   }
   const sameTextSameCode = !!(aStr && bStr && aStr===bStr);
+  // 同一文字なのに画素だけ違う＝写真/配置画像に重なるノンブル等がその場で位置だけ動いたケースがある。
+  // このパスはピクセル連結成分の領域(rg)単位で動くため、buildLines側（textDiff内）の行単位の
+  // 位置変更検出とは独立している。ここで実座標のズレを直接測り、閾値超えなら色/削除/追加より先に
+  // 「位置が変わっています」(MOV-1)として扱う。閾値以下ならこれまで通り下の画素解析に続行する。
+  if(sameTextSameCode){
+    const aBB=regionTextBBox(S.aText, rg.x-p.ax-padT, rg.y-p.ay-padT, rg.w+padT*2, rg.h+padT*2);
+    const bBB=regionTextBBox(S.bText, rg.x-p.bx-padT, rg.y-p.by-padT, rg.w+padT*2, rg.h+padT*2);
+    if(aBB && bBB){
+      const px2mm=25.4/S.dpi, tolMm=0.8;
+      const dxmm=((bBB.x+bBB.w/2+p.bx)-(aBB.x+aBB.w/2+p.ax))*px2mm;
+      const dymm=((bBB.y+bBB.h/2+p.by)-(aBB.y+aBB.h/2+p.ay))*px2mm;
+      if(Math.abs(dxmm)>tolMm || Math.abs(dymm)>tolMm){
+        const dir=`${dxmm>=0?"右":"左"}${Math.abs(dxmm).toFixed(1)}mm・${dymm>=0?"下":"上"}${Math.abs(dymm).toFixed(1)}mm`;
+        return mkCls("moved","位置が変わっています",`${dir} 移動（例:「${annotateCodepoints(bStr).slice(0,14)}」）`,"MOV-1","移動なし(0.0mm)",dir);
+      }
+    }
+  }
   const finish = cls => { if(sameTextSameCode && cls) cls.detail = (cls.detail?cls.detail+"　":"") + "※文字コードは同一（字形/フォントの違いの可能性）"; return cls; };
 
   // --- (2) 画素解析 ---
@@ -1623,7 +1798,16 @@ function buildLines(items){
   //   横書きページが誤って縦書き判定→行が列でまとまりA/Bの行キーが噛み合わず、
   //   本文ブロック全体の平行移動（位置変更）が検出できなくなる不具合を防ぐ。）
   const wideItems = items.reduce((n,t)=>n+(t.w>t.h*1.6?1:0),0);
-  const vertical = (wideItems < items.length*0.5) && (colK.size < rowK.size*0.75);
+  // 追加の安全策：PDF.jsが縦書きの1列まるごとを1アイテムとして返すケース（列内に文字単位の
+  // アイテムが無い）では、colK/rowKによる集計が「列ごとに1個」＝列数だけcolKが増え、
+  // 行(Y)側の集計は逆に少数（同じ開始Y付近に複数列が並ぶだけ）になり、上のcolK/rowK判定が
+  // 「横書き」と誤判定することがあった。この場合、Y方向の許容（cur.h基準）が列の高さ分だけ
+  // 巨大になり、無関係な列同士が同じ「行」にまとめられ、内容が一致しない離れた列の重心が
+  // 平均化されて「位置変更」の量・範囲が実態と異なる（囲みが不自然に大きい）不具合になっていた。
+  // アイテム個々の縦横比（高さ>幅の細長いアイテムが大半）を見て、直接「縦書きらしさ」を判定し
+  // colK/rowKの誤判定を補正する。
+  const tallItems = items.reduce((n,t)=>n+(t.h>t.w*1.6?1:0),0);
+  const vertical = (wideItems < items.length*0.5) && (colK.size < rowK.size*0.75 || tallItems >= items.length*0.5);
   const lines=[];
   if(vertical){
     // 列でまとめる（右→左、列内は上→下）
@@ -1634,22 +1818,37 @@ function buildLines(items){
     const colGroupTol=Math.max(colTol, mw*0.6);
     for(const it of its){
       const cx=it.x+it.w/2; let cur=lines[lines.length-1];
-      if(cur && Math.abs(cx-cur.cx) <= colGroupTol && it.y >= cur.y0 && (it.y-cur.y1) <= Math.max(mh,it.h)*1.8){
+      const sizeOk = cur ? (Math.min(it.h,cur.lastH)*4 >= Math.max(it.h,cur.lastH)) : true;
+      // 列内の縦空き許容は、ページ全体の高さ中央値(mh)ではなく、そのアイテム自身の幅
+      // （縦書きでは文字サイズに一致）を基準にする。PDF.jsが1列を1アイテムで返すページでは
+      // mhが「段落全体の長さ」に引きずられて巨大になり、ノンブルと章タイトルのように
+      // 本来無関係な短い要素どうしが離れていても許容内に収まってしまい、誤って同じ列として
+      // 結合される（結合された列の重心移動が実際の移動量より薄まり、位置変更が検出できない
+      // ／逆に囲みが無関係な範囲まで広がる）不具合があったため。
+      const gapTol=Math.max(mw, it.w, cur?cur.w0:0)*3;
+      if(cur && Math.abs(cx-cur.cx) <= colGroupTol && it.y >= cur.y0 && (it.y-cur.y1) <= gapTol && sizeOk){
         cur.its.push(it);
         cur.x0=Math.min(cur.x0,it.x); cur.y0=Math.min(cur.y0,it.y);
         cur.x1=Math.max(cur.x1,it.x+it.w); cur.y1=Math.max(cur.y1,it.y+it.h);
-        cur.w0=Math.max(cur.w0,it.w); cur.cx=(cur.x0+cur.x1)/2;
+        cur.w0=Math.max(cur.w0,it.w); cur.cx=(cur.x0+cur.x1)/2; cur.lastH=it.h;
       }else{
-        lines.push({its:[it], x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h,w0:it.w,cx:cx});
+        lines.push({its:[it], x0:it.x,y0:it.y,x1:it.x+it.w,y1:it.y+it.h,w0:it.w,cx:cx,lastH:it.h});
       }
     }
     for(const ln of lines){ ln.its.sort((a,b)=>a.y-b.y); }
   }else{
     // 行でまとめる（上→下、行内は左→右）
     const its=items.slice().sort((a,b)=> (a.y-b.y)||(a.x-b.x));
+    // 同じ行(Y近傍)でも、X方向に大きく離れた断片（例：見開き両端のノンブル等）は
+    // 別々の独立した線として扱う。従来はX方向の右側ギャップに上限が無く、同じ高さに
+    // ある離れた2つの短い要素（例：左右ページのノンブル）が1本の行にまとめられていた。
+    // 見開きを左右反転せず1ページとして比較する運用（spread未分割）で、左右のノンブルが
+    // 逆方向に同量だけ動くと、まとめられた行の中心（重心）は打ち消し合ってほぼ動かず、
+    // 「位置変更」の判定（行の中心のずれのみを見る）がゼロ移動と誤認して検出漏れになっていた。
+    const rowGroupGap=Math.max(mw,10)*3;
     for(const it of its){
       const cy=it.y+it.h/2; let cur=lines[lines.length-1];
-      if(cur && Math.abs(cy-cur.cy) <= Math.max(cur.h,it.h)*0.55 && it.x >= cur.x0-it.h){
+      if(cur && Math.abs(cy-cur.cy) <= Math.max(cur.h,it.h)*0.55 && it.x >= cur.x0-it.h && (it.x-cur.x1) <= rowGroupGap){
         cur.its.push(it);
         cur.x0=Math.min(cur.x0,it.x); cur.y0=Math.min(cur.y0,it.y);
         cur.x1=Math.max(cur.x1,it.x+it.w); cur.y1=Math.max(cur.y1,it.y+it.h);
@@ -2597,6 +2796,13 @@ function resetAll(){
   if($("#originMode")) $("#originMode").value="center";
   S.colorDetect="on"; if($("#colorDetect")) $("#colorDetect").value="on";
   S.weightDetect=false; if($("#weightDetect")) $("#weightDetect").value="off";
+  // 検出の詳細設定（感度・ノイズ除去・エッジ許容・解像度・比較範囲）も既定値に戻す。
+  // 前の案件でノイズ調整した設定が残ったまま別件を検査すると、感度が鈍って検出漏れになるため。
+  S.dpi=300; if($("#dpi")) $("#dpi").value="300"; S.scale=S.dpi/72;
+  S.thresh=38; if($("#thresh")) $("#thresh").value="38"; if($("#threshVal")) $("#threshVal").textContent="38";
+  S.noise=3; if($("#noise")) $("#noise").value="3"; if($("#noiseVal")) $("#noiseVal").textContent="3";
+  S.edgeTol=1; if($("#edgeTol")) $("#edgeTol").value="1";
+  S.compareScope="marks"; if($("#compareScope")) $("#compareScope").value="marks";
   ["A","B"].forEach(s=>{
     $("#drop"+s).classList.remove("loaded");
     $("#file"+s).value="";
@@ -2696,14 +2902,17 @@ async function loadPageForExport(pg){
   S.aText=await getTextItemsLogical(S.docA,S.planA,S.aLogical,S.scale);
   S.bText=await getTextItemsLogical(S.docB,S.planB,S.bLogical,S.scale);
   S.bImgRects=(S.colorDetect!=="off" && S.docB)?await getImageRectsLogical(S.docB,S.planB,S.bLogical,S.scale):[];
-  let alignedExp=false;
+  let alignedExp=false, tomboRectExp=null;
   if(a&&b){
     alignedExp=applyAlignment(a,b);
-    if(!alignedExp){   // 起点/見開き(=仕上がり)基準を優先、不可なら中央
-      S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2);
+    if(!alignedExp){   // 起点/見開き(=仕上がり)基準を優先、次にトンボ画像検出、不可なら中央
+      const auto=tryTomboAlign(a,b);
+      if(auto){ S.offX=auto.offX; S.offY=auto.offY; tomboRectExp=auto.aRect; }
+      else{ S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2); }
     }
   } else { S.offX=0; S.offY=0; }
-  setCompareRects(a, alignedExp);
+  if(tomboRectExp){ S.alignedByBox=true; S.aTrimPx=tomboRectExp; S.aBleedPx=null; }
+  else setCompareRects(a, alignedExp);
   computeDiff();
 }
 
