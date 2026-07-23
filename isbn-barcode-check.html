@@ -309,7 +309,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-07-13</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-07-23</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -830,25 +830,34 @@ function tightenWidth(o, t){
   if(t.w>0.01 && t.w<=o.w*1.2 && yOk) return {x:t.x, y:ny, w:t.w, h:nh};
   return o;
 }
-function checkBarcodeQuality(canvas, box){
+function checkBarcodeQuality(canvas, box, label){
+  const dbg=label?(...a)=>console.log('[品質診断詳細]',label,...a):()=>{};
   const W=canvas.width, H=canvas.height, ctx=canvas.getContext('2d');
   const px0=Math.max(0,Math.round(box.x*W)), py0=Math.max(0,Math.round(box.y*H));
   const pw=Math.min(W-px0,Math.round(box.w*W)), ph=Math.min(H-py0,Math.round(box.h*H));
+  dbg('pw,ph', pw, ph);
   if(pw<20||ph<10) return {ok:true, note:"領域が小さく品質判定をスキップ"};
   let data; try{ data=ctx.getImageData(px0,py0,pw,ph).data; }catch(e){ return {ok:true,note:"判定不可"}; }
   const lum=(x,y)=>{ const i=(y*pw+x)*4; return 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; };
   // 1) バー本体の縦帯を特定(数字や余白を除く)。各行の暗画素数が多い行=バー
   const rowDark=[];
+  const sampleCnt=Math.ceil(pw/2);
   for(let y=0;y<ph;y++){ let d=0; for(let x=0;x<pw;x+=2) if(lum(x,y)<128) d++; rowDark.push(d); }
   const maxRD=Math.max(...rowDark,1);
-  // バー帯候補(連続する暗行のかたまり)を全部洗い出す
+  // バー帯候補(連続する暗行のかたまり)を全部洗い出す。
+  // 「全体最大値の50%」という相対判定は、box周囲の余白に表紙の黒背景など
+  // 真っ黒な領域が写り込むと、そちらにmaxRDが引っ張られてバー本体の行
+  // (黒画素比率は本来45〜50%程度)が除外されてしまう。そのため、黒画素比率
+  // が「縞らしい範囲(20〜85%)」にあるかという絶対基準で判定する。
   const yGapMax=Math.max(3,Math.round(ph*0.04));
   const bands=[]; let b0=-1,gap=0;
   for(let y=0;y<ph;y++){
-    if(rowDark[y]>maxRD*0.5){ if(b0<0)b0=y; gap=0; }
+    const frac=rowDark[y]/sampleCnt;
+    if(frac>0.20 && frac<0.85){ if(b0<0)b0=y; gap=0; }
     else if(b0>=0){ gap++; if(gap>yGapMax){ bands.push([b0,y-gap]); b0=-1; } }
   }
   if(b0>=0) bands.push([b0,ph-1]);
+  dbg('maxRD', maxRD, 'bands', JSON.stringify(bands));
   if(!bands.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）"};
   // バーコードの縞は、印字1行分の文字(かすれても数ピクセル程度)と比べて
   // 縦方向にずっと厚みのある帯になる。「box中心に最も近い帯」を採用すると、
@@ -856,6 +865,7 @@ function checkBarcodeQuality(canvas, box){
   // 囲ってしまう/品質異常と誤検知することがあるため、最も背の高い帯を採用する。
   let ry0,ry1,bestH=-1;
   for(const [a,b2] of bands){ const h=b2-a; if(h>bestH){bestH=h; ry0=a; ry1=b2;} }
+  dbg('ry0,ry1', ry0, ry1);
   // 2) 縞の実x範囲を特定。バー帯の縦平均プロファイルでrun-lengthを取り、
   //    モジュール幅の数倍を超える白ギャップ(=本文との余白)で縞の連続を打ち切る
   const prof=new Float32Array(pw);
@@ -863,6 +873,7 @@ function checkBarcodeQuality(canvas, box){
   let psum=0; for(let x=0;x<pw;x++) psum+=prof[x];
   const pthr=psum/pw*0.85;
   const pb=new Uint8Array(pw); for(let x=0;x<pw;x++) pb[x]=prof[x]<pthr?1:0;
+  dbg('pthr', pthr, 'darkCols', pb.reduce((s,v)=>s+v,0), 'profMin', Math.min(...prof), 'profMax', Math.max(...prof));
   // run-length(開始位置付き)
   const pruns=[]; let pc=pb[0],pl=1,ps=0;
   for(let x=1;x<pw;x++){ if(pb[x]===pc) pl++; else{ pruns.push([pc,pl,ps]); pc=pb[x]; ps=x; pl=1; } }
@@ -870,16 +881,32 @@ function checkBarcodeQuality(canvas, box){
   const ws=pruns.map(r=>r[1]).sort((a,b)=>a-b);
   const mod=Math.max(1, ws[Math.floor(ws.length*0.2)]||2);
   const maxbar=mod*5;
-  // 最初の黒から、大きな白ギャップが出るまでを縞範囲とする
-  let cx0=-1,cx1=-1;
-  for(const [c,ln,st] of pruns){
-    if(c===1 && cx0<0) cx0=st;          // 最初の黒
-    if(cx0>=0){
-      if(c===0 && ln>maxbar) break;      // 大きな白=終端
-      cx1=st+ln-1;
+  dbg('numPruns', pruns.length, 'mod', mod, 'maxbar', maxbar);
+  // 大きな白ギャップ(maxbar超)でプロファイルを区切り、複数の候補区間(セグメント)を作る。
+  // その中で最もバー本数が多い区間を「本物の縞」として採用する。
+  // (単純に「最初の黒→最初の大ギャップ」で打ち切ると、box端に紛れ込んだ縁の黒画素
+  //  など孤立したノイズを先頭と誤認し、直後の余白で即座に打ち切ってしまうため)
+  const segments=[]; let segStart=0;
+  for(let idx=0; idx<pruns.length; idx++){
+    if(pruns[idx][1]>maxbar){
+      if(idx>segStart) segments.push(pruns.slice(segStart, idx));
+      segStart=idx+1;
     }
   }
-  if(cx0<0) return {ok:false, note:"読み込みができません（バーコードを認識できません）"};
+  if(segStart<pruns.length) segments.push(pruns.slice(segStart));
+  let best=null, bestBars=-1;
+  for(const seg of segments){
+    const bars=seg.filter(r=>r[0]===1).length;
+    if(bars>bestBars){ bestBars=bars; best=seg; }
+  }
+  dbg('numSegments', segments.length, 'segBarCounts', JSON.stringify(segments.map(s=>s.filter(r=>r[0]===1).length)), 'bestBars', bestBars);
+  if(best){
+    while(best.length && best[0][0]===0) best.shift();
+    while(best.length && best[best.length-1][0]===0) best.pop();
+  }
+  if(!best || !best.length) return {ok:false, note:"読み込みができません（バーコードを認識できません）"};
+  const cx0=best[0][2], last=best[best.length-1], cx1=last[2]+last[1]-1;
+  dbg('cx0,cx1', cx0, cx1);
   // 縞の実x範囲(元canvas正規化座標)を返す→枠補正に使う
   const tightBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
   // 3) バー帯内の複数走査線でrun-length
@@ -920,6 +947,52 @@ function checkBarcodeQuality(canvas, box){
   return {ok:issues.length===0, note:uniq.join(" / "), tightBox,
           metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transOutliers}};
 }
+
+/* 品質判定を、検出用canvas(DETECT_SCALE=3.2固定)ではなく、
+   該当box部分だけをPDFから高解像度で再レンダリングした画像に対して行う。
+   バーコードが小さく印刷されている(例: 通常の90%縮小)場合、DETECT_SCALEが
+   固定倍率のためモジュール幅のピクセル数が不足し、アンチエイリアスの影響で
+   バーの融合/欠落を誤検出しやすい。box部分だけを高倍率で再レンダリングし、
+   モジュールあたりのピクセル数を確保することで誤判定を防ぐ。 */
+const QUALITY_TARGET_PX = 480;   // 品質判定用に確保したいバー領域の目安ピクセル幅
+const QUALITY_MAX_SCALE = 14;    // 再レンダリング倍率の上限(メモリ・速度対策)
+const QUALITY_PAD = 0.15;        // クロップ時に周囲へ持たせる余白(縁の欠けを防ぐ)
+async function checkBarcodeQualityHiRes(page, box, label){
+  if(!box || !box.w || !box.h) return {ok:true, note:"判定不可"};
+  const base=page.getViewport({scale:1});
+  const rawScale=QUALITY_TARGET_PX/(box.w*base.width);
+  const scale=Math.min(Math.max(rawScale, DETECT_SCALE), QUALITY_MAX_SCALE);
+  const vp=page.getViewport({scale});
+  const padX=box.w*QUALITY_PAD, padY=box.h*0.03;
+  const cx0=Math.max(0, Math.floor((box.x-padX)*vp.width));
+  const cy0=Math.max(0, Math.floor((box.y-padY)*vp.height));
+  const cx1=Math.min(vp.width,  Math.ceil((box.x+box.w+padX)*vp.width));
+  const cy1=Math.min(vp.height, Math.ceil((box.y+box.h+padY)*vp.height));
+  const cw=Math.max(1, cx1-cx0), ch=Math.max(1, cy1-cy0);
+  let cv, ctx;
+  try{
+    cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+    ctx=cv.getContext('2d'); ctx.translate(-cx0,-cy0);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+  }catch(e){ return {ok:true, note:"判定不可(高解像度レンダ失敗)"}; }
+  const localBox={
+    x:(box.x*vp.width-cx0)/cw, y:(box.y*vp.height-cy0)/ch,
+    w:box.w*vp.width/cw,       h:box.h*vp.height/ch
+  };
+  const q=checkBarcodeQuality(cv, localBox);
+  if(q.tightBox){
+    // クロップ画像内の正規化座標→元のページ全体の正規化座標へ戻す
+    q.tightBox={
+      x:(q.tightBox.x*cw+cx0)/vp.width,
+      y:(q.tightBox.y*ch+cy0)/vp.height,
+      w:q.tightBox.w*cw/vp.width,
+      h:q.tightBox.h*ch/vp.height
+    };
+  }
+  return q;
+}
+
+
 
 /* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
 function scanBarcodes(canvas){
@@ -1116,7 +1189,7 @@ async function analyzePage(pageNum){
       rep.marks=pickMarks(ocrWords, rep);
       rep.ocrText=txt; rep.boxes={jan:s.other.box}; rep.isJan=true;
       rep.quality={};
-      if(s.other.box){ rep.quality.jan=checkBarcodeQuality(cv,s.other.box);
+      if(s.other.box){ rep.quality.jan=await checkBarcodeQualityHiRes(page,s.other.box,'jan');
         if(rep.quality.jan.tightBox) rep.boxes.jan=tightenWidth(s.other.box, rep.quality.jan.tightBox); }
       results.push(rep);
       continue;
@@ -1142,9 +1215,9 @@ async function analyzePage(pageNum){
     rep.ocrText=txt; rep.boxes={isbn:s.isbn?s.isbn.box:null,dnc:s.dnc?s.dnc.box:null};
     // バーコード品質(欠け・かすれ・縞の異常)を画素で簡易判定
     rep.quality={};
-    if(s.isbn&&s.isbn.box){ rep.quality.isbn=checkBarcodeQuality(cv,s.isbn.box);
+    if(s.isbn&&s.isbn.box){ rep.quality.isbn=await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn');
       if(rep.quality.isbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, rep.quality.isbn.tightBox); }
-    if(s.dnc&&s.dnc.box){ rep.quality.dnc=checkBarcodeQuality(cv,s.dnc.box);
+    if(s.dnc&&s.dnc.box){ rep.quality.dnc=await checkBarcodeQualityHiRes(page,s.dnc.box,'dnc');
       if(rep.quality.dnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, rep.quality.dnc.tightBox); }
     results.push(rep);
   }
