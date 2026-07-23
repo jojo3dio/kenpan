@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 /* ---------- light (default 紙色 / トンボ=シアン系) ---------- */
 :root{
@@ -44,7 +45,7 @@ header{display:flex;align-items:center;gap:16px;padding:10px 16px;
 .brand b{font-weight:700;font-size:16px;letter-spacing:.02em}
 .brand span{color:var(--ink-faint);font-size:12px}
 .sp{flex:1}
-.tools{display:flex;align-items:center;gap:8px}
+.tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 button,.btn{font-family:var(--ui);font-size:13px;cursor:pointer;
   border:1px solid var(--line);background:var(--panel2);color:var(--ink);
   border-radius:7px;padding:7px 12px;transition:.15s}
@@ -52,13 +53,22 @@ button:hover,.btn:hover{border-color:var(--amber);background:var(--amber-bg)}
 button:disabled{opacity:.45;cursor:not-allowed}
 .icobtn{padding:7px 10px}
 .opt{display:flex;align-items:center;gap:6px;color:var(--ink-dim);font-size:12px}
+.pdfbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:13px;font-weight:700;
+  color:#fff;background:#7c3aed;border:1px solid #7c3aed;border-radius:7px;
+  padding:7px 12px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em}
+.pdfbtn:hover{filter:brightness(1.08);border-color:#7c3aed;background:#7c3aed}
+.pdfbtn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.pdfbtn svg{width:15px;height:15px}
 
 /* ---------- body ---------- */
 .main{flex:1;display:flex;min-height:0}
 .col{display:flex;flex-direction:column;min-height:0}
 .left{flex:0 0 224px;border-right:1px solid var(--line);background:var(--panel);overflow:auto}
 .center{flex:1;background:var(--stage);position:relative;display:flex;flex-direction:column;overflow:hidden}
-.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);overflow:auto}
+.viewstage{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.right-fixed{flex:0 0 auto}
+.right-scroll{flex:1;min-height:0;overflow:auto}
 .colhd{height:34px;line-height:34px;padding:0 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
   position:sticky;top:0;background:var(--panel);z-index:3;letter-spacing:.04em}
 .colhd.sub{border-top:1px solid var(--line)}
@@ -106,10 +116,15 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .zoomctl button:hover{border-color:var(--amber);background:var(--amber-bg)}
 .zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:42px;text-align:center}
 .zoomctl .zsep{width:1px;align-self:stretch;background:var(--line);margin:3px 1px}
+.zoomctl button.eyebtn{min-width:auto;height:28px;padding:0 9px;display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--ui);font-size:11px;white-space:nowrap}
+.zoomctl button.eyebtn svg{width:13px;height:13px;flex-shrink:0}
 .zoomctl #dimToggleBtn.off{color:var(--ink-faint);border-color:var(--line);background:var(--panel2)}
 .zoomctl #dimToggleBtn.on{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
 .zoomctl #tomboToggleBtn.off{color:var(--ink-faint);border-color:var(--line);background:var(--panel2)}
 .zoomctl #tomboToggleBtn.on{color:#e05020;border-color:#e05020;background:rgba(224,80,32,.12)}
+.zoomctl #hideAllBtn.off{color:var(--ink-faint);border-color:var(--line);background:var(--panel2)}
+.zoomctl #hideAllBtn.on{color:#a83232;border-color:#a83232;background:rgba(168,50,50,.12)}
 
 /* ---------- 下部の凡例・ステータスバー ---------- */
 .vbar{display:none;align-items:center;gap:14px;color:var(--ink-dim);font-size:11px;flex-wrap:wrap;
@@ -232,6 +247,11 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
       <button id="btnReset" disabled>リセット</button>
       <button id="btnOpen" class="btn">PDFを選択</button>
       <input type="file" id="file" accept="application/pdf" class="hidden">
+      <button id="csvBtn" onclick="exportCSV()" disabled title="計測結果をCSVで書き出す">CSV出力</button>
+      <button class="pdfbtn" id="exportPdfBtn" onclick="exportPreviewPDF()" disabled title="計測プレビュー（トンボ線・寸法入り）をPDFで書き出す">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <span>PDFで保存</span>
+      </button>
       <button class="fbbtn" id="fbOpen" title="この計測結果についてのフィードバックを送信（検出の正誤・気づいた点）">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>フィードバック</span>
@@ -258,6 +278,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
         <span class="sp"></span>
         <span id="pgProgress" class="hint"></span>
       </div>
+      <div class="viewstage">
       <div class="canvaswrap" id="canvaswrap">
         <div class="cw-scroll" id="cwScroll">
           <div class="drop" id="drop">
@@ -278,13 +299,16 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
         </div>
       </div>
       <div class="zoomctl hidden" id="zoomctl">
+        <button id="dimToggleBtn" class="eyebtn" title="寸法の表示/非表示"></button>
+        <button id="tomboToggleBtn" class="eyebtn" title="検出トンボ線の表示/非表示"></button>
+        <span class="zsep"></span>
+        <button id="hideAllBtn" class="eyebtn" title="すべて非表示/表示" onclick="toggleHideAll()"></button>
+        <span class="zsep"></span>
         <button id="zOut" title="縮小">−</button>
         <span id="zoomhint">100%</span>
         <button id="zIn" title="拡大">＋</button>
         <button id="zFit" title="全体表示">全体</button>
-        <span class="zsep"></span>
-        <button id="dimToggleBtn" title="寸法の表示/非表示"></button>
-        <button id="tomboToggleBtn" title="検出トンボ線の表示/非表示"></button>
+      </div>
       </div>
       <div class="vbar" id="vbar">
         <span class="li"><span class="ll" style="background:#e05020"></span>検出トンボ線</span>
@@ -302,6 +326,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
 
     <!-- 右: 設定・結果 -->
     <div class="col right">
+      <div class="right-fixed">
       <div class="colhd">検出設定</div>
       <div class="rsec">
         <div class="rfr">
@@ -330,14 +355,13 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
         </button>
         <div style="font-size:10.5px;color:var(--ink-faint);margin-top:6px;line-height:1.6">ページを開くと自動でトンボを検出します。設定を変えた場合はこのボタンで再検出してください。</div>
       </div>
+      </div>
 
+      <div class="right-scroll">
       <div class="colhd sub" id="resHd" style="display:none">計測結果</div>
       <div class="rsec" id="resSec" style="display:none">
         <div id="resList" class="rl"></div>
-        <div class="rrow2">
-          <button onclick="exportCSV()">CSV出力</button>
-          <button id="togBtn" onclick="toggleAll()">全非表示</button>
-        </div>
+      </div>
       </div>
     </div>
   </div>
@@ -462,6 +486,7 @@ function resetAll(){
   $("#pgProgress").textContent='';
   $("#abtn").disabled=true; $("#btnReset").disabled=true;
   $("#resHd").style.display='none'; $("#resSec").style.display='none';
+  $("#csvBtn").disabled=true; $("#exportPdfBtn").disabled=true;
   $("#file").value='';
   $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
 }
@@ -965,6 +990,7 @@ async function analyze(){
 function clearOv(){
   ['ovC','ixC'].forEach(id=>{const c=$("#"+id);c.getContext('2d').clearRect(0,0,c.width,c.height);});
   $("#resHd").style.display='none'; $("#resSec").style.display='none';
+  $("#csvBtn").disabled=true; $("#exportPdfBtn").disabled=true;
   $("#sbdet").textContent='—';
 }
 function drawOv(r){
@@ -1172,6 +1198,7 @@ window.addEventListener('resize',()=>{ if(pdfDoc) doZoom(1); });
 /* ---------- RESULTS ---------- */
 function buildRes(r){
   $("#resHd").style.display='block'; $("#resSec").style.display='block';
+  $("#csvBtn").disabled=false; $("#exportPdfBtn").disabled=false;
   const unit=$("#unitSel").value;
   const l=$("#resList"); l.innerHTML='';
   const hd=r.dims.filter(d=>d.type==='H');
@@ -1223,13 +1250,13 @@ function refreshDisp(){const r=pgRes[curPg];if(!r)return;drawOv(r);buildRes(r);}
 const EYE_OPEN='<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_CLOSED='<path d="M17.94 17.94A10 10 0 0112 20C5 20 1 12 1 12a18 18 0 015-6M9.9 4.24A9 9 0 0112 4c7 0 11 8 11 8a18 18 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
 function updateDimToggleUI(){
-  const tog=$("#togBtn"); if(tog) tog.textContent=showAll?'全非表示':'全表示';
   const btn=$("#dimToggleBtn");
   if(btn){
-    btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showAll?EYE_OPEN:EYE_CLOSED)+'</svg>';
-    btn.className=showAll?'on':'off';
+    btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showAll?EYE_OPEN:EYE_CLOSED)+'</svg><span>寸法</span>';
+    btn.className='eyebtn '+(showAll?'on':'off');
     btn.title=showAll?'寸法を非表示にする':'寸法を表示する';
   }
+  updateHideAllUI();
 }
 $("#dimToggleBtn").onclick=toggleAll;
 updateDimToggleUI();
@@ -1242,11 +1269,29 @@ function toggleTombo(){
 function updateTomboToggleUI(){
   const btn=$("#tomboToggleBtn");
   if(!btn) return;
-  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showTombo?EYE_OPEN:EYE_CLOSED)+'</svg>';
-  btn.className=showTombo?'on':'off';
+  btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(showTombo?EYE_OPEN:EYE_CLOSED)+'</svg><span>トンボ線</span>';
+  btn.className='eyebtn '+(showTombo?'on':'off');
   btn.title=showTombo?'検出トンボ線を非表示にする':'検出トンボ線を表示する';
+  updateHideAllUI();
 }
 $("#tomboToggleBtn").onclick=toggleTombo;
+
+/* ---------- 寸法・トンボ線 まとめて非表示/表示 ---------- */
+function toggleHideAll(){
+  const bothHidden=!showAll && !showTombo;
+  const target=bothHidden; // 両方非表示中なら「表示」に、そうでなければ「非表示」に揃える
+  if(showAll!==target) toggleAll();
+  if(showTombo!==target) toggleTombo();
+  updateHideAllUI();
+}
+function updateHideAllUI(){
+  const btn=$("#hideAllBtn");
+  if(!btn) return;
+  const bothHidden=!showAll && !showTombo;
+  btn.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'+(bothHidden?EYE_CLOSED:EYE_OPEN)+'</svg><span>全非表示</span>';
+  btn.className='eyebtn '+(bothHidden?'on':'off');
+  btn.title=bothHidden?'すべて表示する':'寸法・トンボ線をすべて非表示にする';
+}
 updateTomboToggleUI();
 
 /* ---------- DBG ---------- */
@@ -1264,6 +1309,55 @@ function exportCSV(){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   a.download='tombo.csv'; a.click();
+}
+
+/* ---------- 計測プレビューPDF書き出し ---------- */
+function capturePreviewCanvas(){
+  const pc=$("#pdfC"), oc=$("#ovC");
+  if(!pc||!pc.width||!oc||!oc.width) return null;
+  const EXTRA=parseInt(oc.style.top||'0')*-1;
+  const c=document.createElement("canvas");
+  c.width=oc.width; c.height=oc.height;
+  const ctx=c.getContext("2d");
+  ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,c.width,c.height);
+  ctx.drawImage(pc,0,EXTRA);
+  ctx.drawImage(oc,0,0);
+  return c;
+}
+async function exportPreviewPDF(){
+  if(!pdfDoc){ alert('PDFが読み込まれていません'); return; }
+  if(!Object.keys(pgRes).length){ alert('計測結果がありません。先にトンボ検出を行ってください。'); return; }
+  const btn=$("#exportPdfBtn");
+  const origHTML=btn.innerHTML;
+  btn.disabled=true; btn.innerHTML='<span>PDF作成中…</span>';
+  const origPg=curPg, origUsc=usc;
+  try{
+    if(!window.jspdf){ alert('PDF書き出しライブラリの読み込みに失敗しました。通信環境をご確認のうえ再度お試しください。'); return; }
+    const { jsPDF } = window.jspdf;
+    usc=1; // 書き出し中は倍率を100%(全体表示相当)に固定して安定させる
+    let doc=null;
+    for(let n=1;n<=pdfDoc.numPages;n++){
+      if(n!==curPg || !pgRes[n]) await selectPage(n-1);
+      const cvs=capturePreviewCanvas();
+      if(!cvs) continue;
+      const sc=bsc*usc;
+      const wMm=cvs.width*PT2MM/sc, hMm=cvs.height*PT2MM/sc;
+      const img=cvs.toDataURL('image/png');
+      const orient = wMm>hMm ? 'landscape' : 'portrait';
+      if(!doc) doc=new jsPDF({unit:'mm', format:[wMm,hMm], orientation:orient});
+      else doc.addPage([wMm,hMm], orient);
+      doc.addImage(img,'PNG',0,0,wMm,hMm);
+    }
+    if(!doc){ alert('書き出せるページがありませんでした'); return; }
+    const base=(fbFileName||'tombo').replace(/\.pdf$/i,'');
+    doc.save(base+'_計測プレビュー.pdf');
+  }catch(e){
+    alert('PDF書き出しに失敗しました: '+e.message);
+  }finally{
+    usc=origUsc;
+    await selectPage(origPg-1);
+    btn.disabled=false; btn.innerHTML=origHTML;
+  }
 }
 
 /* ---------- FILE I/O ---------- */
