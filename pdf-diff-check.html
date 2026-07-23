@@ -2038,9 +2038,15 @@ function textDiff(p){
     // 純削除/追加/置換ブロックそれぞれ、文字列(3字以上)が相手PDF全体に8割以上存在すれば移動として除外。
     // （和欧をまたぐ継ぎ目は0.8前後になるため0.80。実変更の新規テキストは0.1〜0.3で残る＝合成テスト確認済み）
     const _RTH=0.80;
-    for(const d of _dels){ if(!_cancelled.has(d) && _cov(d.aStr,S.gBgram)>=_RTH) _cancelled.add(d); }
-    for(const x of _inss){ if(!_cancelled.has(x) && _cov(x.bStr,S.gAgram)>=_RTH) _cancelled.add(x); }
-    for(const r of _reps){ if(!_cancelled.has(r) && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH) _cancelled.add(r); }
+    // 短い文字列（例：「地区報告」等の反復ラベル）はトライグラムが2〜3個しか無く、ページ内の
+    // 他行に同じラベルが繰り返し出現するだけで偶然カバレッジ100%になり、実際は「その行だけ
+    // 抜けている」内容差分を誤って「別ページへ移動した」と相殺してしまう不具合があった。
+    // 個別ブロックの相殺は、ある程度の長さ（このファイル内の他の閾値と合わせて16字）以上の
+    // 文字列にのみ適用し、短い反復ラベルの抜け・追加は素直に検出させる。
+    const _MINLEN=16;
+    for(const d of _dels){ if(!_cancelled.has(d) && _norm(d.aStr).length>=_MINLEN && _cov(d.aStr,S.gBgram)>=_RTH) _cancelled.add(d); }
+    for(const x of _inss){ if(!_cancelled.has(x) && _norm(x.bStr).length>=_MINLEN && _cov(x.bStr,S.gAgram)>=_RTH) _cancelled.add(x); }
+    for(const r of _reps){ if(!_cancelled.has(r) && _norm(r.aStr).length>=_MINLEN && _norm(r.bStr).length>=_MINLEN && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH) _cancelled.add(r); }
     // ページがreflow文脈（不一致テキストが十分多く＝40字以上、その大半が相手PDFに存在）なら、
     // 残った短い継ぎ目断片(<16字)も抑制。実変更ページは相手に存在せずカバレッジが低いので対象外。
     const _aMiss=_dels.concat(_reps).map(x=>_norm(x.aStr)).join("");
