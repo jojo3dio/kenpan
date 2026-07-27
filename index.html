@@ -44,7 +44,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 
 /* 2カラム本体 */
 .app{max-width:1180px;margin:0 auto;padding:28px;
-  display:grid;grid-template-columns:390px 1fr;gap:28px;align-items:start}
+  display:grid;grid-template-columns:390px 1fr;gap:48px;align-items:start}
 
 /* 左：詳細パネル */
 .detail{position:sticky;top:24px;--glow:var(--accent);
@@ -84,12 +84,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 /* 右：見出し＋タイル */
 .right h1{font-size:22px;margin:0 0 4px;letter-spacing:.01em}
 .right .sub{margin:0 0 20px;color:var(--ink-dim);font-size:13px;line-height:1.7}
-.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:22px 14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:20px 12px}
 
-.cell{display:flex;flex-direction:column;align-items:center;gap:9px}
+.cell{display:flex;flex-direction:column;align-items:center;gap:8px}
 .iconbtn{position:relative;isolation:isolate;--glow:var(--accent);cursor:pointer;
   font:inherit;appearance:none;-webkit-appearance:none;color:var(--glow);
-  width:72px;height:72px;border-radius:20px;
+  width:60px;height:60px;border-radius:16px;
   background:color-mix(in srgb, var(--accent) 12%, var(--panel));
   border:1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
   display:flex;align-items:center;justify-content:center;
@@ -97,7 +97,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 [data-theme="dark"] .iconbtn{--glow:color-mix(in srgb, var(--accent) 70%, white);
   background:color-mix(in srgb, var(--accent) 22%, var(--panel));
   border-color:color-mix(in srgb, var(--accent) 42%, var(--line))}
-.iconbtn svg{width:34px;height:34px}
+.iconbtn svg{width:26px;height:26px}
 .iconbtn:hover{transform:translateY(-3px);
   box-shadow:0 4px 10px rgba(40,32,20,.07),0 14px 30px color-mix(in srgb, var(--glow) 26%, transparent)}
 .iconbtn.sel{border-color:var(--glow);
@@ -106,7 +106,7 @@ body.editing .iconbtn{cursor:grab}
 .iconbtn.dragging{opacity:.35}
 .iconbtn.drag-over{box-shadow:0 0 0 2px var(--glow)}
 
-.cap{font-size:12px;line-height:1.35;font-weight:500;text-align:center;color:var(--ink);max-width:96px}
+.cap{font-size:12px;line-height:1.35;font-weight:500;text-align:center;color:var(--ink);max-width:84px;text-wrap:balance}
 .iconbtn.sel + .cap{color:var(--glow);font-weight:700}
 
 /* ホバーでLEDがアイコンの縁を一周 */
@@ -131,7 +131,7 @@ body.editing .iconbtn .del{display:flex}
 .iconbtn.add{background:transparent;border-style:dashed;color:var(--ink-faint)}
 .iconbtn.add:hover{border-color:var(--amber);color:var(--amber);box-shadow:none}
 .iconbtn.add::after{display:none}
-.iconbtn.add .plus{font-size:28px;line-height:1}
+.iconbtn.add .plus{font-size:22px;line-height:1}
 
 /* フッタ */
 .foot{max-width:1180px;margin:0 auto;padding:8px 28px 44px;color:var(--ink-faint);font-size:12px;line-height:1.7}
@@ -178,6 +178,23 @@ body.editing .iconbtn .del{display:flex}
   .app{grid-template-columns:1fr;gap:20px}
   .detail{position:static}
 }
+
+/* ── ゾーン区切り（点検／編集の間の単純な罫線） ── */
+.zone-divider{height:1px;background:var(--line);margin:48px 0 40px}
+
+/* ── 編集ツール：アイコン配色を反転（枠内=濃い塗り／アイコン=白） ── */
+.iconbtn.rev, [data-theme="dark"] .iconbtn.rev{
+  background:var(--accent); border-color:var(--accent); color:#fff;
+}
+.iconbtn.rev:hover{
+  box-shadow:0 4px 10px rgba(40,32,20,.10),0 14px 30px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.iconbtn.rev.sel{
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 55%, #000 10%);
+}
+.detail.rev .dicon, [data-theme="dark"] .detail.rev .dicon{
+  background:var(--accent); border-color:var(--accent); color:#fff;
+}
 </style>
 </head>
 <body>
@@ -191,7 +208,7 @@ body.editing .iconbtn .del{display:flex}
       <line x1="3" y1="36" x2="11" y2="36" stroke="var(--amber)" stroke-width="2.5"/>
       <path d="M26 27l6 6 12-14" stroke="var(--amber)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <div class="wmwrap"><span class="wm">KEN<i>PAN</i></span><span class="tag">検版ハブ · 下版前点検</span></div>
+    <div class="wmwrap"><span class="wm">KEN<i>PAN</i></span><span class="tag">検版ハブ · 点検・編集</span></div>
   </div>
   <div class="sp"></div>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
@@ -200,11 +217,16 @@ body.editing .iconbtn .del{display:flex}
 
 <div class="app">
   <aside class="detail" id="detail"></aside>
-
   <section class="right">
     <h1>点検ツールを選ぶ</h1>
     <p class="sub">アイコンをクリックすると、そのツールが別タブで開きます。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。</p>
-    <div class="tiles" id="tiles"></div>
+    <div class="tiles" id="tiles-inspect"></div>
+
+    <div class="zone-divider"></div>
+
+    <h1>編集ツールを選ぶ</h1>
+    <p class="sub">アイコンの塗りが濃色・線が白のツールは、PDF自体に手を加える編集系です。</p>
+    <div class="tiles" id="tiles-edit"></div>
   </section>
 </div>
 
@@ -251,29 +273,45 @@ const ICONS={
   toc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/><circle cx="20" cy="18" r="1.4" fill="currentColor"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l5 5L20 6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6" stroke-linecap="round"/></svg>',
-  ruler:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>'
+  ruler:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>',
+  ribbon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z" stroke-linejoin="round"/></svg>'
 };
 const ICON_KEYS=Object.keys(ICONS);
-const ICON_COLORS={ barcode:'#2563eb',position:'#0d9488',diff:'#7c3aed',toc:'#d94f95',check:'#16a34a',doc:'#e11d48',ruler:'#0891b2' };
+const ICON_COLORS={ barcode:'#2563eb',position:'#0d9488',diff:'#7c3aed',toc:'#d94f95',check:'#16a34a',doc:'#e11d48',ruler:'#0891b2',ribbon:'#dc2626' };
 const colorOf=k=>ICON_COLORS[k]||'#64748b';
 
+/* ツール名の改行位置を明示指定（既定ツールのみ。未指定はブラウザ標準+text-wrap:balanceに委ねる） */
+const NAME_BREAKS={
+  'ISBN検版':'ISBN<wbr>検版',
+  'ノンブル検版':'ノンブル<wbr>検版',
+  '下版差分チェッカー':'下版差分<wbr>チェッカー',
+  '目次整合検版':'目次整合<wbr>検版',
+  'トンボ計測':'トンボ<wbr>計測',
+  'PDF しおり追加':'PDF<wbr>しおり追加'
+};
+function capHtml(name){ return NAME_BREAKS[name] || esc(name); }
+
 const DEFAULTS=[
-  {name:'ISBN検版', url:'isbn-barcode-check.html', manual:'manual-isbn.html', cat:'バーコード照合', icon:'barcode',
+  {name:'ISBN検版', url:'isbn-barcode-check.html', manual:'manual-isbn.html', cat:'バーコード照合', icon:'barcode', group:'inspect',
    desc:'表紙・カバーの2段バーコードを検出し、ISBN・Cコード・価格の印字と照合します。バーの欠け・つぶれといった品質不良も検知し、人が読む数字行を誤検出しないよう調整済みです。'},
-  {name:'ノンブル検版', url:'nombre-check.html', manual:'manual-nombre.html', cat:'位置・体裁', icon:'position',
+  {name:'ノンブル検版', url:'nombre-check.html', manual:'manual-nombre.html', cat:'位置・体裁', icon:'position', group:'inspect',
    desc:'ノンブル（ページ番号）の位置を検版します。ズーム／パン、OCRモード、表裏の見当チェックに対応します。'},
-  {name:'下版差分チェッカー', url:'pdf-diff-check.html', manual:'manual-pdf-diff.html', cat:'差分', icon:'diff',
+  {name:'下版差分チェッカー', url:'pdf-diff-check.html', manual:'manual-pdf-diff.html', cat:'差分', icon:'diff', group:'inspect',
    desc:'同一DPIでレンダリングした2つの下版PDFをピクセル単位で差分検出します。5つの表示モードと、全ページを一気に見渡す概観スキャンを備えています。'},
-  {name:'目次整合検版', url:'toc_kenpan.html', manual:'manual-toc.html', cat:'整合', icon:'toc',
+  {name:'目次整合検版', url:'toc_kenpan.html', manual:'manual-toc.html', cat:'整合', icon:'toc', group:'inspect',
    desc:'目次・見出し・柱・ノンブルの相互整合をチェックします。横組み・縦組みの両方に対応します。'},
-  {name:'トンボ計測', url:'tombo-check.html', manual:'manual-tombo.html', cat:'計測', icon:'ruler',
-   desc:'表紙・カバー展開図のトンボ（トリムマーク）を自動検出し、天地・左右・折り位置などの各種寸法を計測します。ハンドルドラッグで微調整、CSV出力にも対応します。'}
+  {name:'トンボ計測', url:'tombo-check.html', manual:'manual-tombo.html', cat:'計測', icon:'ruler', group:'inspect',
+   desc:'表紙・カバー展開図のトンボ（トリムマーク）を自動検出し、天地・左右・折り位置などの各種寸法を計測します。ハンドルドラッグで微調整、CSV出力にも対応します。'},
+  {name:'PDF しおり追加', url:'pdf-bookmark-add.html', manual:'', cat:'しおり付加', icon:'ribbon', group:'edit',
+   desc:'テキストの目次リストからPDFにブックマーク（アウトライン）を階層構造で書き込みます。ページラベルのズレも自動補正します。'}
 ];
 
 let tools=load();
-let shown=0;          // 現在左に表示中のツール
+const GROUPS=['inspect','edit'];
+let shownUrl=null;    // 現在左の詳細パネルに表示中のツールのurl（ゾーン共通）
 let frozen=false;     // 詳細パネルにカーソルがある間は切替を止める
 let hoverTimer=null;  // ホバー遅延（通過しただけでは切り替えない）
+const toolsOf=g=>tools.filter(t=>t.group===g);
 
 function load(){
   let saved=null;
@@ -286,7 +324,8 @@ function load(){
   // 既存の保存データに、後から追加したマニュアルを補完（削除済みツールは復活させない）
   const dmap=Object.fromEntries(DEFAULTS.map(d=>[d.url,d]));
   saved.forEach(t=>{ if(t.manual===undefined) t.manual='';
-    if(!t.manual && dmap[t.url] && dmap[t.url].manual) t.manual=dmap[t.url].manual; });
+    if(!t.manual && dmap[t.url] && dmap[t.url].manual) t.manual=dmap[t.url].manual;
+    if(!t.group) t.group=(dmap[t.url]&&dmap[t.url].group)||'inspect'; });
   return saved;
 }
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(tools)); }catch(e){} }
@@ -297,9 +336,12 @@ function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); 
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
 $('#themeBtn').onclick=()=>{ const d=document.documentElement.getAttribute('data-theme')==='dark'; applyTheme(d?'light':'dark'); };
 
-function renderDetail(i){
-  shown=i; const t=tools[i]; if(!t){ $('#detail').innerHTML=''; return; }
-  const d=$('#detail'); d.style.setProperty('--accent', colorOf(t.icon));
+function renderDetail(){
+  const t=tools.find(x=>x.url===shownUrl);
+  const d=$('#detail');
+  if(!t){ d.innerHTML=''; return; }
+  d.classList.toggle('rev', t.group==='edit');
+  d.style.setProperty('--accent', colorOf(t.icon));
   const hasMan=!!(t.manual&&t.manual.trim());
   d.innerHTML=`
     <div class="dicon">${ICONS[t.icon]||ICONS.check}</div>
@@ -321,33 +363,38 @@ function renderDetail(i){
   if(hasMan) d.querySelector('.man').onclick=()=>openManualPanel(t.manual, t.name);
 }
 
-function showDetail(i){ shown=i; markShown(); renderDetail(i); }
-function scheduleDetail(i){ if(frozen) return; clearTimeout(hoverTimer); hoverTimer=setTimeout(()=>showDetail(i),120); }
+function showDetail(url){ shownUrl=url; markShownAll(); renderDetail(); }
+function scheduleDetail(url){ if(frozen) return; clearTimeout(hoverTimer); hoverTimer=setTimeout(()=>showDetail(url),120); }
 
-function renderTiles(){
-  const g=$('#tiles'); g.innerHTML='';
-  tools.forEach((t,i)=>{
+function renderTiles(group){
+  const list=toolsOf(group);
+  const g=$('#tiles-'+group); g.innerHTML='';
+  const isEdit=group==='edit';
+  list.forEach(t=>{
+    const realIdx=tools.indexOf(t);
     const cell=document.createElement('div'); cell.className='cell';
     const b=document.createElement('button');
-    b.className='iconbtn'+(i===shown?' sel':''); b.type='button';
+    b.className='iconbtn'+(isEdit?' rev':'')+(t.url===shownUrl?' sel':''); b.type='button';
     b.style.setProperty('--accent', colorOf(t.icon));
     b.title=t.name+'を開く';
-    b.innerHTML=`<span class="del" title="削除" data-del="${i}">×</span>${ICONS[t.icon]||ICONS.check}`;
-    b.addEventListener('mouseenter',()=>scheduleDetail(i));
-    b.addEventListener('focus',()=>showDetail(i));
+    b.innerHTML=`<span class="del" title="削除" data-del="${realIdx}">×</span>${ICONS[t.icon]||ICONS.check}`;
+    b.addEventListener('mouseenter',()=>scheduleDetail(t.url));
+    b.addEventListener('focus',()=>showDetail(t.url));
     b.addEventListener('click',e=>{ if(e.target.closest('.del')) return; openUrl(t.url); });
-    // 並べ替え（ドラッグ&ドロップ）
+    // 並べ替え（ドラッグ&ドロップ、同じゾーン内のみ）
     b.draggable=true;
     b.addEventListener('dragstart',e=>{
       if(!document.body.classList.contains('editing')){ e.preventDefault(); return; }
       e.dataTransfer.effectAllowed='move';
-      e.dataTransfer.setData('text/plain', String(i));
+      e.dataTransfer.setData('text/plain', JSON.stringify({idx:realIdx, group}));
       b.classList.add('dragging');
     });
     b.addEventListener('dragend',()=>{ b.classList.remove('dragging');
       g.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over')); });
     b.addEventListener('dragover',e=>{
       if(!document.body.classList.contains('editing')) return;
+      let data; try{ data=JSON.parse(e.dataTransfer.getData('text/plain')||'{}'); }catch(err){ data={}; }
+      if(data.group!==group) return;
       e.preventDefault(); e.dataTransfer.dropEffect='move';
       b.classList.add('drag-over');
     });
@@ -355,35 +402,47 @@ function renderTiles(){
     b.addEventListener('drop',e=>{
       if(!document.body.classList.contains('editing')) return;
       e.preventDefault(); b.classList.remove('drag-over');
-      const from=+e.dataTransfer.getData('text/plain'), to=i;
-      if(Number.isNaN(from) || from===to) return;
+      let data; try{ data=JSON.parse(e.dataTransfer.getData('text/plain')||'{}'); }catch(err){ data={}; }
+      const from=data.idx, to=realIdx;
+      if(data.group!==group || typeof from!=='number' || from===to) return;
       const [moved]=tools.splice(from,1);
       tools.splice(to,0,moved);
-      if(shown===from) shown=to; else if(from<shown && to>=shown) shown--; else if(from>shown && to<=shown) shown++;
-      save(); renderTiles(); renderDetail(shown);
+      save(); renderTiles(group);
     });
-    const cap=document.createElement('span'); cap.className='cap'; cap.textContent=t.name;
+    const cap=document.createElement('span'); cap.className='cap'; cap.innerHTML=capHtml(t.name);
     cell.appendChild(b); cell.appendChild(cap); g.appendChild(cell);
   });
   const acell=document.createElement('div'); acell.className='cell';
   const add=document.createElement('button'); add.className='iconbtn add'; add.type='button'; add.title='ツールを追加';
   add.innerHTML=`<span class="plus">＋</span>`;
-  add.addEventListener('click',openModal);
+  add.addEventListener('click',()=>openModal(group));
   const acap=document.createElement('span'); acap.className='cap'; acap.textContent='追加';
   acell.appendChild(add); acell.appendChild(acap); g.appendChild(acell);
   g.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick=e=>{ e.stopPropagation(); const i=+b.dataset.del;
       if(confirm(`「${tools[i].name}」を一覧から削除しますか？\n（ファイル自体は消えません）`)){
+        const wasShown=tools[i].url===shownUrl;
         tools.splice(i,1); save();
-        if(shown>=tools.length) shown=Math.max(0,tools.length-1);
-        renderTiles(); renderDetail(shown); } };
+        if(wasShown) shownUrl=tools[0]?tools[0].url:null;
+        renderAll(); } };
   });
 }
-function markShown(){ const els=$('#tiles').querySelectorAll('.iconbtn:not(.add)');
-  els.forEach((e,i)=>e.classList.toggle('sel', i===shown)); }
+function markShownAll(){ GROUPS.forEach(group=>{
+  const list=toolsOf(group);
+  const els=$('#tiles-'+group).querySelectorAll('.iconbtn:not(.add)');
+  els.forEach((e,i)=>e.classList.toggle('sel', list[i] && list[i].url===shownUrl));
+}); }
+
+function renderAll(){
+  if(shownUrl==null || !tools.some(t=>t.url===shownUrl)){
+    shownUrl=(tools.find(t=>t.group==='inspect')||tools[0]||{}).url||null;
+  }
+  GROUPS.forEach(renderTiles);
+  renderDetail();
+}
 
 /* グリッドを離れたら保留中の切替を取消（最後に確定した表示を維持） */
-$('#tiles').addEventListener('mouseleave',()=>clearTimeout(hoverTimer));
+GROUPS.forEach(group=>{ $('#tiles-'+group).addEventListener('mouseleave',()=>clearTimeout(hoverTimer)); });
 /* 詳細パネル上では切替を凍結（開く・マニュアルを確実に押せる） */
 $('#detail').addEventListener('mouseenter',()=>{ frozen=true; clearTimeout(hoverTimer); });
 $('#detail').addEventListener('mouseleave',()=>{ frozen=false; });
@@ -392,14 +451,17 @@ $('#editBtn').onclick=()=>{ document.body.classList.toggle('editing');
   $('#editBtn').textContent=document.body.classList.contains('editing')?'完了':'並べ替え・削除'; };
 
 let selIcon='check';
+let modalGroup='inspect';
 function buildIconRow(){
   const r=$('#iconRow'); r.innerHTML='';
   ICON_KEYS.forEach(k=>{ const b=document.createElement('button'); b.innerHTML=ICONS[k];
     b.style.color=colorOf(k); if(k===selIcon) b.classList.add('sel');
     b.onclick=()=>{ selIcon=k; buildIconRow(); }; r.appendChild(b); });
 }
-function openModal(){
-  selIcon='check'; buildIconRow();
+function openModal(group){
+  modalGroup=group||'inspect';
+  $('#modalTitle').textContent=(modalGroup==='edit'?'編集':'点検')+'ツールを追加';
+  selIcon=modalGroup==='edit'?'ribbon':'check'; buildIconRow();
   $('#fName').value=''; $('#fUrl').value=''; $('#fMan').value=''; $('#fCat').value=''; $('#fDesc').value='';
   $('#modalBg').classList.add('show'); $('#fName').focus();
 }
@@ -409,9 +471,10 @@ $('#modalBg').onclick=e=>{ if(e.target===$('#modalBg')) closeModal(); };
 $('#saveBtn').onclick=()=>{
   const name=$('#fName').value.trim(), url=$('#fUrl').value.trim();
   if(!name||!url){ alert('ツール名とファイル名は必須です。'); return; }
-  tools.push({name, url, manual:$('#fMan').value.trim(), cat:$('#fCat').value.trim(),
-    desc:$('#fDesc').value.trim(), icon:selIcon});
-  save(); closeModal(); shown=tools.length-1; renderTiles(); renderDetail(shown);
+  const t={name, url, manual:$('#fMan').value.trim(), cat:$('#fCat').value.trim(),
+    desc:$('#fDesc').value.trim(), icon:selIcon, group:modalGroup};
+  tools.push(t);
+  save(); closeModal(); shownUrl=url; renderAll();
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
 
@@ -434,8 +497,7 @@ $('#manPop').onclick=()=>{
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#manWrap').classList.contains('show')) closeManual(); });
 
-renderTiles();
-renderDetail(shown);
+renderAll();
 </script>
 </body>
 </html>
