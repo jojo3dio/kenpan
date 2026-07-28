@@ -627,6 +627,39 @@
   @media (prefers-reduced-motion:reduce){
     *{transition:none !important;}
   }
+  /* ── フィードバック（他ツールと同形） ── */
+  .fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+    background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
+  .fbmodal.show{display:flex}
+  .fbcard{width:min(460px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
+  .fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--sub);line-height:1.6}
+  .fbfield{margin-bottom:13px}
+  .fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--sub);margin-bottom:5px}
+  .fbfield label .req{color:var(--err);margin-left:3px}
+  .fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--sans);font-size:13px;color:var(--ink);
+    background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
+  .fbfield textarea{min-height:64px;line-height:1.5}
+  .fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:4px;word-break:break-all}
+  .fbrow2{display:flex;gap:9px}
+  .fbrow2 .fbfield{flex:1;margin-bottom:13px}
+  .fbverdict{display:flex;gap:7px}
+  .fbverdict button{flex:1;font-family:var(--sans);font-size:12px;color:var(--sub);background:var(--panel2);
+    border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
+  .fbverdict button:hover{border-color:var(--shu)}
+  .fbverdict button.on{background:var(--shu);color:#fff;border-color:var(--shu);font-weight:700}
+  .fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
+  .fbactions{display:flex;gap:9px;margin-top:18px}
+  .fbactions button{flex:1;font-family:var(--sans);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+  .fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--sub)}
+  .fbactions .fbcancel:hover{color:var(--ink)}
+  .fbactions .fbsend{background:var(--shu);border:1px solid var(--shu);color:#fff;font-weight:700}
+  .fbactions .fbsend:hover{filter:brightness(1.06)}
+  .fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
+  .fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
+    background:var(--shu-dim);color:var(--shu-deep);border:1px solid var(--shu)}
+  .fbnote.ok{background:var(--ok-dim);color:var(--ok);border-color:var(--ok)}
 </style>
 </head>
 <body>
@@ -652,7 +685,69 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
     <span>ダーク</span>
   </button>
+  <button id="fbOpen" class="hdr-btn hdr-btn-accent" type="button" title="この処理についてのフィードバックを送信（気づいた点・不具合など）">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span>フィードバック</span>
+  </button>
 </header>
+
+<!-- ============ フィードバック機能（他ツールと同形） ============ -->
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">この処理について気づいた点を送ってください。判定・変換ロジックの改良に使います。<br>※プレビュー表示中であれば、表示中のページ画像を添付します。PDFファイル全体は送信されません。</p>
+
+    <div class="fbfield">
+      <label>結果は正しかった？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">正しい<span class="vm">問題なし</span></button>
+        <button type="button" data-v="false_positive">誤り<span class="vm">想定と違う</span></button>
+        <button type="button" data-v="missed">見逃し<span class="vm">出てない</span></button>
+      </div>
+    </div>
+
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="目次自動認識">目次自動認識</option>
+          <option value="ページラベル解決">ページラベル解決</option>
+          <option value="しおり階層編集">しおり階層編集</option>
+          <option value="プレビュー表示">プレビュー表示</option>
+          <option value="PDF出力">PDF出力</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>ページ</label>
+        <input id="fbPage" type="text" placeholder="例: 5">
+      </div>
+    </div>
+
+    <div class="fbfield">
+      <label>ファイル名</label>
+      <input id="fbFile" type="text" placeholder="自動入力されます" readonly>
+      <div class="fbhint" id="fbFileHint"></div>
+    </div>
+
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：目次の見出しが1件認識できていない など"></textarea>
+    </div>
+
+    <div class="fbfield">
+      <label>お名前・担当（任意）</label>
+      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+    </div>
+
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
+  </div>
+</div>
 
 <div id="resultBar">
   <span id="resultMsg"></span>
@@ -2577,6 +2672,108 @@ function resetAll(){
 }
 function previewApp_isShown(){ return $("previewApp").classList.contains("show"); }
 $("btnReset").addEventListener("click", resetAll);
+
+// ====== フィードバック（ISBN検版・トンボ計測等と同方式） ======
+(function(){
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_APP_VERSION = "v1.0";
+  const modal = $("fbModal");
+  let fbVerdict = "";
+
+  // 表示中のプレビューページを、描画済みcanvasからそのままキャプチャする（再描画不要）
+  function capturePageThumb(){
+    try{
+      if(!previewApp_isShown()) return "";
+      const cv = $("pvCanvas");
+      if(!cv || !cv.width || !cv.height) return "";
+      return cv.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  function reporterStore(get, val){
+    try{ if(get) return localStorage.getItem("bookmark-kenpan-reporter") || "";
+         localStorage.setItem("bookmark-kenpan-reporter", val); }catch(e){}
+    return "";
+  }
+  function fbCurPage(){
+    return (previewApp_isShown() && previewPdfjsDoc) ? pageLabelFor(currentPreviewPage) : "";
+  }
+  function setVerdict(v){
+    fbVerdict = v;
+    document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  }
+  function showNote(msg, ok){
+    const n = $("fbNote");
+    n.style.display = "block";
+    n.className = "fbnote" + (ok ? " ok" : "");
+    n.innerHTML = msg;
+  }
+  function openFbModal(){
+    $("fbFile").value = (pdfFile && pdfFile.name) || "（未読込）";
+    $("fbFileHint").textContent = "表示ページ: " + (fbCurPage() || "—");
+    $("fbPage").value = fbCurPage();
+    $("fbCategory").value = "";
+    $("fbComment").value = "";
+    $("fbReporter").value = reporterStore(true);
+    $("fbNote").style.display = "none";
+    $("fbSend").disabled = false; $("fbSend").textContent = "送信する";
+    setVerdict("");
+    modal.classList.add("show");
+  }
+  function closeFbModal(){ modal.classList.remove("show"); }
+
+  async function postFeedback(payload){
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+  }
+  function basePayload(extra){
+    return Object.assign({
+      tool: "bookmark_kenpan", verdict: "", category: "",
+      file: (pdfFile && pdfFile.name) || "", page: fbCurPage(), comment: "",
+      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      userAgent: navigator.userAgent,
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "",
+      bookmarkCount: (typeof bmEntries !== "undefined" && bmEntries) ? bmEntries.length : 0
+    }, extra || {});
+  }
+
+  async function send(){
+    if(!fbVerdict){ showNote("「結果は正しかった？」を選択してください。", false); return; }
+    const reporter = $("fbReporter").value.trim();
+    reporterStore(false, reporter);
+    const extra = {
+      verdict: fbVerdict,
+      category: $("fbCategory").value,
+      file: $("fbFile").value.trim(),
+      page: $("fbPage").value.trim(),
+      comment: $("fbComment").value.trim(),
+      reporter
+    };
+    const btn = $("fbSend"); btn.disabled = true; btn.textContent = "画像を準備中…";
+    extra.thumb = capturePageThumb();
+    btn.textContent = "送信中…";
+    const payload = basePayload(extra);
+    try{
+      await postFeedback(payload);
+      showNote("送信しました。ありがとうございます！", true);
+      $("fbComment").value = ""; setVerdict("");
+      setTimeout(closeFbModal, 1100);
+    }catch(err){
+      showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
+      btn.disabled = false; btn.textContent = "送信する";
+    }
+  }
+
+  $("fbOpen").addEventListener("click", () => openFbModal());
+  $("fbCancel").addEventListener("click", closeFbModal);
+  modal.addEventListener("click", e => { if(e.target === modal) closeFbModal(); });
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && modal.classList.contains("show")) closeFbModal(); });
+  document.querySelectorAll("#fbVerdict button").forEach(b => b.addEventListener("click", () => setVerdict(b.dataset.v)));
+  $("fbSend").addEventListener("click", send);
+})();
 </script>
 </body>
 </html>
