@@ -161,7 +161,8 @@
 
   /* ── STEP2：しおりリスト または 目次から自動認識 ── */
   .method-pdfname{
-    display:inline-flex; align-items:center; gap:7px; margin-bottom:14px;
+    display:flex; align-items:center; gap:7px;
+    width:fit-content; margin:0 auto 14px;
     font-size:12.5px; color:var(--sub);
     background:var(--shu-dim); border:1px solid color-mix(in srgb, var(--shu) 30%, var(--line));
     border-radius:999px; padding:5px 14px;
@@ -397,35 +398,48 @@
   .bm-row.lv1 .bm-title{font-weight:400;color:var(--sub);}
   .bm-row .bm-title:hover{border-color:var(--line);}
   .bm-row .bm-title:focus{outline:none;border-color:var(--shu);background:var(--panel);}
+  /* ページラベル：長円の白い窓の中に数字/文字を入力（ノンブル上の見た目のラベルであることを明示） */
   .bm-row .bm-label{
     flex:none;
-    width:52px;
-    border:1px solid transparent;
-    background:transparent;
-    color:var(--sub);
-    border-radius:6px;
-    padding:3px 4px;
+    width:64px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:#2b2419;
+    border-radius:999px;
+    padding:4px 6px;
     font-family:var(--mono);
     font-size:11.5px;
     text-align:center;
-    transition:border-color .15s, background .15s;
+    transition:border-color .15s, box-shadow .15s;
   }
-  .bm-row .bm-label:hover{border-color:var(--line);}
-  .bm-row .bm-label:focus{outline:none;border-color:var(--shu);background:var(--panel);}
+  .bm-row .bm-label:hover{border-color:var(--shu);}
+  .bm-row .bm-label:focus{outline:none;border-color:var(--shu);box-shadow:0 0 0 3px var(--shu-dim);}
   .bm-row .bm-label.bad{
-    background:var(--err-dim);
+    background:#fff;
     color:var(--err);
-    border-color:color-mix(in srgb, var(--err) 40%, transparent);
+    border-color:var(--err);
+    box-shadow:0 0 0 3px var(--err-dim);
   }
-  .bm-row .bm-title::placeholder,
-  .bm-row .bm-label::placeholder{color:var(--faint);font-weight:400;}
-  .bm-goto{
-    flex:none; font-family:var(--mono); font-size:10.5px; font-weight:700;
-    padding:3px 7px; border-radius:999px; border:1px solid var(--line);
-    background:var(--panel); color:var(--sub); cursor:pointer; white-space:nowrap;
+  /* 通し番号：背景色の付いたチップに数字のみ（このPDF内の物理ページ順） */
+  .bm-row .bm-serial{
+    flex:none;
+    min-width:34px;
+    border:1px solid transparent;
+    background:var(--panel2);
+    color:var(--sub);
+    border-radius:8px;
+    padding:4px 8px;
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:700;
+    text-align:center;
+    cursor:pointer;
     transition:.15s;
   }
-  .bm-goto:hover{border-color:var(--shu); color:var(--shu); background:var(--shu-dim);}
+  .bm-row .bm-serial:hover:not(:disabled){background:var(--shu-dim); color:var(--shu-deep); border-color:color-mix(in srgb, var(--shu) 35%, transparent);}
+  .bm-row .bm-serial:disabled{color:var(--faint); cursor:default;}
+  .bm-row .bm-title::placeholder,
+  .bm-row .bm-label::placeholder{color:var(--faint);font-weight:400;}
 
   /* ── 結果カード（ログはボタンでモーダル表示） ── */
   .logcard{padding:18px 20px 20px;}
@@ -540,18 +554,34 @@
   .pv-pagelabel{font-family:var(--mono); font-size:12px; color:var(--sub); min-width:64px; text-align:center;}
   .preview-canvas-row{display:flex; gap:14px; align-items:stretch; flex:1; min-height:0;}
   .preview-canvas-row .preview-canvas-wrap{flex:1; min-width:0;}
-  .preview-toc-pane{position:relative;}
-  .preview-toc-pane::before{
-    content:"目次ページ"; position:absolute; top:6px; left:10px; z-index:1;
-    font-size:10.5px; font-family:var(--mono); color:var(--faint);
-    background:var(--panel2); padding:1px 6px; border-radius:6px;
-  }
+  /* ── キャンバス領域：下版差分チェッカーと同じ「ステージ全面キャンバス＋右下フローティングズームバー」方式。
+       目次側・本文側それぞれ独立したビューア（ズーム/パン）を持つ ── */
   .preview-canvas-wrap{
     background:var(--panel2); border:1px solid var(--line); border-radius:16px;
-    padding:18px; overflow:auto; min-height:0;
-    display:flex; align-items:flex-start; justify-content:center;
+    overflow:hidden; min-height:0;
+    display:flex; flex-direction:column;
   }
-  #pvCanvas, #pvTocCanvas{background:#fff; box-shadow:var(--shadow); display:block; max-width:100%;}
+  .pv-canvas-stage{position:relative; flex:1; min-height:0; background:var(--panel2);}
+  #pvCanvas, #pvTocCanvas{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab;}
+  #pvCanvas.grabbing, #pvTocCanvas.grabbing{cursor:grabbing;}
+  .pv-zoombar{position:absolute; right:12px; bottom:12px; z-index:2; display:flex; gap:6px;}
+  .pv-zoombar button{
+    background:var(--panel); border:1px solid var(--line); color:var(--ink);
+    border-radius:6px; width:34px; height:30px; cursor:pointer;
+    font-family:var(--mono); font-size:13px; box-shadow:var(--shadow);
+  }
+  .pv-zoombar button.zfit{width:auto; padding:0 9px;}
+  .pv-zoombar button:hover{border-color:var(--shu); color:var(--shu);}
+  /* 目次ペインのページ送り：本文側とキャンバス上端を揃えるため専用ツールバーは持たず、
+     ズームバーと同じ「ステージ内フローティング」方式で左下に配置する */
+  .pv-navbar{
+    position:absolute; left:12px; bottom:12px; z-index:2;
+    display:flex; align-items:center; gap:6px;
+    background:var(--panel); border:1px solid var(--line); border-radius:9px;
+    padding:0 8px; height:30px; box-shadow:var(--shadow);
+  }
+  .pv-navbar-label{font-size:10.5px; font-family:var(--mono); color:var(--faint); font-weight:600; letter-spacing:.02em;}
+  .pv-navbar .bm-btn{width:22px; height:22px;}
   /* しおり側は左カラム全体の高さに合わせ、はみ出す分はスクロール。幅は控えめにしてプレビューを広く取る */
   .preview-right{flex:0 0 320px; max-width:100%; min-height:0; display:flex; flex-direction:column; transition:flex-basis .2s;}
   .preview-app.toc-open .preview-right{flex:0 0 240px;}
@@ -690,7 +720,9 @@
       <span class="bmh-sp" style="width:16px"></span>
       <span class="bmh-label" style="width:46px">階層</span>
       <span class="bmh-sp" style="flex:1"></span>
-      <span class="bmh-sp" style="width:52px"></span>
+      <span class="bmh-sp" style="width:50px"></span>
+      <span class="bmh-label" style="width:40px;white-space:nowrap;">通し番号</span>
+      <span class="bmh-label" style="width:64px;white-space:nowrap;">ページラベル</span>
     </div>
     <div id="bmList"></div>
   </section>
@@ -702,7 +734,7 @@
       <button id="pvBack" class="bm-reset" type="button">← 設定に戻る</button>
       <div class="pv-nav">
         <button id="pvPrev" class="bm-btn" type="button" title="前のページ">◀</button>
-        <input type="text" id="pvPageInput" class="pv-pageinput" inputmode="numeric" title="ページ番号を入力してEnter">
+        <input type="text" id="pvPageInput" class="pv-pageinput" title="ページラベルを入力してEnter">
         <span class="pv-pagesep">/</span>
         <span id="pvPageTotal" class="pv-pagetotal">-</span>
         <button id="pvNext" class="bm-btn" type="button" title="次のページ">▶</button>
@@ -713,10 +745,28 @@
     </div>
     <div class="preview-canvas-row">
       <div class="preview-canvas-wrap preview-toc-pane" id="pvTocPane" style="display:none;">
-        <canvas id="pvTocCanvas"></canvas>
+        <div class="pv-canvas-stage" id="pvTocStage">
+          <canvas id="pvTocCanvas"></canvas>
+          <div class="pv-navbar">
+            <span class="pv-navbar-label">目次</span>
+            <button id="pvTocPrev" class="bm-btn" type="button" title="前のページ">◀</button>
+            <input type="text" id="pvTocPageInput" class="pv-pageinput" title="ページラベルを入力してEnter">
+            <span class="pv-pagesep">/</span>
+            <span id="pvTocPageTotal" class="pv-pagetotal">-</span>
+            <button id="pvTocNext" class="bm-btn" type="button" title="次のページ">▶</button>
+          </div>
+          <div class="pv-zoombar">
+            <button id="pvTocZOut" type="button" title="縮小">−</button><button id="pvTocZFit" class="zfit" type="button" title="全体表示">全体</button><button id="pvTocZIn" type="button" title="拡大">＋</button>
+          </div>
+        </div>
       </div>
       <div class="preview-canvas-wrap">
-        <canvas id="pvCanvas"></canvas>
+        <div class="pv-canvas-stage" id="pvStage">
+          <canvas id="pvCanvas"></canvas>
+          <div class="pv-zoombar">
+            <button id="pvZOut" type="button" title="縮小">−</button><button id="pvZFit" class="zfit" type="button" title="全体表示">全体</button><button id="pvZIn" type="button" title="拡大">＋</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -766,7 +816,9 @@ let resultBlob = null;
 let resultName = "";
 let previewPdfjsDoc = null;   // 実行時に読み込んだPDF（ページプレビュー用に保持）
 let currentPreviewPage = 1;
+let currentTocPreviewPage = 1; // 目次側ペインで現在表示中のページ（本文側とは独立）
 let previewTocPages = [];     // 自動認識/指定した目次ページ（プレビューで並べて表示するのに使う）
+let previewPageLabels = null; // PDFのページラベル（pdf.jsのgetPageLabels()結果。index=物理ページ-1）
 
 // ───────────────────────────────────────────
 //  UI ヘルパー
@@ -795,27 +847,119 @@ $("btnCloseLog").addEventListener("click", closeLogModal);
 $("logModalBg").addEventListener("click", e => { if(e.target === $("logModalBg")) closeLogModal(); });
 document.addEventListener("keydown", e => { if(e.key === "Escape"){ closeLogModal(); closeTocPreview(); } });
 
-// ── プレビュー画面：左にPDFページ、右にしおり階層編集（cardTreeをその場で移動して再利用） ──
+// ── ページラベル表示ヘルパー：物理ページ番号(1始まり) ⇔ PDFのページラベル文字列 ──
+function pageLabelFor(n){
+  if(previewPageLabels && previewPageLabels[n - 1] != null && previewPageLabels[n - 1] !== "") return previewPageLabels[n - 1];
+  return String(n);
+}
+function resolvePreviewPageInput(text, totalPages){
+  const t = normalizeLabel(text);
+  if(!t) return null;
+  if(previewPageLabels){
+    for(let i = 0; i < previewPageLabels.length; i++){
+      if(previewPageLabels[i] != null && normalizeLabel(previewPageLabels[i]) === t) return i + 1;
+    }
+  }
+  const n = parseInt(t, 10);
+  if(!Number.isNaN(n) && n >= 1 && n <= totalPages) return n;
+  return null;
+}
+
+// ── ビューア（下版差分チェッカーと同じ方式：ステージ全面キャンバスにページのビットマップを描画し、
+//    ズーム/パンはCanvas変換で行う。目次側・本文側でそれぞれ独立したインスタンスを持つ） ──
+function createPaneViewer(canvas, stage){
+  const ctx = canvas.getContext("2d");
+  const st = {content:null, contentW:0, contentH:0, zoom:1, panX:0, panY:0};
+
+  function viewSize(){ const r = stage.getBoundingClientRect(); return {w:r.width, h:r.height}; }
+  function resizeCanvas(){
+    const r = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(r.width * dpr));
+    canvas.height = Math.max(1, Math.round(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function fitZoom(){
+    if(!st.content) return;
+    const v = viewSize();
+    const z = Math.min(v.w / st.contentW, v.h / st.contentH) * 0.94;
+    st.zoom = z;
+    st.panX = (v.w - st.contentW * z) / 2;
+    st.panY = (v.h - st.contentH * z) / 2;
+  }
+  function draw(){
+    const v = viewSize();
+    ctx.clearRect(0, 0, v.w, v.h);
+    if(!st.content) return;
+    ctx.imageSmoothingEnabled = st.zoom < 1.5;
+    ctx.drawImage(st.content, st.panX, st.panY, st.contentW * st.zoom, st.contentH * st.zoom);
+  }
+  function fit(){ resizeCanvas(); fitZoom(); draw(); }
+  function zoomAt(f, cx, cy){
+    if(!st.content) return;
+    const nz = Math.max(0.05, Math.min(20, st.zoom * f));
+    st.panX = cx - (cx - st.panX) * (nz / st.zoom);
+    st.panY = cy - (cy - st.panY) * (nz / st.zoom);
+    st.zoom = nz;
+    draw();
+  }
+  async function setPage(pdfjsDoc, pageNum){
+    const page = await pdfjsDoc.getPage(pageNum);
+    const base = page.getViewport({scale: 1});
+    const renderScale = Math.min(4, 1800 / base.width); // 高精細に一度だけレンダリングし、以降はCanvas変換でズーム
+    const viewport = page.getViewport({scale: renderScale});
+    const off = document.createElement("canvas");
+    off.width = Math.ceil(viewport.width);
+    off.height = Math.ceil(viewport.height);
+    await page.render({canvasContext: off.getContext("2d"), viewport}).promise;
+    st.content = off; st.contentW = off.width; st.contentH = off.height;
+    fit();
+  }
+  function clear(){ st.content = null; resizeCanvas(); draw(); }
+
+  // ドラッグ＝パン／ホイール＝ズーム（下版差分チェッカーと同じ操作感）
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener("mousedown", e => {
+    const r = canvas.getBoundingClientRect();
+    dragging = true; lastX = e.clientX - r.left; lastY = e.clientY - r.top;
+    canvas.classList.add("grabbing");
+  });
+  window.addEventListener("mousemove", e => {
+    if(!dragging) return;
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    st.panX += mx - lastX; st.panY += my - lastY;
+    lastX = mx; lastY = my; draw();
+  });
+  window.addEventListener("mouseup", () => { dragging = false; canvas.classList.remove("grabbing"); });
+  canvas.addEventListener("wheel", e => {
+    if(!st.content) return;
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
+  }, {passive:false});
+
+  return {setPage, clear, fit, zoomAt, viewSize};
+}
+
+const mainViewer = createPaneViewer($("pvCanvas"), $("pvStage"));
+const tocViewer  = createPaneViewer($("pvTocCanvas"), $("pvTocStage"));
+$("pvZOut").addEventListener("click", () => { const v = mainViewer.viewSize(); mainViewer.zoomAt(0.8, v.w / 2, v.h / 2); });
+$("pvZIn").addEventListener("click",  () => { const v = mainViewer.viewSize(); mainViewer.zoomAt(1.25, v.w / 2, v.h / 2); });
+$("pvZFit").addEventListener("click", () => mainViewer.fit());
+$("pvTocZOut").addEventListener("click", () => { const v = tocViewer.viewSize(); tocViewer.zoomAt(0.8, v.w / 2, v.h / 2); });
+$("pvTocZIn").addEventListener("click",  () => { const v = tocViewer.viewSize(); tocViewer.zoomAt(1.25, v.w / 2, v.h / 2); });
+$("pvTocZFit").addEventListener("click", () => tocViewer.fit());
+
+// ── 本文側プレビュー：左にPDFページ、右にしおり階層編集（cardTreeをその場で移動して再利用） ──
 async function renderPreviewPage(n){
   if(!previewPdfjsDoc) return;
   const total = previewPdfjsDoc.numPages;
   n = Math.max(1, Math.min(n, total));
   currentPreviewPage = n;
   try{
-    const page = await previewPdfjsDoc.getPage(n);
-    const canvas = $("pvCanvas");
-    const ctx = canvas.getContext("2d");
-    const wrap = canvas.parentElement;
-    const availWidth = Math.max(200, wrap.clientWidth - 36);
-    const availHeight = Math.max(200, wrap.clientHeight - 36);
-    const base = page.getViewport({scale: 1});
-    // 全体表示：幅・高さ双方に収まる倍率（見開きページ等の縦横比にも対応）
-    const scale = Math.min(2.2, availWidth / base.width, availHeight / base.height);
-    const viewport = page.getViewport({scale});
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({canvasContext: ctx, viewport}).promise;
-    $("pvPageInput").value = n;
+    await mainViewer.setPage(previewPdfjsDoc, n);
+    $("pvPageInput").value = pageLabelFor(n);
     $("pvPageTotal").textContent = total;
   }catch(e){
     log(`  プレビュー描画エラー：${e.message || e}`, "err");
@@ -824,29 +968,45 @@ async function renderPreviewPage(n){
 $("pvPrev").addEventListener("click", () => renderPreviewPage(currentPreviewPage - 1));
 $("pvPageInput").addEventListener("keydown", e => {
   if(e.key !== "Enter") return;
-  const n = parseInt($("pvPageInput").value, 10);
-  if(!Number.isNaN(n)) renderPreviewPage(n);
-  else $("pvPageInput").value = currentPreviewPage;
+  const n = resolvePreviewPageInput($("pvPageInput").value, previewPdfjsDoc ? previewPdfjsDoc.numPages : 1);
+  if(n !== null) renderPreviewPage(n);
+  else $("pvPageInput").value = pageLabelFor(currentPreviewPage);
 });
-$("pvPageInput").addEventListener("blur", () => { $("pvPageInput").value = currentPreviewPage; });
+$("pvPageInput").addEventListener("blur", () => { $("pvPageInput").value = pageLabelFor(currentPreviewPage); });
+$("pvNext").addEventListener("click", () => renderPreviewPage(currentPreviewPage + 1));
+
+// ── 目次側プレビュー：目次ページ（previewTocPages）の中だけを送る。本文側とは独立 ──
+let tocPaneShown = false;
+let currentTocIndex = 0; // previewTocPages内でのインデックス（物理ページ番号そのものではない）
+async function renderTocPanePage(idx){
+  if(!previewPdfjsDoc || previewTocPages.length === 0) return;
+  idx = Math.max(0, Math.min(idx, previewTocPages.length - 1));
+  currentTocIndex = idx;
+  const physPage = previewTocPages[idx];
+  currentTocPreviewPage = physPage;
+  try{
+    await tocViewer.setPage(previewPdfjsDoc, physPage);
+    $("pvTocPageInput").value = pageLabelFor(physPage);
+    $("pvTocPageTotal").textContent = previewTocPages.length;
+  }catch(e){
+    log(`  目次プレビュー描画エラー：${e.message || e}`, "err");
+  }
+}
+$("pvTocPrev").addEventListener("click", () => renderTocPanePage(currentTocIndex - 1));
+$("pvTocNext").addEventListener("click", () => renderTocPanePage(currentTocIndex + 1));
+$("pvTocPageInput").addEventListener("keydown", e => {
+  if(e.key !== "Enter") return;
+  const n = resolvePreviewPageInput($("pvTocPageInput").value, previewPdfjsDoc ? previewPdfjsDoc.numPages : 1);
+  const idx = n !== null ? previewTocPages.indexOf(n) : -1;
+  if(idx !== -1) renderTocPanePage(idx);
+  else{
+    log("⚠ 指定されたページは目次ページの範囲外です。目次ページ内のラベルを入力してください。", "warn");
+    $("pvTocPageInput").value = pageLabelFor(currentTocPreviewPage);
+  }
+});
+$("pvTocPageInput").addEventListener("blur", () => { $("pvTocPageInput").value = pageLabelFor(currentTocPreviewPage); });
 
 // 目次ページを横に並べて表示するトグル（設定画面で指定/検出した目次ページを、該当ページと見比べられる）
-let tocPaneShown = false;
-async function renderTocPaneCanvas(){
-  if(previewTocPages.length === 0) return;
-  const page = await previewPdfjsDoc.getPage(previewTocPages[0]);
-  const canvas = $("pvTocCanvas");
-  const ctx = canvas.getContext("2d");
-  const wrap = canvas.parentElement;
-  const availWidth = Math.max(160, wrap.clientWidth - 36);
-  const availHeight = Math.max(200, wrap.clientHeight - 36);
-  const base = page.getViewport({scale: 1});
-  const scale = Math.min(2.2, availWidth / base.width, availHeight / base.height);
-  const viewport = page.getViewport({scale});
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  await page.render({canvasContext: ctx, viewport}).promise;
-}
 async function toggleTocPane(){
   if(!tocPaneShown){
     if(previewTocPages.length === 0){
@@ -858,15 +1018,15 @@ async function toggleTocPane(){
     $("previewApp").classList.add("toc-open");
     $("pvToggleToc").classList.add("active");
     $("pvToggleTocLabel").textContent = "目次を閉じる";
-    await renderTocPaneCanvas();
-    await renderPreviewPage(currentPreviewPage); // 横幅が変わったので該当ページを再描画
+    await renderTocPanePage(0);
+    mainViewer.fit(); // 横幅が変わったので本文側を再フィット
   }else{
     tocPaneShown = false;
     $("pvTocPane").style.display = "none";
     $("previewApp").classList.remove("toc-open");
     $("pvToggleToc").classList.remove("active");
     $("pvToggleTocLabel").textContent = "目次を並べる";
-    await renderPreviewPage(currentPreviewPage);
+    mainViewer.fit();
   }
 }
 $("pvToggleToc").addEventListener("click", toggleTocPane);
@@ -877,11 +1037,10 @@ window.addEventListener("resize", () => {
   if(!$("previewApp").classList.contains("show")) return;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    renderPreviewPage(currentPreviewPage);
-    if(tocPaneShown) renderTocPaneCanvas();
+    mainViewer.fit();
+    if(tocPaneShown) tocViewer.fit();
   }, 150);
 });
-$("pvNext").addEventListener("click", () => renderPreviewPage(currentPreviewPage + 1));
 
 function enterPreviewMode(startPage){
   resetUndoHistory();
@@ -1682,16 +1841,22 @@ function renderBmList(focusIndex){
     btnDel.title = "この行を削除";
     btnDel.addEventListener("click", () => deleteEntry(i));
 
-    row.append(check, handle, guide, btnOut, btnIn, title, label, btnAdd, btnDel);
+    row.append(check, handle, guide, btnOut, btnIn, title, btnAdd, btnDel);
 
+    // 通し番号（このPDF内の物理ページ順・背景色チップ）→ ページラベル（長円の白窓）の順で右端に並べる
+    const serial = document.createElement("button");
+    serial.type = "button"; serial.className = "bm-serial";
     if(typeof e.physIdx === "number"){
-      const goto = document.createElement("button");
-      goto.type = "button"; goto.className = "bm-goto";
-      goto.textContent = `p.${e.physIdx + 1}`;
-      goto.title = "このページをプレビュー";
-      goto.addEventListener("click", () => renderPreviewPage(e.physIdx + 1));
-      row.appendChild(goto);
+      serial.textContent = String(e.physIdx + 1);
+      serial.title = "このページをプレビュー（通し番号）";
+      serial.addEventListener("click", () => renderPreviewPage(e.physIdx + 1));
+    }else{
+      serial.textContent = "—";
+      serial.disabled = true;
+      serial.title = "ページ未解決";
     }
+    row.appendChild(serial);
+    row.appendChild(label);
 
     list.appendChild(row);
 
@@ -2164,6 +2329,7 @@ async function runBookmark(){
     const directLabelMap = new Map();
     try{
       const labelArr = await pdfjsDoc.getPageLabels();
+      previewPageLabels = labelArr || null; // プレビュー上部のページ指定欄に表示するPDF自体のページラベル
       if(labelArr){
         labelArr.forEach((lab, idx) => {
           if(lab == null) return;
@@ -2172,7 +2338,7 @@ async function runBookmark(){
         });
         log(`  ページラベル直接マップ：${directLabelMap.size} 件`);
       }
-    }catch(e){}
+    }catch(e){ previewPageLabels = null; }
 
     let offsetMap = {};
     if(segments.length > 0){
@@ -2276,7 +2442,9 @@ function resetAll(){
   if(previewApp_isShown() && !confirm("すべてリセットします。よろしいですか？")) return;
 
   pdfFile = null; txtFile = null; resultBlob = null; resultName = "";
-  previewPdfjsDoc = null; currentPreviewPage = 1;
+  previewPdfjsDoc = null; currentPreviewPage = 1; currentTocPreviewPage = 1; currentTocIndex = 0;
+  previewPageLabels = null;
+  mainViewer.clear(); tocViewer.clear();
   bmEntries = []; unresolvedLabels.clear();
 
   $("filePdf").value = ""; $("fileTxt").value = "";
