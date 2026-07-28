@@ -838,7 +838,13 @@ function checkBarcodeQuality(canvas, box, label){
   dbg('pw,ph', pw, ph);
   if(pw<20||ph<10) return {ok:true, note:"領域が小さく品質判定をスキップ"};
   let data; try{ data=ctx.getImageData(px0,py0,pw,ph).data; }catch(e){ return {ok:true,note:"判定不可"}; }
-  const lum=(x,y)=>{ const i=(y*pw+x)*4; return 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; };
+  // 印刷PDFは「何も塗られていない=用紙の白」を表すため透明(alpha低)なことが多く、
+  // 特にcheckBarcodeQualityHiResの高解像度クロップ再レンダリングでは背景が
+  // 塗られない(透明)まま返ってくることがある。alphaを無視してRGBだけで輝度を
+  // 取ると、透明画素が黒(0,0,0)として読まれ、バーコードの白地部分まで「暗い」
+  // と誤判定してしまう。白背景に合成してから輝度を計算することでこれを防ぐ。
+  const lum=(x,y)=>{ const i=(y*pw+x)*4; const af=data[i+3]/255;
+    return af*(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2])+(1-af)*255; };
   // 1) バー本体の縦帯を特定(数字や余白を除く)。各行の暗画素数が多い行=バー
   const rowDark=[];
   const sampleCnt=Math.ceil(pw/2);
@@ -972,7 +978,11 @@ async function checkBarcodeQualityHiRes(page, box, label){
   let cv, ctx;
   try{
     cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
-    ctx=cv.getContext('2d'); ctx.translate(-cx0,-cy0);
+    ctx=cv.getContext('2d');
+    // クロップ再レンダリングでは、PDF側で何も塗られていない(=用紙の白を意味する)
+    // 部分が透明のまま残ることがあるため、先に白で塗り潰しておく
+    ctx.fillStyle="#fff"; ctx.fillRect(0,0,cw,ch);
+    ctx.translate(-cx0,-cy0);
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ return {ok:true, note:"判定不可(高解像度レンダ失敗)"}; }
   const localBox={
@@ -1063,16 +1073,58 @@ async function ensureOcr(){
   // whitelistは付けない方が誤読しにくいことがあるため、既定は外す。必要十分な文字のみ後段の正規表現で抽出する
   return ocrWorker;
 }
+/* バーコード周囲の「白いラベル面」の実際の外形を検出し、OCR切り出し範囲とする。
+   表紙デザインによっては、固定倍率の余白だけで切り出すと、隣接する大きな見出し文字や
+   色地のイラストまで巻き込んでしまい、OCRの結果が丸ごと崩れることがある(実例：
+   バーコード右側に大きなタイトル文字がある表紙で、OCRが完全な誤読文字列を返す)。
+   バーコードラベルは通常、印刷面の中で白地の版下として作られているため、
+   四方それぞれについて「白地が続く範囲」を実測し、そこまでを切り出し範囲とする。
+   デザイン上の理由で白地がほとんど無い場合に備え、上限(従来の固定倍率)は残す。 */
+function detectLabelCrop(canvas, x0,y0,x1,y1){
+  const W=canvas.width, H=canvas.height, ctx=canvas.getContext('2d');
+  const bw=x1-x0, bh=y1-y0;
+  if(bw<=0||bh<=0) return null;
+  const capL=bw*2.0, capR=bw*2.0, capT=bh*0.8, capB=bh*0.8;
+  const rx0=Math.max(0,Math.floor(x0-capL)), rx1=Math.min(W,Math.ceil(x1+capR));
+  const ry0=Math.max(0,Math.floor(y0-capT)), ry1=Math.min(H,Math.ceil(y1+capB));
+  const rw=rx1-rx0, rh=ry1-ry0;
+  if(rw<=0||rh<=0) return null;
+  let data; try{ data=ctx.getImageData(rx0,ry0,rw,rh).data; }catch(e){ return null; }
+  const WHITE=232, WHITE_FRAC=0.55;
+  const STEP=Math.max(2,Math.round(Math.min(bw,bh)*0.02));
+  const isWhite=(lx,ly)=>{ if(lx<0||lx>=rw||ly<0||ly>=rh) return false;
+    const i=(ly*rw+lx)*4; return data[i]>WHITE&&data[i+1]>WHITE&&data[i+2]>WHITE; };
+  const ySamp=[]; for(let ly=Math.max(0,Math.round(y0-ry0));ly<=Math.min(rh-1,Math.round(y1-ry0));ly+=2) ySamp.push(ly);
+  const xSamp=[]; for(let lx=Math.max(0,Math.round(x0-rx0));lx<=Math.min(rw-1,Math.round(x1-rx0));lx+=2) xSamp.push(lx);
+  if(!ySamp.length||!xSamp.length) return null;
+  const colWhiteFrac=(lx)=>{ let c=0; for(const ly of ySamp) if(isWhite(lx,ly)) c++; return c/ySamp.length; };
+  const rowWhiteFrac=(ly)=>{ let c=0; for(const lx of xSamp) if(isWhite(lx,ly)) c++; return c/xSamp.length; };
+  const x0l=Math.round(x0-rx0), x1l=Math.round(x1-rx0), y0l=Math.round(y0-ry0), y1l=Math.round(y1-ry0);
+  let padL=0; for(let d=STEP; d<=capL; d+=STEP){ if(colWhiteFrac(x0l-d)<WHITE_FRAC) break; padL=d; }
+  let padR=0; for(let d=STEP; d<=capR; d+=STEP){ if(colWhiteFrac(x1l+d)<WHITE_FRAC) break; padR=d; }
+  let padT=0; for(let d=STEP; d<=capT; d+=STEP){ if(rowWhiteFrac(y0l-d)<WHITE_FRAC) break; padT=d; }
+  let padB=0; for(let d=STEP; d<=capB; d+=STEP){ if(rowWhiteFrac(y1l+d)<WHITE_FRAC) break; padB=d; }
+  const margin=Math.max(4,Math.round(Math.min(bw,bh)*0.04));
+  return {
+    cx0: Math.max(0, x0-padL-margin), cx1: Math.min(W, x1+padR+margin),
+    cy0: Math.max(0, y0-padT-margin), cy1: Math.min(H, y1+padB+margin)
+  };
+}
 async function ocrNearBarcodes(canvas,boxesPx){
   if(!boxesPx.length) return "";
   const W=canvas.width,H=canvas.height;
   let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
   let y0=Math.min(...boxesPx.map(b=>b.y)), y1=Math.max(...boxesPx.map(b=>b.y+b.h));
   const bw=x1-x0,bh=y1-y0;
-  // 印字位置はデザイン依存なので四方を広めに切り出してOCRする
-  // 印字は通常バーコードの左(または上下)。右の広げすぎは本文を巻き込むので控えめにする
-  let cx0=Math.max(0,x0-bw*2.0), cx1=Math.min(W,x1+bw*2.0);
-  let cy0=Math.max(0,y0-bh*0.8), cy1=Math.min(H,y1+bh*0.8);
+  // 印字位置はデザイン依存なので、まず周囲の白いラベル面の実際の外形を検出して切り出す。
+  // 検出できない場合のみ、従来通りの固定倍率(四方を広めに)にフォールバックする。
+  const det=detectLabelCrop(canvas,x0,y0,x1,y1);
+  let cx0,cx1,cy0,cy1;
+  if(det){ cx0=det.cx0; cx1=det.cx1; cy0=det.cy0; cy1=det.cy1; }
+  else{
+    cx0=Math.max(0,x0-bw*2.0); cx1=Math.min(W,x1+bw*2.0);
+    cy0=Math.max(0,y0-bh*0.8); cy1=Math.min(H,y1+bh*0.8);
+  }
   const cw=cx1-cx0, ch=cy1-cy0; if(cw<10||ch<10) return "";
   const up=3, tmp=document.createElement('canvas');
   tmp.width=cw*up; tmp.height=ch*up;
