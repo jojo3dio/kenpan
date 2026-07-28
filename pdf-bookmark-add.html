@@ -475,6 +475,13 @@
     display:flex; align-items:flex-start; justify-content:center;
   }
   #tpvCanvas{background:#fff; box-shadow:var(--shadow); display:block; max-width:100%;}
+  #tocTextArea{
+    width:100%; height:300px; resize:vertical; box-sizing:border-box;
+    font-family:var(--mono); font-size:12.5px; line-height:1.6;
+    padding:12px; border:1px solid var(--line); border-radius:10px;
+    background:var(--panel2); color:var(--ink);
+  }
+  #tocTextArea:focus{outline:none; border-color:var(--shu);}
   .modal-hd{
     display:flex; align-items:center; justify-content:space-between;
     padding:14px 18px; border-bottom:1px solid var(--line);
@@ -582,6 +589,18 @@
   }
   .pv-navbar-label{font-size:10.5px; font-family:var(--mono); color:var(--faint); font-weight:600; letter-spacing:.02em;}
   .pv-navbar .bm-btn{width:22px; height:22px;}
+  /* 目次テキストのコピー：ページ送り・ズームとは別に左上へ独立配置し、赤で目立たせる */
+  .pv-toc-copybar{position:absolute; left:12px; top:12px; z-index:2;}
+  .pv-navbar-copy{
+    display:inline-flex; align-items:center; gap:6px;
+    font:inherit; font-size:12px; font-weight:700; white-space:nowrap;
+    padding:7px 13px; border-radius:999px; border:1px solid var(--shu);
+    background:linear-gradient(160deg, var(--shu), var(--shu-deep)); color:#fff;
+    cursor:pointer; box-shadow:0 3px 10px rgba(220,38,38,.28); transition:filter .15s, transform .15s;
+  }
+  .pv-navbar-copy svg{width:14px; height:14px; flex:none;}
+  .pv-navbar-copy:hover{filter:brightness(1.08);}
+  .pv-navbar-copy:active{transform:translateY(1px);}
   /* しおり側は左カラム全体の高さに合わせ、はみ出す分はスクロール。幅は控えめにしてプレビューを広く取る */
   .preview-right{flex:0 0 320px; max-width:100%; min-height:0; display:flex; flex-direction:column; transition:flex-basis .2s;}
   .preview-app.toc-open .preview-right{flex:0 0 240px;}
@@ -747,6 +766,12 @@
       <div class="preview-canvas-wrap preview-toc-pane" id="pvTocPane" style="display:none;">
         <div class="pv-canvas-stage" id="pvTocStage">
           <canvas id="pvTocCanvas"></canvas>
+          <div class="pv-toc-copybar">
+            <button id="pvTocCopyBtn" class="pv-navbar-copy" type="button" title="目次ページのテキストを抽出して表示（認識できなかった項目を手入力する際に）">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M4 16V6a2 2 0 0 1 2-2h10" stroke-linecap="round"/></svg>
+              <span>テキストコピー</span>
+            </button>
+          </div>
           <div class="pv-navbar">
             <span class="pv-navbar-label">目次</span>
             <button id="pvTocPrev" class="bm-btn" type="button" title="前のページ">◀</button>
@@ -800,6 +825,22 @@
   </div>
 </div>
 
+<div class="modal-bg" id="tocTextModalBg">
+  <div class="modal-panel">
+    <div class="modal-hd">
+      <h3>目次ページのテキスト</h3>
+      <button id="btnCloseTocText" class="modal-x" type="button" aria-label="閉じる">×</button>
+    </div>
+    <div style="padding:14px 18px 18px;">
+      <p class="hint" id="tocTextStatus" style="margin:0 0 8px;">下のテキストは選択済みです。ボタンを押すか、⌘C（Windowsは Ctrl+C）でコピーしてください。</p>
+      <textarea id="tocTextArea" readonly></textarea>
+      <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+        <button id="btnCopyTocText" class="bm-add" type="button">選択部分をコピー</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -845,7 +886,7 @@ function closeLogModal(){ $("logModalBg").classList.remove("show"); }
 $("btnShowLog").addEventListener("click", openLogModal);
 $("btnCloseLog").addEventListener("click", closeLogModal);
 $("logModalBg").addEventListener("click", e => { if(e.target === $("logModalBg")) closeLogModal(); });
-document.addEventListener("keydown", e => { if(e.key === "Escape"){ closeLogModal(); closeTocPreview(); } });
+document.addEventListener("keydown", e => { if(e.key === "Escape"){ closeLogModal(); closeTocPreview(); closeTocTextModal(); } });
 
 // ── ページラベル表示ヘルパー：物理ページ番号(1始まり) ⇔ PDFのページラベル文字列 ──
 function pageLabelFor(n){
@@ -1005,6 +1046,65 @@ $("pvTocPageInput").addEventListener("keydown", e => {
   }
 });
 $("pvTocPageInput").addEventListener("blur", () => { $("pvTocPageInput").value = pageLabelFor(currentTocPreviewPage); });
+
+// ── 目次ページのテキストをコピー：自動認識で拾いきれなかった項目を手入力する際の下書き用。
+//    パターンマッチ前の生テキスト（行単位）を全ての目次ページ分まとめてモーダルに表示する。
+//    「選択部分をコピー」ボタンは、テキスト内で選択している範囲だけをコピーする
+//    （何も選択していなければ全文をコピー）。通常の⌘C/Ctrl+Cによるコピーも問題なく使える。
+async function copyTextToClipboard(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
+function openTocTextModal(text){
+  $("tocTextArea").value = text;
+  $("tocTextStatus").textContent = "必要な部分を選択して「選択部分をコピー」を押すか、⌘C（Windowsは Ctrl+C）でコピーしてください。";
+  $("tocTextModalBg").classList.add("show");
+  requestAnimationFrame(() => { $("tocTextArea").focus(); });
+}
+function closeTocTextModal(){ $("tocTextModalBg").classList.remove("show"); }
+$("btnCloseTocText").addEventListener("click", closeTocTextModal);
+$("tocTextModalBg").addEventListener("click", e => { if(e.target === $("tocTextModalBg")) closeTocTextModal(); });
+$("btnCopyTocText").addEventListener("click", async () => {
+  const ta = $("tocTextArea");
+  const selected = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+  const hasSelection = selected.length > 0;
+  const target = hasSelection ? selected : ta.value;
+  try{
+    await copyTextToClipboard(target);
+    $("tocTextStatus").textContent = hasSelection
+      ? "✓ 選択部分をコピーしました。"
+      : "✓ 全文をコピーしました（範囲が選択されていなかったため）。";
+  }catch(e){
+    $("tocTextStatus").textContent = "自動コピーに失敗しました。コピーしたい範囲を選択して ⌘C（Windowsは Ctrl+C）でコピーしてください。";
+  }
+});
+
+async function copyTocPageText(){
+  if(!previewPdfjsDoc || previewTocPages.length === 0) return;
+  try{
+    const blocks = [];
+    for(const physPage of previewTocPages){
+      const lines = await extractLines(previewPdfjsDoc, physPage);
+      blocks.push(lines.map(l => l.text).join("\n"));
+    }
+    const text = blocks.join("\n\n").trim();
+    if(!text){
+      log("⚠ 目次ページからテキストを抽出できませんでした（画像化されている可能性があります）。", "warn");
+      return;
+    }
+    openTocTextModal(text);
+  }catch(e){
+    log(`  テキスト抽出でエラーが発生しました：${e.message || e}`, "err");
+  }
+}
+$("pvTocCopyBtn").addEventListener("click", copyTocPageText);
 
 // 目次ページを横に並べて表示するトグル（設定画面で指定/検出した目次ページを、該当ページと見比べられる）
 async function toggleTocPane(){
