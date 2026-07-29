@@ -947,6 +947,8 @@ const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 //  状態
 // ───────────────────────────────────────────
 let pdfFile = null;
+let pdfFileHandle = null;
+const supportsFSAccess = (typeof window.showOpenFilePicker === "function");
 let txtFile = null;
 let resultBlob = null;
 let resultName = "";
@@ -1328,28 +1330,53 @@ $("themeBtn").addEventListener("click", () => {
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
 });
 
-function setupZone(zoneId, inputId, nameId, onFile){
+function setupZone(zoneId, inputId, nameId, onFile, wantsHandle){
   const zone = $(zoneId), input = $(inputId), name = $(nameId);
-  input.addEventListener("change", () => {
-    if(input.files[0]){ onFile(input.files[0]); name.textContent = input.files[0].name; name.classList.add("has"); }
-  });
+  if(wantsHandle && supportsFSAccess){
+    zone.addEventListener("click", async e => {
+      e.preventDefault();
+      try{
+        const [handle] = await window.showOpenFilePicker({types:[{description:"PDF", accept:{"application/pdf":[".pdf"]}}]});
+        const f = await handle.getFile();
+        onFile(f, handle);
+        name.textContent = f.name; name.classList.add("has");
+      }catch(err){
+        if(err && err.name === "AbortError") return; // キャンセル
+      }
+    });
+  }else{
+    input.addEventListener("change", () => {
+      if(input.files[0]){ onFile(input.files[0], null); name.textContent = input.files[0].name; name.classList.add("has"); }
+    });
+  }
   zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
   zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
-  zone.addEventListener("drop", e => {
+  zone.addEventListener("drop", async e => {
     e.preventDefault(); zone.classList.remove("dragover");
+    if(wantsHandle && supportsFSAccess && e.dataTransfer.items && e.dataTransfer.items[0] && typeof e.dataTransfer.items[0].getAsFileSystemHandle === "function"){
+      try{
+        const handle = await e.dataTransfer.items[0].getAsFileSystemHandle();
+        if(handle && handle.kind === "file"){
+          const f = await handle.getFile();
+          onFile(f, handle); name.textContent = f.name; name.classList.add("has");
+          return;
+        }
+      }catch(err){ /* フォールバックへ */ }
+    }
     const f = e.dataTransfer.files[0];
-    if(f){ onFile(f); name.textContent = f.name; name.classList.add("has"); }
+    if(f){ onFile(f, null); name.textContent = f.name; name.classList.add("has"); }
   });
 }
-setupZone("zonePdf","filePdf","namePdf", f => {
+setupZone("zonePdf","filePdf","namePdf", (f, handle) => {
   pdfFile = f;
+  pdfFileHandle = handle || null;
   // 対象PDF選択 → しおりリスト/自動認識の選択画面へ切り替え
   $("pdfStep").style.display = "none";
   $("methodStep").style.display = "";
   $("inputsHd").textContent = "しおりの作り方を選ぶ";
   $("methodPdfName").innerHTML = `対象PDF：<b>${escapeHtml(f.name)}</b>　<button type="button" class="method-change" id="btnChangePdf">変更</button>`;
   $("btnChangePdf").addEventListener("click", backToPdfStep);
-});
+}, true);
 function backToPdfStep(){
   $("methodStep").style.display = "none";
   $("pdfStep").style.display = "";
@@ -2199,10 +2226,28 @@ function showResult(success, msg){
   $("btnExport").disabled = !success;
 }
 
-function downloadResult(){
+async function downloadResult(){
   if(!resultBlob){
     log("⚠ まだ出力がありません。先に「▶ しおりを追加する」を実行してください。", "warn");
     return;
+  }
+  if(pdfFileHandle){
+    try{
+      if(typeof pdfFileHandle.requestPermission === "function"){
+        const perm = await pdfFileHandle.queryPermission({mode:"readwrite"});
+        if(perm !== "granted"){
+          const req = await pdfFileHandle.requestPermission({mode:"readwrite"});
+          if(req !== "granted") throw new Error("permission not granted");
+        }
+      }
+      const writable = await pdfFileHandle.createWritable();
+      await writable.write(resultBlob);
+      await writable.close();
+      log(`✓ 元のファイルに上書き保存しました：${resultName}`, "ok");
+      return;
+    }catch(werr){
+      console.warn("直接上書きに失敗、ダウンロードにフォールバックします", werr);
+    }
   }
   const url = URL.createObjectURL(resultBlob);
   const a = document.createElement("a");
@@ -2635,7 +2680,7 @@ async function runBookmark(){
 function resetAll(){
   if(previewApp_isShown() && !confirm("すべてリセットします。よろしいですか？")) return;
 
-  pdfFile = null; txtFile = null; resultBlob = null; resultName = "";
+  pdfFile = null; pdfFileHandle = null; txtFile = null; resultBlob = null; resultName = "";
   previewPdfjsDoc = null; currentPreviewPage = 1; currentTocPreviewPage = 1; currentTocIndex = 0;
   previewPageLabels = null;
   mainViewer.clear(); tocViewer.clear();

@@ -100,7 +100,8 @@ input[type=file]{display:none}
 .previewwrap{flex:1;overflow:auto;padding:24px;cursor:grab}
 .previewwrap.grabbing{cursor:grabbing}
 .previewwrap.hidden{display:none}
-.pvcard{background:#000;box-shadow:0 4px 30px rgba(0,0,0,.6);display:block}
+.pvinner{min-width:100%;min-height:100%;display:flex;align-items:center;justify-content:center}
+.pvcard{background:#000;box-shadow:0 4px 30px rgba(0,0,0,.6);display:block;flex:0 0 auto}
 .zoomctl{display:flex;align-items:center;gap:3px;margin-left:auto}
 .zoomctl.hidden{display:none}
 .zoomctl button{font-size:14px;line-height:1;min-width:26px;height:26px;padding:0 5px;border:1px solid var(--line);
@@ -160,7 +161,9 @@ input[type=file]{display:none}
           </div>
         </div>
         <div class="previewwrap hidden" id="previewwrap">
-          <canvas class="pvcard" id="pvcanvas"></canvas>
+          <div class="pvinner" id="pvinner">
+            <canvas class="pvcard" id="pvcanvas"></canvas>
+          </div>
         </div>
       </div>
       <div class="pvfoot hidden" id="pvfoot">
@@ -202,7 +205,8 @@ const $=s=>document.querySelector(s);
 const {PDFDocument}=PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1;
+let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1, origFileName='spread-fixed.pdf', fileHandle=null;
+const supportsFSAccess = (typeof window.showOpenFilePicker === 'function');
 let zoom=1, baseCssW=0, baseCssH=0, fitScale=1;
 const ZMIN=0.3, ZMAX=6;
 let bindingMode='right'; // 右綴じ(既定): 奇数=左, 偶数=右 ／ 左綴じ: 奇数=右, 偶数=左
@@ -252,17 +256,45 @@ function banner(show,text,pct){
   if(pct!=null) $("#barFill").style.width=pct+"%";
 }
 
-$("#btnOpen").onclick=()=>$("#file").click();
-$("#file").onchange=e=>{ const f=e.target.files[0]; if(f) loadFile(f); };
+$("#btnOpen").onclick=async ()=>{
+  if(supportsFSAccess){
+    try{
+      const [handle]=await window.showOpenFilePicker({types:[{description:'PDF',accept:{'application/pdf':['.pdf']}}]});
+      const f=await handle.getFile();
+      loadFile(f, handle);
+      return;
+    }catch(err){
+      if(err && err.name==='AbortError') return; // ユーザーがキャンセル
+      // 何らかの理由でFile System Access APIが使えない場合は通常のinputにフォールバック
+    }
+  }
+  $("#file").click();
+};
+$("#file").onchange=e=>{ const f=e.target.files[0]; if(f) loadFile(f, null); };
 const dz=$("#dropzone"), cen=$("#center")||document.querySelector(".center");
 ;['dragenter','dragover'].forEach(ev=>document.querySelector(".center").addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
 ;['dragleave','drop'].forEach(ev=>document.querySelector(".center").addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
-document.querySelector(".center").addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+document.querySelector(".center").addEventListener('drop',async e=>{
+  const item=e.dataTransfer.items && e.dataTransfer.items[0];
+  if(supportsFSAccess && item && typeof item.getAsFileSystemHandle==='function'){
+    try{
+      const handle=await item.getAsFileSystemHandle();
+      if(handle && handle.kind==='file'){
+        const f=await handle.getFile();
+        loadFile(f, handle);
+        return;
+      }
+    }catch(err){ /* フォールバックへ */ }
+  }
+  const f=e.dataTransfer.files[0]; if(f) loadFile(f, null);
+});
 
 $("#btnReset").onclick=()=>location.reload();
 
-async function loadFile(file){
+async function loadFile(file, handle){
   banner(true,"PDFを読み込み中…",5);
+  origFileName=file.name;
+  fileHandle=handle||null;
   const ab=await file.arrayBuffer();
   origBytes=ab.slice(0);
   const pdfBytesForJs=ab.slice(0);
@@ -385,23 +417,18 @@ async function autoDetectBinding(){
 async function analyze(){
   const n=pdfDoc.numPages;
   pages=[];
+  const sizeCounts={};
   for(let i=1;i<=n;i++){
     banner(true,`ページサイズを解析中… (${i}/${n})`, 5+ (i/n)*35);
     const page=await pdfDoc.getPage(i);
     const vp=page.getViewport({scale:1});
-    pages.push({num:i, w:vp.width, h:vp.height});
+    const key=Math.round(vp.width/2)*2+"x"+Math.round(vp.height/2)*2;
+    sizeCounts[key]=(sizeCounts[key]||0)+1;
+    pages.push({num:i, w:vp.width, h:vp.height, key});
   }
-  // 見開きページは単ページより必ず幅が広いという前提のもと、
-  // 出現頻度ではなく「最大幅」を見開き基準として採用する
-  // (単ページの方が枚数が多い・全体が2ページしかない等のケースでも誤判定しないため)
-  let maxW=-1;
-  pages.forEach(p=>{ if(p.w>maxW) maxW=p.w; });
-  const atMax=pages.filter(p=>Math.abs(p.w-maxW)<2);
-  const hCounts={};
-  atMax.forEach(p=>{ const hk=Math.round(p.h/2)*2; hCounts[hk]=(hCounts[hk]||0)+1; });
-  let bestH=null, bestC=-1;
-  for(const k in hCounts) if(hCounts[k]>bestC){ bestC=hCounts[k]; bestH=Number(k); }
-  spreadW=maxW; spreadH=bestH;
+  let modeKey=null, modeCount=-1;
+  for(const k in sizeCounts) if(sizeCounts[k]>modeCount){ modeCount=sizeCounts[k]; modeKey=k; }
+  [spreadW, spreadH]=modeKey.split("x").map(Number);
   pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; });
 
   banner(true,"綴じ方向を自動判定中…",38);
@@ -564,19 +591,6 @@ function applyZoom(){
   cv.style.width=Math.round(baseCssW*zoom)+"px";
   cv.style.height=Math.round(baseCssH*zoom)+"px";
   $("#zoomhint").textContent=Math.round(zoom*100)+"%";
-  centerViewer();
-}
-
-/* previewwrap自体にalign-items:center等のflex中央寄せを使うと、拡大時にはみ出した分が
-   対称に配置され、スクロールで開始側(左・上)のはみ出し部分に到達できなくなる。
-   これを避けるため、previewwrapは通常のブロック要素のままにし、
-   canvasが小さいときだけJSでマージンを計算して中央に見せる。 */
-function centerViewer(){
-  const wrap=$("#previewwrap"), cv=$("#pvcanvas");
-  const mx=Math.max(0, (wrap.clientWidth - cv.offsetWidth)/2);
-  const my=Math.max(0, (wrap.clientHeight - cv.offsetHeight)/2);
-  cv.style.marginLeft=mx+"px"; cv.style.marginTop=my+"px";
-  cv.style.marginRight=mx+"px"; cv.style.marginBottom=my+"px";
 }
 
 $("#zIn").onclick=()=>{ zoom=Math.min(ZMAX, zoom*1.25); applyZoom(); };
@@ -649,11 +663,34 @@ $("#btnExport").onclick=async ()=>{
     }
     banner(true,"PDFを保存中…",97);
     const outBytes=await outDoc.save();
-    const blob=new Blob([outBytes], {type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='spread-fixed.pdf'; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    let savedDirectly=false;
+    if(fileHandle){
+      try{
+        if(typeof fileHandle.requestPermission==='function'){
+          const perm=await fileHandle.queryPermission({mode:'readwrite'});
+          if(perm!=='granted'){
+            const req=await fileHandle.requestPermission({mode:'readwrite'});
+            if(req!=='granted') throw new Error('permission not granted');
+          }
+        }
+        const writable=await fileHandle.createWritable();
+        await writable.write(outBytes);
+        await writable.close();
+        savedDirectly=true;
+      }catch(werr){
+        console.warn('直接上書きに失敗、ダウンロードにフォールバックします', werr);
+      }
+    }
+    if(!savedDirectly){
+      const blob=new Blob([outBytes], {type:'application/pdf'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=origFileName; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    }else{
+      banner(true,"✓ 元のファイルに上書き保存しました",100);
+      await new Promise(r=>setTimeout(r,1200));
+    }
   }catch(err){
     console.error(err);
     alert('書き出し中にエラーが発生しました: '+err.message);
