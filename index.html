@@ -110,10 +110,10 @@ body.editing .iconbtn{cursor:grab}
 .iconbtn.sel + .cap{color:var(--glow);font-weight:700}
 
 /* ホバーでLEDがアイコンの縁を一周 */
-.iconbtn::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.8px;
+.iconbtn::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:2.8px;
   background:conic-gradient(from var(--a),
-     #fff 0deg, var(--glow) 14deg,
-     color-mix(in srgb, var(--glow) 0%, transparent) 78deg, transparent 360deg);
+     #fff 0deg, var(--glow) 20deg,
+     color-mix(in srgb, var(--glow) 0%, transparent) 84deg, transparent 360deg);
   -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
   filter:drop-shadow(0 0 3px color-mix(in srgb, var(--glow) 70%, transparent));
@@ -191,6 +191,13 @@ body.editing .iconbtn .del{display:flex}
 }
 .iconbtn.rev.sel{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 55%, #000 10%);
+}
+/* 編集ツールは背景・枠が濃色のため、glow色ではなく白ベースで長さを点検ツールと揃える */
+.iconbtn.rev::after{
+  background:conic-gradient(from var(--a),
+     #fff 0deg, #fff 20deg,
+     color-mix(in srgb, #fff 0%, transparent) 84deg, transparent 360deg);
+  filter:drop-shadow(0 0 3px rgba(255,255,255,.6));
 }
 .detail.rev .dicon, [data-theme="dark"] .detail.rev .dicon{
   background:var(--accent); border-color:var(--accent); color:#fff;
