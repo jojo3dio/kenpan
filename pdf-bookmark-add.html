@@ -2607,8 +2607,7 @@ async function runBookmark(){
     writeOutlines(pdfDoc, tree);
 
     const outBytes = await pdfDoc.save({useObjectStreams: false});
-    const base = pdfFile.name.replace(/\.pdf$/i, "");
-    resultName = `${base}_しおり付き.pdf`;
+    resultName = pdfFile.name;
     resultBlob = new Blob([outBytes], {type: "application/pdf"});
 
     log("── 完了 ──", "ok");
