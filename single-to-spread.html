@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>見開き化ツール — 単ページ見開きサイズ変換</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<style>
+:root{
+  --bg:#f5f3fb; --panel:#ffffff; --panel2:#eeeaf9; --line:#dcd6f0;
+  --ink:#211d33; --ink-dim:#635c80; --ink-faint:#8981a3;
+  --acc:#6d5cd6; --acc-bg:#e4ddf9; --acc-ink:#ffffff;
+  --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#f1ecfb; --thumbbg:#ffffff;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 4px rgba(70,60,110,.12);
+}
+[data-theme="dark"]{
+  --bg:#14111f; --panel:#1c1830; --panel2:#251f3d; --line:#372f57;
+  --ink:#e8e4f7; --ink-dim:#a79fc9; --ink-faint:#726a94;
+  --acc:#9b8cfa; --acc-bg:#2c2650; --acc-ink:#100c1f;
+  --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#191531; --thumbbg:#100c1f;
+  --shadow:0 2px 10px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:14px}
+.app{display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+.mk{width:28px;height:28px;border-radius:7px;flex:0 0 auto;background:var(--acc);
+  display:flex;align-items:center;justify-content:center}
+.mk svg{width:17px;height:17px}
+.brand b{font-size:15px;letter-spacing:.01em}
+.brand span{font-size:11.5px;color:var(--ink-dim);margin-left:8px}
+.sp{flex:1}
+button{font-family:var(--ui);cursor:pointer}
+.btn{font-size:13px;padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);transition:.15s}
+.btn:hover{border-color:var(--acc);background:var(--acc-bg)}
+.btn.primary{border-color:var(--acc);background:var(--acc);color:var(--acc-ink);font-weight:700}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.4;cursor:default}
+.icobtn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);font-size:14px;display:flex;align-items:center;justify-content:center}
+.icobtn:hover{border-color:var(--acc);color:var(--ink)}
+.bindgrp{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-dim);margin-right:2px}
+.bindgrp b{font-weight:500;margin-right:1px;white-space:nowrap}
+.bindbtn{font-size:12px;padding:6px 11px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim)}
+.bindbtn.on{border-color:var(--acc);background:var(--acc);color:var(--acc-ink);font-weight:700}
+.bindbtn:hover{border-color:var(--acc)}
+input[type=file]{display:none}
+
+.banner{display:none;align-items:center;gap:12px;padding:8px 16px;background:var(--acc-bg);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-dim)}
+.banner.show{display:flex}
+.bar{flex:1;height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+
+.main{flex:1;display:flex;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0}
+.left{width:340px;max-width:40vw;flex:0 1 340px;border-left:1px solid var(--line);background:var(--panel)}
+.colhd{padding:12px 14px 8px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.jumpgrp{display:flex;gap:6px;align-items:center}
+.jumpbtn{font-size:11px;padding:4px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);cursor:pointer;font-family:var(--ui)}
+.jumpbtn:hover{border-color:var(--acc);background:var(--acc-bg);color:var(--ink)}
+.plist{flex:1;overflow:auto;padding:8px}
+.empty-msg{padding:30px 16px;color:var(--ink-faint);text-align:center;font-size:13px;line-height:1.7}
+
+.prow{display:flex;gap:10px;padding:9px;border-radius:10px;border:1px solid transparent;cursor:pointer;margin-bottom:6px;align-items:center}
+.prow:hover{background:var(--panel2)}
+.prow.sel{border-color:var(--acc);background:var(--acc-bg)}
+.thumb{width:44px;height:60px;flex:0 0 auto;background:var(--thumbbg);border:1px solid var(--line);border-radius:4px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.thumb canvas,.thumb img{width:100%;height:100%;object-fit:contain}
+.pinfo{flex:1;min-width:0}
+.pnum{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+.ptag{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:999px;margin-top:3px;margin-right:4px}
+.ptag.nombre{background:var(--ok-bg);color:var(--ok)}
+.ptag.hashira{background:var(--acc-bg);color:var(--acc)}
+.ptag.manual{background:var(--warn-bg);color:var(--warn)}
+.ptag.guess{background:var(--panel2);color:var(--ink-dim);border:1px dashed var(--line)}
+.ptag.spread{background:var(--panel2);color:var(--ink-dim)}
+.side-pick{display:flex;gap:4px;flex:0 0 auto}
+.side-pick button{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);font-size:12px}
+.side-pick button.on{border-color:var(--acc);background:var(--acc);color:var(--acc-ink);font-weight:700}
+
+.center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0}
+.stage{flex:1;position:relative;display:flex;min-height:0;background:var(--stage)}
+.drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;z-index:2}
+.drop.hidden{display:none}
+.dropzone{max-width:460px;text-align:center;padding:40px;border:2px dashed var(--line);border-radius:16px;color:var(--ink-dim)}
+.dropzone.hot{border-color:var(--acc);background:var(--acc-bg)}
+.dropzone h2{color:var(--ink);font-size:18px;margin:0 0 10px}
+.dropzone p{font-size:12.5px;line-height:1.7;margin:6px 0}
+.previewwrap{flex:1;overflow:auto;padding:24px;cursor:grab}
+.previewwrap.grabbing{cursor:grabbing}
+.previewwrap.hidden{display:none}
+.pvinner{min-width:100%;min-height:100%;display:flex;align-items:center;justify-content:center}
+.pvcard{background:#000;box-shadow:0 4px 30px rgba(0,0,0,.6);display:block;flex:0 0 auto}
+.zoomctl{display:flex;align-items:center;gap:3px;margin-left:auto}
+.zoomctl.hidden{display:none}
+.zoomctl button{font-size:14px;line-height:1;min-width:26px;height:26px;padding:0 5px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.zoomctl button#zFit{font-size:11px;min-width:auto;padding:0 9px;font-family:var(--ui)}
+.zoomctl button:hover{border-color:var(--acc);background:var(--acc-bg)}
+.zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:38px;text-align:center}
+.pvfoot{padding:8px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--ink-dim);display:flex;gap:10px;align-items:center;flex:0 0 auto}
+.pvnav{display:flex;align-items:center;gap:2px}
+.navbtn{font-size:12px;line-height:1;min-width:26px;height:26px;padding:0 4px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.navbtn:hover{border-color:var(--acc);background:var(--acc-bg)}
+.pageinput{width:36px;text-align:center;font-family:var(--mono);font-size:12px;padding:5px 2px;
+  border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--ink);margin:0 2px}
+.pageinput:focus{outline:none;border-color:var(--acc)}
+.pvtotal{font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin-right:2px}
+
+.foot{padding:8px 16px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;background:var(--panel)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="mk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1" fill="white" fill-opacity=".18"/></svg>
+      </div>
+      <b>見開き化ツール</b><span>単ページを見開きサイズに自動変換</span>
+    </div>
+    <div class="sp"></div>
+    <div class="bindgrp" id="bindGrp">
+      <b>綴じ方向</b>
+      <button class="bindbtn on" data-bind="right">右綴じ</button>
+      <button class="bindbtn" data-bind="left">左綴じ</button>
+    </div>
+    <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
+    <button class="btn" id="btnReset" disabled>リセット</button>
+    <button class="btn" id="btnOpen">PDFを選択</button>
+    <input type="file" id="file" accept="application/pdf">
+    <button class="btn primary" id="btnExport" disabled>PDFを保存</button>
+  </header>
+
+  <div class="banner" id="banner">
+    <span id="bannerText">解析中…</span>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+
+  <div class="main">
+    <div class="col center">
+      <div class="stage" id="stage">
+        <div class="drop" id="drop">
+          <div class="dropzone" id="dropzone">
+            <h2>PDFをドラッグ＆ドロップ</h2>
+            <p>またはクリックして選択（ファイルは外部に送信されず、すべてブラウザ内で処理されます）</p>
+            <p style="margin-top:14px">見開きサイズと単ページが混在するPDFを読み込むと、単ページのノンブル（奇数/偶数）や柱の位置から左右どちらのページかを自動判定し、白ページを足して見開きサイズに拡張します。判定できないページは手動で左右を選べます。</p>
+          </div>
+        </div>
+        <div class="previewwrap hidden" id="previewwrap">
+          <div class="pvinner" id="pvinner">
+            <canvas class="pvcard" id="pvcanvas"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="pvfoot hidden" id="pvfoot">
+        <div class="pvnav">
+          <button class="navbtn" id="pFirst" title="先頭ページ">|◀</button>
+          <button class="navbtn" id="pPrev" title="前のページ">◀</button>
+          <input type="text" id="pageInput" class="pageinput" inputmode="numeric">
+          <span class="pvtotal">/ <span id="pageTotal">0</span></span>
+          <button class="navbtn" id="pNext" title="次のページ">▶</button>
+          <button class="navbtn" id="pLast" title="最後のページ">▶|</button>
+        </div>
+        <div class="zoomctl hidden" id="zoomctl">
+          <button id="zOut" title="縮小">−</button>
+          <span id="zoomhint">100%</span>
+          <button id="zIn" title="拡大">＋</button>
+          <button id="zFit" title="全体表示">全体表示</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="col left">
+      <div class="colhd">
+        <span>ページ一覧</span>
+        <div class="jumpgrp">
+          <button class="jumpbtn" id="jumpPrevSingle" title="前の単ページへ">◀単</button>
+          <button class="jumpbtn" id="jumpNextSingle" title="次の単ページへ">単▶</button>
+          <span id="singleCount" style="font-family:var(--mono)"></span>
+        </div>
+      </div>
+      <div class="plist" id="plist"><div class="empty-msg">PDFを読み込むと全ページが一覧表示されます。見開きサイズと異なる単ページ（章扉・奥付など）には左右選択ボタンが表示されます。</div></div>
+    </div>
+  </div>
+
+  <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：ノンブル(奇数/偶数)を優先→読めない場合は柱の位置を近傍の見開きページと照合。どちらも判定不可の場合は手動選択が必要です。</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const {PDFDocument}=PDFLib;
+pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1;
+let zoom=1, baseCssW=0, baseCssH=0, fitScale=1;
+const ZMIN=0.3, ZMAX=6;
+let bindingMode='right'; // 右綴じ(既定): 奇数=左, 偶数=右 ／ 左綴じ: 奇数=右, 偶数=左
+
+function sideForParity(parity, mode){
+  if(mode==='left') return parity==='odd' ? 'right' : 'left';
+  return parity==='odd' ? 'left' : 'right';
+}
+function bindLabel(mode){ return mode==='left' ? '左綴じ' : '右綴じ'; }
+
+function setBinding(mode){
+  bindingMode=mode;
+  document.querySelectorAll('.bindbtn').forEach(b=>b.classList.toggle('on', b.dataset.bind===mode));
+  pages.filter(p=>p.isSingle && p.method==='nombre').forEach(p=>{
+    p.side=sideForParity(p.nombreParity, bindingMode);
+    p.detail=`ノンブル ${p.nombreVal}（${p.nombreParity==='odd'?'奇数':'偶数'}）・${bindLabel(bindingMode)}前提`;
+  });
+  const lastNum = pages.length ? pages[pages.length-1].num : null;
+  pages.filter(p=>p.isSingle && p.method==='guess').forEach(p=>{
+    const isLastPage = p.num===lastNum;
+    p.side = sideForParity(isLastPage?'even':'odd', bindingMode);
+    p.detail = isLastPage
+      ? `ノンブル・柱とも情報なし（奥付等の可能性が高く、${bindLabel(bindingMode)}前提で${p.side==='left'?'左':'右'}を初期値に設定・要確認）`
+      : `ノンブル・柱とも情報なし（章扉等の可能性が高く、${bindLabel(bindingMode)}前提で${p.side==='left'?'左':'右'}を初期値に設定・要確認）`;
+  });
+  renderList();
+  if(selected>=0) renderComposite();
+}
+document.querySelectorAll('.bindbtn').forEach(b=>{ b.onclick=()=>setBinding(b.dataset.bind); });
+
+/* ---------------- テーマ ---------------- */
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  try{ localStorage.setItem('spreadfix-theme', t); }catch(e){}
+}
+applyTheme((()=>{ try{ return localStorage.getItem('spreadfix-theme')||'dark'; }catch(e){ return 'dark'; } })());
+$("#btnTheme").onclick=()=>{
+  const cur=document.documentElement.getAttribute('data-theme');
+  applyTheme(cur==='dark'?'light':'dark');
+  if(selected>=0) renderComposite();
+};
+
+function banner(show,text,pct){
+  const b=$("#banner");
+  b.classList.toggle('show',show);
+  if(text!=null) $("#bannerText").textContent=text;
+  if(pct!=null) $("#barFill").style.width=pct+"%";
+}
+
+$("#btnOpen").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{ const f=e.target.files[0]; if(f) loadFile(f); };
+const dz=$("#dropzone"), cen=$("#center")||document.querySelector(".center");
+;['dragenter','dragover'].forEach(ev=>document.querySelector(".center").addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+;['dragleave','drop'].forEach(ev=>document.querySelector(".center").addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+document.querySelector(".center").addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+
+$("#btnReset").onclick=()=>location.reload();
+
+async function loadFile(file){
+  banner(true,"PDFを読み込み中…",5);
+  const ab=await file.arrayBuffer();
+  origBytes=ab.slice(0);
+  const pdfBytesForJs=ab.slice(0);
+  pdfDoc=await pdfjsLib.getDocument({data:pdfBytesForJs}).promise;
+  $("#drop").classList.add('hidden');
+  await analyze();
+  banner(false);
+  renderList();
+  renderStat();
+  $("#btnExport").disabled=false;
+  $("#btnReset").disabled=false;
+  if(pages.length){
+    selected=0; renderList();
+    requestAnimationFrame(()=>{ requestAnimationFrame(()=>{ drawPreview(0); }); });
+  }
+}
+
+/* ---------------- 解析 ---------------- */
+function toHalfWidthDigits(s){
+  return s.replace(/[\uFF10-\uFF19]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
+}
+function normText(s){ return (s||"").replace(/\s+/g,"").replace(/[0-9\uFF10-\uFF19]/g,""); }
+
+async function getItems(num){
+  const page=await pdfDoc.getPage(num);
+  const tc=await page.getTextContent();
+  return {page, items:tc.items};
+}
+
+function findNombre(items, pageH, xMin, xMax){
+  const cutoff=pageH*0.22;
+  let best=null;
+  for(const it of items){
+    const y=it.transform[5], x=it.transform[4];
+    if(y>cutoff) continue;
+    if(xMin!=null && x<xMin) continue;
+    if(xMax!=null && x>=xMax) continue;
+    const t=toHalfWidthDigits(it.str).trim();
+    if(!/^[\-–—.]?\d{1,4}[\-–—.]?$/.test(t)) continue;
+    const digits=t.match(/\d+/); if(!digits) continue;
+    if(!best || y<best.y) best={y, val:parseInt(digits[0],10)};
+  }
+  return best;
+}
+
+function headerText(items, pageH, xMin, xMax){
+  const cutoff=pageH*0.82;
+  const cands=items.filter(it=>{
+    const y=it.transform[5], x=it.transform[4];
+    if(y<cutoff) return false;
+    if(xMin!=null && x<xMin) return false;
+    if(xMax!=null && x>=xMax) return false;
+    const t=it.str.trim();
+    if(!t) return false;
+    if(/^[\d\uFF10-\uFF19]+$/.test(toHalfWidthDigits(t))) return false; // 数字のみは除外(ノンブル混入対策)
+    return true;
+  });
+  cands.sort((a,b)=>a.transform[4]-b.transform[4]);
+  return cands.map(c=>c.str).join("").trim();
+}
+
+async function detectSide(p){
+  const {items}=await getItems(p.num);
+  const nb=findNombre(items, p.h);
+  if(nb){
+    const parity = (nb.val%2===1) ? 'odd' : 'even';
+    p.nombreVal=nb.val; p.nombreParity=parity;
+    p.side = sideForParity(parity, bindingMode);
+    p.method='nombre'; p.detail=`ノンブル ${nb.val}（${parity==='odd'?'奇数':'偶数'}）・${bindLabel(bindingMode)}前提`;
+    return;
+  }
+  const hdr=normText(headerText(items, p.h, null, null));
+  if(hdr.length>=2){
+    // 直近の見開きページがノンブル・柱とも無い(画像/アウトライン化ページ等)場合に備え、
+    // テキストが取れる見開きページが見つかるまで前後最大3ページまで探す
+    const prevCands=pages.filter(q=>!q.isSingle && q.num<p.num).sort((a,b)=>b.num-a.num).slice(0,3);
+    const nextCands=pages.filter(q=>!q.isSingle && q.num>p.num).sort((a,b)=>a.num-b.num).slice(0,3);
+    let voteL=0, voteR=0;
+    for(const nb2 of [...prevCands, ...nextCands]){
+      const {items:nitems}=await getItems(nb2.num);
+      const left=normText(headerText(nitems, nb2.h, 0, spreadW/2));
+      const right=normText(headerText(nitems, nb2.h, spreadW/2, spreadW));
+      const matchL = left.length>=2 && (hdr.includes(left)||left.includes(hdr));
+      const matchR = right.length>=2 && (hdr.includes(right)||right.includes(hdr));
+      if(matchL && !matchR) voteL++;
+      else if(matchR && !matchL) voteR++;
+      if(voteL||voteR) break; // 最初に一致したページで確定(遠いページほど信頼度が下がるため)
+    }
+    if(voteL>0 && voteR===0){ p.side='left'; p.method='hashira'; p.detail='柱の一致（近傍の見開きページと照合）'; return; }
+    if(voteR>0 && voteL===0){ p.side='right'; p.method='hashira'; p.detail='柱の一致（近傍の見開きページと照合）'; return; }
+  }
+  // ノンブル・柱とも情報が無い場合：章扉は奇数ページ相当（＝綴じ方向次第で右綴じなら左、左綴じなら右）、
+  // 奥付(文書の最終ページ)は偶数ページ相当として、綴じ方向に連動した初期値を設定する(要確認の推定値)
+  const isLastPage = p.num === pages[pages.length-1].num;
+  const guessParity = isLastPage ? 'even' : 'odd';
+  p.side = sideForParity(guessParity, bindingMode);
+  p.method='guess';
+  p.detail = isLastPage
+    ? `ノンブル・柱とも情報なし（奥付等の可能性が高く、${bindLabel(bindingMode)}前提で${p.side==='left'?'左':'右'}を初期値に設定・要確認）`
+    : `ノンブル・柱とも情報なし（章扉等の可能性が高く、${bindLabel(bindingMode)}前提で${p.side==='left'?'左':'右'}を初期値に設定・要確認）`;
+}
+
+/* 見開きページの左右半分それぞれでノンブルを検出し、奇数/偶数がどちら側に来ているかで
+   右綴じ／左綴じを自動判定する */
+async function autoDetectBinding(){
+  const spreads=pages.filter(p=>!p.isSingle);
+  for(const sp of spreads){
+    const {items}=await getItems(sp.num);
+    const leftNb=findNombre(items, sp.h, 0, spreadW/2);
+    const rightNb=findNombre(items, sp.h, spreadW/2, spreadW);
+    if(leftNb && rightNb && (leftNb.val%2) !== (rightNb.val%2)){
+      bindingMode = (leftNb.val%2===1) ? 'right' : 'left';
+      document.querySelectorAll('.bindbtn').forEach(b=>b.classList.toggle('on', b.dataset.bind===bindingMode));
+      return true;
+    }
+  }
+  return false;
+}
+
+async function analyze(){
+  const n=pdfDoc.numPages;
+  pages=[];
+  const sizeCounts={};
+  for(let i=1;i<=n;i++){
+    banner(true,`ページサイズを解析中… (${i}/${n})`, 5+ (i/n)*35);
+    const page=await pdfDoc.getPage(i);
+    const vp=page.getViewport({scale:1});
+    const key=Math.round(vp.width/2)*2+"x"+Math.round(vp.height/2)*2;
+    sizeCounts[key]=(sizeCounts[key]||0)+1;
+    pages.push({num:i, w:vp.width, h:vp.height, key});
+  }
+  let modeKey=null, modeCount=-1;
+  for(const k in sizeCounts) if(sizeCounts[k]>modeCount){ modeCount=sizeCounts[k]; modeKey=k; }
+  [spreadW, spreadH]=modeKey.split("x").map(Number);
+  pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; });
+
+  banner(true,"綴じ方向を自動判定中…",38);
+  await autoDetectBinding();
+
+  const singles=pages.filter(p=>p.isSingle);
+  for(let i=0;i<singles.length;i++){
+    banner(true,`単ページを判定中… (${i+1}/${singles.length})`, 40+(i/Math.max(1,singles.length))*30);
+    await detectSide(singles[i]);
+  }
+  // サムネイル生成（全ページ）
+  for(let i=0;i<pages.length;i++){
+    banner(true,`サムネイルを生成中… (${i+1}/${pages.length})`, 70+(i/Math.max(1,pages.length))*30);
+    await makeThumb(pages[i]);
+  }
+}
+
+async function makeThumb(p){
+  const page=await pdfDoc.getPage(p.num);
+  const scale=88/p.w;
+  const vp=page.getViewport({scale});
+  const cv=document.createElement('canvas');
+  cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+  p.thumb=cv.toDataURL('image/png');
+}
+
+/* ---------------- UI ---------------- */
+function renderStat(){
+  const singles=pages.filter(p=>p.isSingle);
+  $("#singleCount").textContent=`全${pages.length}p・単ページ${singles.length}件`;
+}
+
+function renderList(){
+  const el=$("#plist"); el.innerHTML="";
+  if(!pages.length){ el.innerHTML='<div class="empty-msg">PDFを読み込むと、見開きサイズと異なる単ページ（章扉・奥付など）がここに一覧表示されます。</div>'; return; }
+  pages.forEach((p,idx)=>{
+    const row=document.createElement('div');
+    row.className='prow'+(selected===idx?' sel':'');
+    if(!p.isSingle){
+      row.innerHTML=`
+        <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
+        <div class="pinfo">
+          <div class="pnum">p.${p.num}</div>
+          <span class="ptag spread">見開き</span>
+        </div>`;
+      row.onclick=()=>{ selected=idx; renderList(); drawPreview(idx); };
+      el.appendChild(row);
+      return;
+    }
+    const tagClass=p.method==='nombre'?'nombre':(p.method==='hashira'?'hashira':(p.method==='guess'?'guess':'manual'));
+    const tagLabel=p.method==='nombre'?'ノンブル判定':(p.method==='hashira'?'柱で判定':(p.method==='guess'?'推定(要確認)':'要手動選択'));
+    row.innerHTML=`
+      <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
+      <div class="pinfo">
+        <div class="pnum">p.${p.num}</div>
+        <span class="ptag ${tagClass}">${tagLabel}</span>
+      </div>
+      <div class="side-pick">
+        <button data-side="left" class="${p.side==='left'?'on':''}" title="左ページに寄せる">左</button>
+        <button data-side="right" class="${p.side==='right'?'on':''}" title="右ページに寄せる">右</button>
+      </div>`;
+    row.querySelector('[data-side="left"]').onclick=(e)=>{ e.stopPropagation(); p.side='left'; p.method='manual'; p.detail='手動選択（左）'; renderList(); if(selected===idx) drawPreview(idx); };
+    row.querySelector('[data-side="right"]').onclick=(e)=>{ e.stopPropagation(); p.side='right'; p.method='manual'; p.detail='手動選択（右）'; renderList(); if(selected===idx) drawPreview(idx); };
+    row.onclick=()=>{ selected=idx; renderList(); drawPreview(idx); };
+    el.appendChild(row);
+  });
+  const selRow=el.children[selected];
+  if(selRow) selRow.scrollIntoView({block:'nearest'});
+}
+
+async function drawPreview(idx){
+  selected=idx;
+  zoom=1;
+  $("#previewwrap").classList.remove('hidden');
+  $("#zoomctl").classList.remove('hidden');
+  $("#pvfoot").classList.remove('hidden');
+  const p=pages[idx];
+  $("#pageInput").value=p.num;
+  $("#pageTotal").textContent=pages.length;
+  await renderComposite();
+}
+
+function goToPage(idx){
+  if(!pages.length) return;
+  idx=Math.max(0, Math.min(pages.length-1, idx));
+  selected=idx;
+  renderList();
+  drawPreview(idx);
+}
+$("#pFirst").onclick=()=>goToPage(0);
+$("#pLast").onclick=()=>goToPage(pages.length-1);
+$("#pPrev").onclick=()=>{ if(selected>0) goToPage(selected-1); };
+$("#pNext").onclick=()=>{ if(selected<pages.length-1) goToPage(selected+1); };
+$("#pageInput").addEventListener('keydown', e=>{ if(e.key==='Enter') $("#pageInput").blur(); });
+$("#pageInput").onchange=()=>{
+  if(!pages.length) return;
+  let v=(parseInt($("#pageInput").value,10)||1)-1;
+  goToPage(v);
+};
+
+function jumpSingle(dir){
+  const singles=pages.map((p,i)=>i).filter(i=>pages[i].isSingle);
+  if(!singles.length) return;
+  if(dir>0){
+    const next=singles.find(i=>i>selected);
+    goToPage(next!=null ? next : singles[0]);
+  }else{
+    const before=singles.filter(i=>i<selected);
+    goToPage(before.length ? before[before.length-1] : singles[singles.length-1]);
+  }
+}
+$("#jumpPrevSingle").onclick=()=>jumpSingle(-1);
+$("#jumpNextSingle").onclick=()=>jumpSingle(1);
+
+async function renderComposite(){
+  if(selected<0) return;
+  const p=pages[selected];
+  const wrap=$("#previewwrap");
+  const maxW=Math.max(120, wrap.clientWidth-48), maxH=Math.max(120, wrap.clientHeight-48);
+  const targetW = p.isSingle ? spreadW : p.w;
+  const targetH = p.isSingle ? spreadH : p.h;
+  fitScale=Math.min(maxW/targetW, maxH/targetH);
+  baseCssW=targetW*fitScale; baseCssH=targetH*fitScale;
+  const renderScale=Math.min(fitScale*3, 6);
+
+  const cv=$("#pvcanvas");
+  cv.width=Math.ceil(targetW*renderScale); cv.height=Math.ceil(targetH*renderScale);
+  const g=cv.getContext('2d');
+  g.fillStyle="#ffffff"; g.fillRect(0,0,cv.width,cv.height);
+
+  const page=await pdfDoc.getPage(p.num);
+  const vp=page.getViewport({scale:renderScale});
+
+  if(p.isSingle){
+    const tmp=document.createElement('canvas');
+    tmp.width=Math.ceil(vp.width); tmp.height=Math.ceil(vp.height);
+    await page.render({canvasContext:tmp.getContext('2d'), viewport:vp}).promise;
+
+    const side=p.side||'left';
+    const x = side==='right' ? cv.width-tmp.width : 0;
+    const y = Math.round((cv.height-tmp.height)/2);
+    g.drawImage(tmp, x, y);
+
+    // 中央の折り目ガイド
+    g.strokeStyle="rgba(109,92,214,.7)";
+    g.setLineDash([8,6]); g.lineWidth=Math.max(1.5, renderScale*0.6);
+    g.beginPath(); g.moveTo(cv.width/2,0); g.lineTo(cv.width/2,cv.height); g.stroke();
+    g.setLineDash([]);
+
+    applyZoom();
+  }else{
+    await page.render({canvasContext:g, viewport:vp}).promise;
+    applyZoom();
+  }
+}
+
+function applyZoom(){
+  const cv=$("#pvcanvas");
+  cv.style.width=Math.round(baseCssW*zoom)+"px";
+  cv.style.height=Math.round(baseCssH*zoom)+"px";
+  $("#zoomhint").textContent=Math.round(zoom*100)+"%";
+}
+
+$("#zIn").onclick=()=>{ zoom=Math.min(ZMAX, zoom*1.25); applyZoom(); };
+$("#zOut").onclick=()=>{ zoom=Math.max(ZMIN, zoom/1.25); applyZoom(); };
+$("#zFit").onclick=()=>{ zoom=1; applyZoom(); $("#previewwrap").scrollLeft=0; $("#previewwrap").scrollTop=0; };
+
+/* ホイールでカーソル位置を中心にズーム */
+$("#previewwrap").addEventListener('wheel', e=>{
+  if(selected<0) return;
+  e.preventDefault();
+  const wrap=$("#previewwrap"), cv=$("#pvcanvas");
+  const old=zoom;
+  const factor = e.deltaY<0 ? 1.12 : 1/1.12;
+  zoom=Math.min(ZMAX, Math.max(ZMIN, zoom*factor));
+  if(zoom===old) return;
+  const r=cv.getBoundingClientRect();
+  const dx=e.clientX-r.left, dy=e.clientY-r.top;
+  const ratio=zoom/old;
+  applyZoom();
+  wrap.scrollLeft += dx*(ratio-1);
+  wrap.scrollTop += dy*(ratio-1);
+}, {passive:false});
+
+/* ドラッグでプレビューを移動(パン) */
+let panning=false, panX=0, panY=0, panSL=0, panST=0;
+$("#previewwrap").addEventListener('mousedown', e=>{
+  if(selected<0 || e.button!==0) return;
+  if(e.target.closest('button,input,a')) return;
+  panning=true; panX=e.clientX; panY=e.clientY;
+  const wrap=$("#previewwrap");
+  panSL=wrap.scrollLeft; panST=wrap.scrollTop;
+  wrap.classList.add('grabbing'); e.preventDefault();
+});
+window.addEventListener('mousemove', e=>{
+  if(!panning) return;
+  const wrap=$("#previewwrap");
+  wrap.scrollLeft = panSL-(e.clientX-panX);
+  wrap.scrollTop = panST-(e.clientY-panY);
+});
+window.addEventListener('mouseup', ()=>{
+  if(panning){ panning=false; $("#previewwrap").classList.remove('grabbing'); }
+});
+
+/* ---------------- 書き出し ---------------- */
+$("#btnExport").onclick=async ()=>{
+  const singles=pages.filter(p=>p.isSingle);
+  const unresolved=singles.filter(p=>!p.side);
+  if(unresolved.length){
+    alert(`左右が未確定の単ページが${unresolved.length}件あります（一覧の「左」「右」ボタンで指定してください）。\n該当ページ: `+unresolved.map(p=>'p.'+p.num).join(', '));
+    return;
+  }
+  banner(true,"見開きPDFを生成中…",10);
+  try{
+    // Acrobatの編集メニュー(hidari_yose/migi_yose)と同じ原理：
+    // 新規ページを作って中身を埋め込むのではなく、単ページのMediaBox/CropBoxを
+    // 見開き幅までそのまま拡張する。拡張した分は元々何も描かれていないため白になる。
+    // 左に寄せる(=右に白を入れる)ときは左端を固定して右端だけ広げ、
+    // 右に寄せる(=左に白を入れる)ときは右端を固定して左端を広げる。
+    const outDoc=await PDFDocument.load(origBytes);
+    const outPages=outDoc.getPages();
+    for(let i=0;i<pages.length;i++){
+      const p=pages[i];
+      if(!p.isSingle) continue;
+      banner(true,`ページを拡張中… (p.${p.num})`, 10+(i/pages.length)*85);
+      const pg=outPages[i];
+      const mb=pg.getMediaBox();
+      const newX = (p.side==='right') ? (mb.x+mb.width-spreadW) : mb.x;
+      pg.setMediaBox(newX, mb.y, spreadW, mb.height);
+      pg.setCropBox(newX, mb.y, spreadW, mb.height);
+    }
+    banner(true,"PDFを保存中…",97);
+    const outBytes=await outDoc.save();
+    const blob=new Blob([outBytes], {type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='spread-fixed.pdf'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }catch(err){
+    console.error(err);
+    alert('書き出し中にエラーが発生しました: '+err.message);
+  }
+  banner(false);
+};
+
+window.addEventListener('resize', ()=>{ if(selected>=0) renderComposite(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>単ページ見開き化 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#6d5cd6;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:700px;margin:0 auto;padding:24px 18px 60px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--glow);
+  border-radius:12px;padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">単ページ見開き化</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6.5C10 5 7 4.5 4 4.5v14c3 0 6 .5 8 2 2-1.5 5-2 8-2v-14c-3 0-6 .5-8 2z" stroke-linejoin="round"/><path d="M12 6.5v14" stroke-linecap="round"/></svg></div>
+    <div>
+      <h1>単ページ見開き化</h1>
+      <p>章扉・奥付などファイルを分けて作ったために単ページのままになっているページを、見開きサイズに自動拡張します。ノンブルや柱の位置、綴じ方向から左右どちらのページかを自動判定し、正しい側に白ページを追加します。</p>
+      <a class="open" href="single-to-spread.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p class='lead'>InDesignなどでファイルを分けて作った章扉・奥付は、見開きでPDFを書き出しても<b>単ページのまま</b>になりがちです。そのまま出力すると横倒しになったり、中央配置されて左右どちらのページか分かりにくくなります。このツールは、PDF内で最も多いページサイズを<b>見開きの基準</b>として自動検出し、それより小さい単ページを見つけ出して、正しい側（左右）に白ページを追加し見開きサイズへ拡張します。左右の判定は、ノンブル（奇数／偶数）を優先し、読み取れない場合は柱の位置を近傍の見開きページと照合します。どちらも判定できない場合（章扉・奥付など）は、綴じ方向と文書内の位置から推定した初期値を設定したうえで、手動でも指定できます。</p>
+
+  <ol class="steps">
+    <li><b>対象PDFを選ぶ。</b>画面にPDFをドラッグ＆ドロップするか、クリックして選択します。</li>
+    <li><b>自動判定を確認する。</b>読み込むと、見開き基準サイズと綴じ方向（右綴じ／左綴じ）が自動検出され、単ページごとに左右が自動判定されます。ページ一覧に「ノンブル判定」「柱で判定」「推定(要確認)」のタグで判定方法が表示されます。</li>
+    <li><b>綴じ方向を確認・修正する。</b>右上の「右綴じ／左綴じ」ボタンで切り替えられます。切り替えると、ノンブルや推定に基づくページの左右が自動的に再計算されます。</li>
+    <li><b>プレビューで見た目を確認する。</b>一覧の各ページをクリックすると、実際にどちら側へ寄って白ページが追加されるかをプレビューで確認できます。</li>
+    <li><b>必要なページだけ手動で調整する。</b>「推定(要確認)」タグの付いたページ（章扉・奥付など）は、一覧の「左」「右」ボタンでいつでも上書きできます。自動判定済みのページも同様に上書き可能です。</li>
+    <li><b>PDFを保存する。</b>左右が確定していれば「PDFを保存」を押すだけでそのまま書き出されます。未確定のページが残っている場合は、該当ページ番号を示すアラートで知らせます。</li>
+  </ol>
+
+  <h2>画面の見かた</h2>
+  <div class="cards">
+    <div class="c"><div class="t">綴じ方向</div><div class="d">見開きページのノンブルの奇数・偶数の出方から自動判定します。手動で右綴じ／左綴じを切り替えることもできます。</div></div>
+    <div class="c"><div class="t">ページ一覧</div><div class="d">全ページが並び、単ページには判定方法のタグと左右選択ボタンが表示されます。「◀単／単▶」ボタンで単ページだけを前後にジャンプできます。</div></div>
+    <div class="c"><div class="t">推定(要確認)タグ</div><div class="d">ノンブル・柱のどちらからも判定できなかったページです。章扉は右、奥付（文書の最終ページ）は左を初期値にしていますが、実際の見た目をプレビューで必ず確認してください。</div></div>
+    <div class="c"><div class="t">プレビュー</div><div class="d">選択したページが実際にどちら側へ配置され、どちらに白ページが追加されるかを表示します。下部のページ送り・ページ番号入力で他のページも確認できます。</div></div>
+    <div class="c"><div class="t">ズーム操作</div><div class="d">マウスホイールでカーソル位置を基準にズーム、ドラッグでパン移動。右下の「−／100%／＋／全体表示」でも調整できます。</div></div>
+    <div class="c"><div class="t">PDFを保存</div><div class="d">単ページのMediaBox／CropBoxを見開き幅まで拡張して書き出します。見開きサイズのページには一切手を加えません。</div></div>
+  </div>
+
+  <div class='note'><b>「推定(要確認)」のページは必ずプレビューで確認を：</b>ノンブル・柱のどちらも情報が無いページ（章扉・奥付など）は、慣習に基づく初期値が入っているだけです。実際の本の構成と異なる場合は、一覧の「左」「右」ボタンで修正してから保存してください。</div>
+
+  <h2>うまくいかないとき</h2>
+  <dl class="faq">
+    <dt>単ページが検出されない・見開きページまで単ページ扱いになる</dt>
+    <dd>見開き基準サイズは、PDF内で最も多いページサイズを自動採用しています。単ページが本の大半を占めるような特殊な構成のPDFでは、基準サイズの検出がずれる場合があります。</dd>
+    <dt>綴じ方向の自動判定が実際の本と違う</dt>
+    <dd>右上の「右綴じ／左綴じ」ボタンで切り替えてください。ノンブルで判定済みのページは即座に再計算されます。柱判定や推定で決まったページは、必要であれば一覧の「左」「右」ボタンで個別に修正してください。</dd>
+    <dt>章扉や奥付の左右が思っていたのと逆</dt>
+    <dd>ノンブル・柱とも情報が無いページは、慣習（章扉は右、奥付は左）に基づく推定値です。実際の構成に合わせて一覧の「左」「右」ボタンで上書きしてください。</dd>
+    <dt>「PDFを保存」を押すとアラートが出て止まる</dt>
+    <dd>左右が未確定の単ページが残っています。アラートに表示されたページ番号を一覧で探し、「左」「右」ボタンで指定してから再度保存してください。</dd>
+  </dl>
+
+  <div class="foot">検版ハブ｜単ページ見開き化 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+</body>
+</html>
