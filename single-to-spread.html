@@ -100,8 +100,7 @@ input[type=file]{display:none}
 .previewwrap{flex:1;overflow:auto;padding:24px;cursor:grab}
 .previewwrap.grabbing{cursor:grabbing}
 .previewwrap.hidden{display:none}
-.pvinner{min-width:100%;min-height:100%;display:flex;align-items:center;justify-content:center}
-.pvcard{background:#000;box-shadow:0 4px 30px rgba(0,0,0,.6);display:block;flex:0 0 auto}
+.pvcard{background:#000;box-shadow:0 4px 30px rgba(0,0,0,.6);display:block}
 .zoomctl{display:flex;align-items:center;gap:3px;margin-left:auto}
 .zoomctl.hidden{display:none}
 .zoomctl button{font-size:14px;line-height:1;min-width:26px;height:26px;padding:0 5px;border:1px solid var(--line);
@@ -161,9 +160,7 @@ input[type=file]{display:none}
           </div>
         </div>
         <div class="previewwrap hidden" id="previewwrap">
-          <div class="pvinner" id="pvinner">
-            <canvas class="pvcard" id="pvcanvas"></canvas>
-          </div>
+          <canvas class="pvcard" id="pvcanvas"></canvas>
         </div>
       </div>
       <div class="pvfoot hidden" id="pvfoot">
@@ -567,6 +564,19 @@ function applyZoom(){
   cv.style.width=Math.round(baseCssW*zoom)+"px";
   cv.style.height=Math.round(baseCssH*zoom)+"px";
   $("#zoomhint").textContent=Math.round(zoom*100)+"%";
+  centerViewer();
+}
+
+/* previewwrap自体にalign-items:center等のflex中央寄せを使うと、拡大時にはみ出した分が
+   対称に配置され、スクロールで開始側(左・上)のはみ出し部分に到達できなくなる。
+   これを避けるため、previewwrapは通常のブロック要素のままにし、
+   canvasが小さいときだけJSでマージンを計算して中央に見せる。 */
+function centerViewer(){
+  const wrap=$("#previewwrap"), cv=$("#pvcanvas");
+  const mx=Math.max(0, (wrap.clientWidth - cv.offsetWidth)/2);
+  const my=Math.max(0, (wrap.clientHeight - cv.offsetHeight)/2);
+  cv.style.marginLeft=mx+"px"; cv.style.marginTop=my+"px";
+  cv.style.marginRight=mx+"px"; cv.style.marginBottom=my+"px";
 }
 
 $("#zIn").onclick=()=>{ zoom=Math.min(ZMAX, zoom*1.25); applyZoom(); };
