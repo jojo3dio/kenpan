@@ -205,7 +205,7 @@ const $=s=>document.querySelector(s);
 const {PDFDocument}=PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1, origFileName='spread-fixed.pdf';
+let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1;
 let zoom=1, baseCssW=0, baseCssH=0, fitScale=1;
 const ZMIN=0.3, ZMAX=6;
 let bindingMode='right'; // 右綴じ(既定): 奇数=左, 偶数=右 ／ 左綴じ: 奇数=右, 偶数=左
@@ -266,7 +266,6 @@ $("#btnReset").onclick=()=>location.reload();
 
 async function loadFile(file){
   banner(true,"PDFを読み込み中…",5);
-  origFileName=file.name;
   const ab=await file.arrayBuffer();
   origBytes=ab.slice(0);
   const pdfBytesForJs=ab.slice(0);
@@ -389,18 +388,23 @@ async function autoDetectBinding(){
 async function analyze(){
   const n=pdfDoc.numPages;
   pages=[];
-  const sizeCounts={};
   for(let i=1;i<=n;i++){
     banner(true,`ページサイズを解析中… (${i}/${n})`, 5+ (i/n)*35);
     const page=await pdfDoc.getPage(i);
     const vp=page.getViewport({scale:1});
-    const key=Math.round(vp.width/2)*2+"x"+Math.round(vp.height/2)*2;
-    sizeCounts[key]=(sizeCounts[key]||0)+1;
-    pages.push({num:i, w:vp.width, h:vp.height, key});
+    pages.push({num:i, w:vp.width, h:vp.height});
   }
-  let modeKey=null, modeCount=-1;
-  for(const k in sizeCounts) if(sizeCounts[k]>modeCount){ modeCount=sizeCounts[k]; modeKey=k; }
-  [spreadW, spreadH]=modeKey.split("x").map(Number);
+  // 見開きページは単ページより必ず幅が広いという前提のもと、
+  // 出現頻度ではなく「最大幅」を見開き基準として採用する
+  // (単ページの方が枚数が多い・全体が2ページしかない等のケースでも誤判定しないため)
+  let maxW=-1;
+  pages.forEach(p=>{ if(p.w>maxW) maxW=p.w; });
+  const atMax=pages.filter(p=>Math.abs(p.w-maxW)<2);
+  const hCounts={};
+  atMax.forEach(p=>{ const hk=Math.round(p.h/2)*2; hCounts[hk]=(hCounts[hk]||0)+1; });
+  let bestH=null, bestC=-1;
+  for(const k in hCounts) if(hCounts[k]>bestC){ bestC=hCounts[k]; bestH=Number(k); }
+  spreadW=maxW; spreadH=bestH;
   pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; });
 
   banner(true,"綴じ方向を自動判定中…",38);
@@ -638,7 +642,7 @@ $("#btnExport").onclick=async ()=>{
     const blob=new Blob([outBytes], {type:'application/pdf'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url; a.download=origFileName; document.body.appendChild(a); a.click(); a.remove();
+    a.href=url; a.download='spread-fixed.pdf'; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 4000);
   }catch(err){
     console.error(err);
