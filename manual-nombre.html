@@ -88,7 +88,6 @@ ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
 ul.plain li{margin:5px 0}
 .foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
   font-size:12px;color:var(--ink-faint)}
-.kp-copyright{font-size:11.5px;color:inherit;opacity:.68;margin-left:12px;white-space:nowrap;user-select:none}
 </style>
 </head>
 <body>
@@ -98,7 +97,6 @@ ul.plain li{margin:5px 0}
   <span class="nm">ノンブル検版</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
   <span class="sp"></span>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
-<span class="kp-copyright">© FUJIWARA PRINTING.inc</span>
 </div>
 <div class="wrap">
   <div class="hero">
@@ -110,7 +108,7 @@ ul.plain li{margin:5px 0}
     </div>
   </div>
   <h2>このツールでできること</h2><p class='lead'>各ページのノンブル（ページ番号）の<b>位置</b>を検版します。ページを送りながら確認でき、OCR による自動検出、表裏の見当（ノド／小口側のばらつき）チェック、レポート出力に対応します。</p><ol class="steps"><li><b>PDFを開く。</b>「PDFを開く／PDFを選択」から読み込みます。</li><li><b>ページを送る。</b><span class='tag'>⏮ ◀ ▶ ⏭</span> で移動。「−／＋／全体表示」で倍率調整します。</li><li><b>「OCRで検出」。</b>ノンブルを自動抽出し、ページ内の位置を取得します。</li><li><b>位置を確認。</b>「位置オーバービュー」で全ページのノンブル位置を俯瞰、「デザイングループ」でレイアウトの揃いを確認します。</li><li><b>指摘を見る。</b>「指摘（エラー結果）」に位置ずれ等の候補が並びます。「表裏チェック」で見開きの見当を確認します。</li><li><b>例外設定。</b>扉や中扉などノンブルが無いページは「ノンブル無しにする」、戻すときは「解除」。誤選択は「選択クリア」。</li><li><b>出力。</b>「レポート」から CSV／JSON／PNG／印刷で結果を保存・共有できます。</li></ol><h2>画面の見かた</h2><div class="cards"><div class="c"><div class="t">位置オーバービュー</div><div class="d">全ページのノンブル位置を一覧で重ね、外れ値を見つけやすくします。</div></div><div class="c"><div class="t">デザイングループ</div><div class="d">同じ体裁のページをまとめ、グループ内の揃いを確認します。</div></div><div class="c"><div class="t">指摘（エラー結果）</div><div class="d">位置ずれなどの要確認ページを抽出します。</div></div><div class="c"><div class="t">表裏チェック</div><div class="d">奇数・偶数ページの見当（左右の振り分け）を確認します。</div></div><div class="c"><div class="t">ページ別 一覧</div><div class="d">ページごとの検出結果を一覧表示します。</div></div></div><h2>うまくいかないとき</h2><dl class="faq"><dt>ノンブルが検出されない</dt><dd>「OCRで検出」を再実行し、倍率を上げて番号がはっきり写る状態にしてください。装飾ノンブルは認識しにくい場合があります。</dd><dt>ノンブルが無いページが指摘される</dt><dd>扉などは「ノンブル無しにする」で対象外にできます。</dd><dt>結果を共有したい</dt><dd>「レポート」から CSV／JSON で書き出し、PNG や印刷で校正紙に添付できます。</dd></dl>
-  <div class="foot">検版ハブ｜ノンブル検版 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+  <div class="foot">検版ハブ｜ノンブル検版 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。 ｜ © FUJIWARA PRINTING.inc</div>
 </div>
 <script>
 (function(){

@@ -120,8 +120,8 @@ input[type=file]{display:none}
 .pvtotal{font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin-right:2px}
 
 .foot{padding:8px 16px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;background:var(--panel)}
+.kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
 .hidden{display:none!important}
-.kp-copyright{font-size:11.5px;color:inherit;opacity:.68;margin-left:12px;white-space:nowrap;user-select:none}
 </style>
 </head>
 <body>
@@ -145,8 +145,7 @@ input[type=file]{display:none}
     <button class="btn" id="btnOpen">PDFを選択</button>
     <input type="file" id="file" accept="application/pdf">
     <button class="btn primary" id="btnExport" disabled>PDFを保存</button>
-  <span class="kp-copyright">© FUJIWARA PRINTING.inc</span>
-</header>
+  </header>
 
   <div class="banner" id="banner">
     <span id="bannerText">解析中…</span>
@@ -199,6 +198,7 @@ input[type=file]{display:none}
   </div>
 
   <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：①そのページ自身のノンブル(奇数/偶数)→②書籍内の別ページのノンブルからの逆算(ファイル境目で単ページが連続する場合も対応)→③柱の位置を近傍の見開きページと照合→④手動選択、の順で判定します。</div>
+<div class="kp-strip">© FUJIWARA PRINTING.inc</div>
 </div>
 
 <script>

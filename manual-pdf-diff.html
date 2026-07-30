@@ -88,7 +88,6 @@ ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
 ul.plain li{margin:5px 0}
 .foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
   font-size:12px;color:var(--ink-faint)}
-.kp-copyright{font-size:11.5px;color:inherit;opacity:.68;margin-left:12px;white-space:nowrap;user-select:none}
 </style>
 </head>
 <body>
@@ -98,7 +97,6 @@ ul.plain li{margin:5px 0}
   <span class="nm">下版差分チェッカー</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
   <span class="sp"></span>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
-<span class="kp-copyright">© FUJIWARA PRINTING.inc</span>
 </div>
 <div class="wrap">
   <div class="hero">
@@ -110,7 +108,7 @@ ul.plain li{margin:5px 0}
     </div>
   </div>
   <h2>このツールでできること</h2><p class='lead'>顧客入稿PDF（<b>A</b>）と最終下版PDF（<b>B</b>）を<b>同じ解像度でレンダリングして重ね</b>、ピクセル単位で差分を検出します。位置合わせ、5つの表示モード、全ページ走査、差分の種別分けに対応し、結果は PDF に書き出せます。処理はすべてブラウザ内で完結し、ファイルは外部に送信されません（local · no-upload）。</p><ol class="steps"><li><b>2つのPDFを読み込む。</b>「A・顧客入稿PDF」と「B・最終下版PDF」にそれぞれドラッグ＆ドロップ。両方が <span class='tag'>✓ 読込済</span> になると比較が始まります。</li><li><b>解像度（DPI）を選ぶ。</b>既定は <span class='tag'>300dpi（推奨・高精度）</span>。重いときは 150dpi（中）や 100dpi（低・推奨）に下げると軽くなります。</li><li><b>位置を合わせる。</b>「起点」（用紙左上／仕上がり左上（トンボ無視）／断ち落とし左上／中央そろえ）と「範囲」（全体／仕上がりのみ／断ち落とし込み）を選びます。ズレが残るときは「Bオフセット（B位置微調整）」と「B不透明度」で追い込みます。</li><li><b>レイアウトを設定。</b>見開きなら「A＝見開き（左右分割）」「B＝見開き（左右分割）」、綴じは「左綴じ（左→右）／右綴じ（右→左）」。「ノンブル自動／自動判別」でA・Bのページ対応を取ります。</li><li><b>表示モードで見る。</b>並べて／スワイプ／赤青重ね／透過／差分 を切り替えて確認します（下表）。</li><li><b>感度を調整。</b>「標準（画像のみ）」と「高感度（塗り・文字色も）」を切り替え、ノイズ除去・エッジ許容・差分線の太さ（0px〜2px）で拾い方を調整します。</li><li><b>全ページを走査。</b>「全ページを走査」で集計（差分あり ○/総ページ）。「差分のあるページのみ」で絞り込み、矢印やページ送りで移動します（「次へ」でも走査が進みます）。</li><li><b>結果を残す。</b>「PDF書き出し」で差分結果を出力。検出の当たり外れは「フィードバックを送信」（正しい／誤検知／見逃し＋自由コメント）から報告できます。</li></ol><h2>表示モードの使い分け</h2><div class="cards"><div class="c"><div class="t">並べて</div><div class="d">AとBを左右に並べて目視比較。文字組みや体裁の違いに。</div></div><div class="c"><div class="t">スワイプ</div><div class="d">境界線を左右に動かしてAとBを切り替え表示。重なり位置の確認に。</div></div><div class="c"><div class="t">赤青重ね</div><div class="d">Aを赤・Bを青で重ね、ズレを色で把握。版ずれ・移動の検出に。</div></div><div class="c"><div class="t">透過</div><div class="d">Bを半透明で重ねる。Bオフセットでの微調整時に便利。</div></div><div class="c"><div class="t">差分</div><div class="d">変化した画素だけを強調表示。「どこが変わったか」を一目で把握。</div></div></div><h2>差分の種別</h2><p class='lead'>検出された差分は次のように分類されます。種別で絞り込むと、見たい変化だけを追えます。</p><div class="cards"><div class="c"><div class="t">文字／内容変更</div><div class="d">テキストや図版の内容が変わった箇所。</div></div><div class="c"><div class="t">位置変更（移動）</div><div class="d">同じ要素が動いた箇所。</div></div><div class="c"><div class="t">色変更（色味・補正）</div><div class="d">色や濃度の変化。</div></div><div class="c"><div class="t">太さ変更（ウエイト）</div><div class="d">線・文字の太さの変化。</div></div><div class="c"><div class="t">サイズ差</div><div class="d">要素の拡大・縮小。</div></div><div class="c"><div class="t">追加／削除</div><div class="d">片方だけに増えた（追加）／消えた（削除）要素。</div></div><div class="c"><div class="t">片側のみの領域</div><div class="d">A・Bでアートボード（範囲）が違う部分。</div></div></div><div class='note'><b>位置合わせのコツ：</b>「起点」と「範囲」をA・Bでそろえるのが最重要です。トンボの有無が違うデータ同士なら、起点を<b>「仕上がり左上（トンボ無視）」</b>にすると安定します。それでも全体がずれるときは「Bオフセット」を mm 単位で微調整してください。</div><h2>うまくいかないとき</h2><dl class="faq"><dt>全面が差分になる</dt><dd>A・BのDPI・起点・範囲がそろっているか確認してください。判型やトリミングが違うと全面差分になります。</dd><dt>細かいノイズだらけになる</dt><dd>「ノイズ除去」を上げる、感度を「標準（画像のみ）」にする、差分線の太さを 1px にする、で落ち着きます。</dd><dt>ページがずれて対応する</dt><dd>綴じ方向・見開き設定・「ノンブル自動」を見直してください。片側にしか無いページは「Aにこのページ無し」等で示されます。</dd><dt>動作が重い／時間がかかる</dt><dd>DPIを下げてください（ページ数が多いと走査に時間がかかります）。</dd></dl>
-  <div class="foot">検版ハブ｜下版差分チェッカー 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。</div>
+  <div class="foot">検版ハブ｜下版差分チェッカー 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。 ｜ © FUJIWARA PRINTING.inc</div>
 </div>
 <script>
 (function(){

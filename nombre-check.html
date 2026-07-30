@@ -61,6 +61,7 @@
   .icobtn{display:inline-flex;align-items:center;gap:6px}
 
   main{flex:1;display:grid;grid-template-columns:210px 1fr 374px;min-height:0}
+  .kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
   .col{min-height:0;overflow:auto}
   .pagelist{border-right:1px solid var(--line);padding:8px;background:var(--panel)}
   .viewer{display:flex;flex-direction:column;padding:0;min-height:0}
@@ -286,7 +287,6 @@
     color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
     border-radius:6px;padding:1px 7px;line-height:1.5;transition:.12s;white-space:nowrap}
   .findings .issfb:hover{color:var(--red);border-color:var(--red);background:color-mix(in srgb,var(--red) 12%,var(--panel))}
-.kp-copyright{font-size:11.5px;color:inherit;opacity:.68;margin-left:12px;white-space:nowrap;user-select:none}
 </style>
 </head>
 <body>
@@ -325,7 +325,6 @@
       <span>フィードバック</span>
     </button>
   </div>
-<span class="kp-copyright">© FUJIWARA PRINTING.inc</span>
 </header>
 
 <div class="ocrbar" id="ocrbar" style="display:none">
@@ -417,6 +416,7 @@
     </div>
   </div>
 </main>
+<div class="kp-strip">© FUJIWARA PRINTING.inc</div>
 </div>
 
 <div class="progress" id="progress">解析中 …</div>
