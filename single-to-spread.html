@@ -121,9 +121,13 @@ input[type=file]{display:none}
 
 .foot{padding:8px 16px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;background:var(--panel)}
 .hidden{display:none!important}
+.kp-copyright{position:fixed;right:10px;bottom:6px;font-size:10px;opacity:.4;letter-spacing:.02em;color:var(--ink-faint);pointer-events:none;z-index:999}
+@media print{.kp-copyright{display:none}}
 </style>
 </head>
 <body>
+<div class="kp-copyright">© FUJIWARA PRINTING.inc</div>
+
 <div class="app">
   <header>
     <div class="brand">

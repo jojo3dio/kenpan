@@ -88,9 +88,13 @@ ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
 ul.plain li{margin:5px 0}
 .foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
   font-size:12px;color:var(--ink-faint)}
+.kp-copyright{position:fixed;right:10px;bottom:6px;font-size:10px;opacity:.4;letter-spacing:.02em;color:var(--ink-faint);pointer-events:none;z-index:999}
+@media print{.kp-copyright{display:none}}
 </style>
 </head>
 <body>
+<div class="kp-copyright">© FUJIWARA PRINTING.inc</div>
+
 <div class="top">
   <a class="back" href="index.html">← ハブに戻る</a>
   <span class="nm">PDFしおり追加</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
