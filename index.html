@@ -189,6 +189,16 @@ body.editing .iconbtn .del{display:flex}
 .iconrow button svg{width:23px;height:23px}
 .iconrow button.sel{border-color:currentColor;background:color-mix(in srgb, currentColor 12%, var(--panel))}
 
+/* アプリ化ヘルプ（ブラウザ別手順） */
+.modal.ihelp{max-width:520px}
+.ihelp .browser{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:11px;background:var(--panel2)}
+.ihelp .browser.detected{border-color:var(--amber);background:var(--amber-bg)}
+.ihelp .browser .bh{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;margin-bottom:7px}
+.ihelp .browser .badge{font-family:var(--mono);font-size:10px;color:#1a1205;background:var(--amber);
+  border-radius:5px;padding:2px 6px;font-weight:700;letter-spacing:.02em}
+.ihelp .browser ol{margin:0;padding-left:1.25em;font-size:13px;line-height:1.75;color:var(--ink)}
+.ihelp .browser .btail{font-size:12px;color:var(--ink-dim);line-height:1.6;margin-top:6px}
+
 @media(max-width:860px){
   .app{grid-template-columns:1fr;gap:20px}
   .detail{position:static}
@@ -232,6 +242,12 @@ body.compact #rowBtn{display:inline-flex}
 body.compact.row #rowBtn .show-grid{display:none}
 body.compact.row #rowBtn .show-row{display:inline-flex}
 #reloadBtn .ric{font-size:14px}
+#installBtn{display:inline-flex;align-items:center;gap:6px}
+#installBtn .iic{display:inline-flex}
+#installBtn.attn{animation:iattn 1.6s ease-in-out 2}
+@keyframes iattn{0%,100%{box-shadow:0 0 0 0 transparent}
+  50%{box-shadow:0 0 0 4px color-mix(in srgb, var(--amber) 35%, transparent)}}
+@media (prefers-reduced-motion: reduce){ #installBtn.attn{animation:none} }
 
 /* ============================================================
    コンパクト表示（デスクトップの片隅に置く小窓ランチャー用）
@@ -243,6 +259,7 @@ body.compact .brand .tag{display:none}
 body.compact .brand .wm{font-size:15px;letter-spacing:.14em}
 body.compact .mark{width:22px;height:19px}
 body.compact #editBtn{display:none}
+body.compact #installBtn{display:none}    /* アプリ化は設定用のため常用バーでは隠す */
 body.compact .tbtn{padding:6px 9px;font-size:12px}
 body.compact #reloadBtn .rtext{display:none}   /* 更新はアイコンのみ */
 body.compact #compactBtn .t{display:none}       /* 切替もアイコンのみ */
@@ -284,6 +301,9 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
     <div class="wmwrap"><span class="wm">KEN<i>PAN</i></span><span class="tag">検版ハブ · 点検・編集</span></div>
   </div>
   <div class="sp"></div>
+  <button class="tbtn" id="installBtn" title="このハブをアプリとしてインストールする方法">
+    <span class="iic" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11M8 11l4 4 4-4M5 20h14"/></svg></span>
+    <span class="itext">アプリ化</span></button>
   <button class="tbtn" id="reloadBtn" title="ハブを最新版に更新（キャッシュを無視して再読み込み）">
     <span class="ric" aria-hidden="true">⟳</span> <span class="rtext">更新</span></button>
   <button class="tbtn mbtn" id="compactBtn" title="コンパクト表示／通常表示を切り替え">
@@ -325,6 +345,16 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
       <button id="manClose">閉じる</button>
     </div>
     <iframe id="manFrame" title="操作マニュアル"></iframe>
+  </div>
+</div>
+
+<div class="modal-bg" id="installWrap">
+  <div class="modal ihelp">
+    <h2>KENPAN をアプリとして使う</h2>
+    <p class="hint">ブラウザに「インストール」すると、Dock やタスクバーのアイコンから、アドレスバーの無い独立ウィンドウで開けます。中身はこのページのままなので、更新は自動で反映されます。</p>
+    <div id="browserList"></div>
+    <p class="hint" style="margin:2px 0 0">インストール後は、Dock／タスクバー／スタートメニューのアイコンから直接開けます。ツールを追加・改訂したら、ハブの「更新」ボタンか開き直しで反映されます。</p>
+    <div class="modal-actions"><button class="tbtn primary" id="installClose">閉じる</button></div>
   </div>
 </div>
 
@@ -466,6 +496,57 @@ $('#rowBtn').onclick=()=>{
   applyCompact(); resizeForState();
 };
 applyCompact();
+
+/* ── アプリ化ヘルプ（ブラウザ別手順・お使いのブラウザを自動判定） ── */
+const BROWSERS=[
+  {key:'safari', name:'Safari（Mac）',
+   steps:['メニューバーの「ファイル」→「Dock に追加」を選ぶ','名前を確認して「追加」を押す'],
+   tail:'Dock と Launchpad にアイコンが追加され、独立ウィンドウで開きます。'},
+  {key:'chrome', name:'Chrome（Windows / Mac）',
+   steps:['アドレスバー右端のインストールアイコン（モニターに下矢印／⊕）をクリック。無ければ右上「⋮」→「保存して共有」→「このページをアプリとしてインストール」','「インストール」を押す'],
+   tail:'Windows はスタート／タスクバー、Mac は Launchpad／アプリに追加されます。'},
+  {key:'edge', name:'Edge（Windows）',
+   steps:['アドレスバー右端のアプリインストールアイコン、または右上「…」→「アプリ」→「このサイトをアプリとしてインストール」','「インストール」を押す'],
+   tail:'スタート／タスクバーに追加されます。'}
+];
+function detectBrowser(){
+  const ua=navigator.userAgent;
+  if(/Edg\//.test(ua)) return 'edge';
+  if(/OPR\//.test(ua)) return null;
+  if(/Chrome\//.test(ua)) return 'chrome';
+  if(/Safari\//.test(ua) && !/Chrome\//.test(ua)) return 'safari';
+  return null;
+}
+function buildInstallHelp(){
+  const det=detectBrowser();
+  const ordered=BROWSERS.slice().sort((a,b)=>(b.key===det)-(a.key===det));
+  $('#browserList').innerHTML=ordered.map(bw=>{
+    const d=bw.key===det;
+    return `<div class="browser${d?' detected':''}">
+      <div class="bh">${esc(bw.name)}${d?'<span class="badge">お使いのブラウザ</span>':''}</div>
+      <ol>${bw.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+      <div class="btail">${esc(bw.tail)}</div>
+    </div>`;
+  }).join('');
+}
+function openInstall(){
+  buildInstallHelp(); $('#installWrap').classList.add('show');
+  const b=$('#installBtn'); if(b) b.classList.remove('attn');
+  try{ localStorage.setItem('kenpan-hub-install-seen','1'); }catch(e){}
+}
+function closeInstall(){ $('#installWrap').classList.remove('show'); }
+if($('#installBtn')) $('#installBtn').onclick=openInstall;
+$('#installClose').onclick=closeInstall;
+$('#installWrap').addEventListener('click',e=>{ if(e.target===$('#installWrap')) closeInstall(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#installWrap').classList.contains('show')) closeInstall(); });
+/* すでにアプリとして開いているならボタンは不要。初回のみ軽く注意喚起 */
+(function(){
+  const inst=$('#installBtn'); if(!inst) return;
+  const standalone=(window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone===true;
+  if(standalone){ inst.style.display='none'; return; }
+  let seen=false; try{ seen=localStorage.getItem('kenpan-hub-install-seen')==='1'; }catch(e){}
+  if(!seen) inst.classList.add('attn');
+})();
 
 function renderDetail(){
   const t=tools.find(x=>x.url===shownUrl);
