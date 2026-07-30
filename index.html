@@ -260,14 +260,13 @@ body.compact .zone-divider{margin:13px 0 11px}
 body.compact .foot{display:none}
 body.compact .addcell{display:none}            /* 「追加」タイルは隠す */
 
-/* ── 横一列モード（コンパクト時のみ・アイコンのみ／名前はホバーtitleで表示） ──
-   点検ゾーンと編集ゾーンを横に並べ、縦罫線で仕切って1本の横バーにする */
-body.compact.row .app{padding:8px 12px}
-body.compact.row .right{display:flex;flex-direction:row;align-items:center;
+/* ── 横一列モード（コンパクト時のみ・アイコン＋名前を横に並べ、縦罫線でゾーンを仕切る） ── */
+body.compact.row .app{padding:10px 12px 12px}
+body.compact.row .right{display:flex;flex-direction:row;align-items:flex-start;
   justify-content:center;gap:12px;flex-wrap:nowrap;overflow-x:auto}
-body.compact.row .tiles{display:flex;flex-direction:row;flex-wrap:nowrap;gap:12px;grid-template-columns:none}
-body.compact.row .zone-divider{width:1px;height:40px;margin:0 2px;flex:0 0 auto}  /* 横バーでは縦罫線に */
-body.compact.row .cap{display:none}            /* 名前はアイコンのホバーで表示 */
+body.compact.row .tiles{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;grid-template-columns:none}
+body.compact.row .zone-divider{width:1px;height:46px;margin:0 2px;flex:0 0 auto}  /* 横バーでは縦罫線に（アイコン高に合わせる） */
+body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.3;margin-top:1px}
 </style>
 </head>
 <body>
@@ -451,7 +450,7 @@ else if(mqCompact.addListener) mqCompact.addListener(applyCompact);
 function resizeForState(){
   try{
     if(!isCompact()) window.resizeTo(1180,840);
-    else if(userRow)  window.resizeTo(560,150);   // 横一列：横長・短尺のバー
+    else if(userRow)  window.resizeTo(680,210);   // 横一列：横長・低めのバー（名前入り）
     else              window.resizeTo(300,480);   // グリッド：小窓
   }catch(e){}
 }
