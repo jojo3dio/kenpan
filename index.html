@@ -261,9 +261,10 @@ body.compact .foot{display:none}
 body.compact .addcell{display:none}            /* 「追加」タイルは隠す */
 
 /* ── 横一列モード（コンパクト時のみ・アイコン＋名前を横に並べ、縦罫線でゾーンを仕切る） ── */
-body.compact.row .app{padding:10px 12px 12px}
+body.compact.row .app{padding:4px 12px 10px}
 body.compact.row .right{display:flex;flex-direction:row;align-items:flex-start;
-  justify-content:center;gap:12px;flex-wrap:nowrap;overflow-x:auto}
+  justify-content:center;gap:12px;flex-wrap:nowrap;overflow-x:auto;
+  padding-top:7px}                              /* ホバーで浮くアイコンが上端で切れないよう余白 */
 body.compact.row .tiles{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;grid-template-columns:none}
 body.compact.row .zone-divider{width:1px;height:46px;margin:0 2px;flex:0 0 auto}  /* 横バーでは縦罫線に（アイコン高に合わせる） */
 body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.3;margin-top:1px}
