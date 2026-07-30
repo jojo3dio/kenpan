@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KENPAN — 検版ハブ</title>
+<!-- PWA（Windows: Edge/Chrome「アプリとしてインストール」／Mac: Safari「Dockに追加」対応） -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#b9791a">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="application-name" content="KENPAN">
+<meta name="apple-mobile-web-app-title" content="KENPAN">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -41,6 +51,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
 .tbtn:hover{border-color:var(--amber);background:var(--amber-bg)}
 .tbtn.primary{border-color:var(--amber);background:var(--amber);color:#1a1205;font-weight:700}
 .tbtn.primary:hover{filter:brightness(1.05)}
+#reloadBtn .ric{display:inline-block;font-size:14px;line-height:1;transform:translateY(1px)}
+#reloadBtn[disabled]{opacity:.7;cursor:default}
+#reloadBtn.spinning .ric{animation:ricspin .7s linear infinite}
+@keyframes ricspin{to{transform:translateY(1px) rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){ #reloadBtn.spinning .ric{animation:none} }
 
 /* 2カラム本体 */
 .app{max-width:1180px;margin:0 auto;padding:28px;
@@ -218,6 +233,8 @@ body.editing .iconbtn .del{display:flex}
     <div class="wmwrap"><span class="wm">KEN<i>PAN</i></span><span class="tag">検版ハブ · 点検・編集</span></div>
   </div>
   <div class="sp"></div>
+  <button class="tbtn" id="reloadBtn" title="ハブを最新版に更新（キャッシュを無視して再読み込み）">
+    <span class="ric" aria-hidden="true">⟳</span> 更新</button>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
 </div>
@@ -341,7 +358,17 @@ function load(){
 }
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(tools)); }catch(e){} }
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function openUrl(u){ if(u) window.open(u,'_blank','noopener'); }
+/* 「開く」たびに最新版を取得するためのキャッシュ回避クエリ（mailto:等の別スキームは対象外）。#ハッシュは末尾に温存する */
+function bust(u){
+  if(!u) return u;
+  try{
+    if(/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^https?:/i.test(u)) return u; // http(s)以外の別スキームは触らない
+    const h=u.indexOf('#'); const hash=h>=0?u.slice(h):''; let base=h>=0?u.slice(0,h):u;
+    base += (base.includes('?')?'&':'?') + '_v=' + Date.now();
+    return base + hash;
+  }catch(e){ return u; }
+}
+function openUrl(u){ if(u) window.open(bust(u),'_blank','noopener'); }
 
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{localStorage.setItem(THEME,t);}catch(e){} }
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
@@ -458,6 +485,18 @@ GROUPS.forEach(group=>{ $('#tiles-'+group).addEventListener('mouseleave',()=>cle
 $('#detail').addEventListener('mouseenter',()=>{ frozen=true; clearTimeout(hoverTimer); });
 $('#detail').addEventListener('mouseleave',()=>{ frozen=false; });
 
+/* 更新ボタン：キャッシュを無視してハブ自身を再取得（GitHub Pages の静的ファイル向け） */
+$('#reloadBtn').onclick=()=>{
+  const b=$('#reloadBtn'); if(b.disabled) return;
+  b.disabled=true; b.classList.add('spinning');
+  const u=new URL(location.href); u.searchParams.set('_r', Date.now());
+  location.replace(u.href);
+};
+/* 更新で付いた _r クエリは、読み込み後にアドレスバーから静かに取り除く（再読込は起こさない） */
+(function(){ const u=new URL(location.href);
+  if(u.searchParams.has('_r')){ u.searchParams.delete('_r');
+    history.replaceState(null,'', u.pathname + (u.search||'') + (u.hash||'')); } })();
+
 $('#editBtn').onclick=()=>{ document.body.classList.toggle('editing');
   $('#editBtn').textContent=document.body.classList.contains('editing')?'完了':'並べ替え・削除'; };
 
@@ -494,7 +533,7 @@ let manUrl='';
 function openManualPanel(url,name){
   manUrl=url;
   $('#manTitle').textContent=(name?name+' ':'')+'操作マニュアル';
-  $('#manFrame').src=url;
+  $('#manFrame').src=bust(url);
   $('#manWrap').classList.add('show');
 }
 function closeManual(){ $('#manWrap').classList.remove('show'); $('#manFrame').src='about:blank'; }
@@ -503,7 +542,7 @@ $('#manWrap').addEventListener('click',e=>{ if(e.target===$('#manWrap')) closeMa
 $('#manPop').onclick=()=>{
   const w=Math.min(700,(screen.availWidth||900)), h=Math.min(800,(screen.availHeight||820));
   const l=Math.max(0,((screen.availWidth||w)-w)/2), tp=Math.max(0,((screen.availHeight||h)-h)/2);
-  window.open(manUrl,'_blank','noopener,width='+w+',height='+h+',left='+l+',top='+tp);
+  window.open(bust(manUrl),'_blank','noopener,width='+w+',height='+h+',left='+l+',top='+tp);
   closeManual();
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#manWrap').classList.contains('show')) closeManual(); });
