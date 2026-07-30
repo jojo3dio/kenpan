@@ -81,6 +81,7 @@ input[type=file]{display:none}
 .pnum{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
 .ptag{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:999px;margin-top:3px;margin-right:4px}
 .ptag.nombre{background:var(--ok-bg);color:var(--ok)}
+.ptag.infer{background:var(--ok-bg);color:var(--ok);border:1px dashed var(--ok)}
 .ptag.hashira{background:var(--acc-bg);color:var(--acc)}
 .ptag.manual{background:var(--warn-bg);color:var(--warn)}
 .ptag.guess{background:var(--panel2);color:var(--ink-dim);border:1px dashed var(--line)}
@@ -194,7 +195,7 @@ input[type=file]{display:none}
     </div>
   </div>
 
-  <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：ノンブル(奇数/偶数)を優先→読めない場合は柱の位置を近傍の見開きページと照合。どちらも判定不可の場合は手動選択が必要です。</div>
+  <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：①そのページ自身のノンブル(奇数/偶数)→②書籍内の別ページのノンブルからの逆算(ファイル境目で単ページが連続する場合も対応)→③柱の位置を近傍の見開きページと照合→④手動選択、の順で判定します。</div>
 </div>
 
 <script>
@@ -203,6 +204,7 @@ const {PDFDocument}=PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 let origBytes=null, pdfDoc=null, pages=[], spreadW=0, spreadH=0, selected=-1;
+let nombreAnchors=[]; // 書籍全体で読み取れたノンブルの{ord,val,pageNum}一覧（ord=物理ページ通し番号）
 let zoom=1, baseCssW=0, baseCssH=0, fitScale=1;
 const ZMIN=0.3, ZMAX=6;
 let bindingMode='right'; // 右綴じ(既定): 奇数=左, 偶数=右 ／ 左綴じ: 奇数=右, 偶数=左
@@ -219,6 +221,10 @@ function setBinding(mode){
   pages.filter(p=>p.isSingle && p.method==='nombre').forEach(p=>{
     p.side=sideForParity(p.nombreParity, bindingMode);
     p.detail=`ノンブル ${p.nombreVal}（${p.nombreParity==='odd'?'奇数':'偶数'}）・${bindLabel(bindingMode)}前提`;
+  });
+  pages.filter(p=>p.isSingle && p.method==='infer').forEach(p=>{
+    p.side=sideForParity(p.inferParity, bindingMode);
+    p.detail=`このページ自体にノンブルは無いが、p.${p.inferAnchorPage}のノンブルから逆算し ${p.inferVal}（${p.inferParity==='odd'?'奇数':'偶数'}）と推定・${bindLabel(bindingMode)}前提`;
   });
   const lastNum = pages.length ? pages[pages.length-1].num : null;
   pages.filter(p=>p.isSingle && p.method==='guess').forEach(p=>{
@@ -286,24 +292,67 @@ function toHalfWidthDigits(s){
 }
 function normText(s){ return (s||"").replace(/\s+/g,"").replace(/[0-9\uFF10-\uFF19]/g,""); }
 
+const itemsCache={};
 async function getItems(num){
+  if(itemsCache[num]) return itemsCache[num];
   const page=await pdfDoc.getPage(num);
   const tc=await page.getTextContent();
-  return {page, items:tc.items};
+  const result={page, items:tc.items};
+  itemsCache[num]=result;
+  return result;
 }
 
 function findNombre(items, pageH, xMin, xMax){
-  const cutoff=pageH*0.22;
-  let best=null;
-  for(const it of items){
+  // ノンブルは頁下部に単独である場合だけでなく、この書籍のように柱と一緒に頁上部にある
+  // 場合もある。上部を優先して探し、無ければ下部を探す。
+  return findNombreInBand(items, pageH, xMin, xMax, true) || findNombreInBand(items, pageH, xMin, xMax, false);
+}
+// 同じ行・近い位置に「本文らしき」非数字テキストが隣接していないかを見る。
+// 頁下部でこれが真に孤立していない場合、脚注の参照番号（直後に脚注本文が続く）を
+// ノンブルと誤認している可能性が高いため除外する。頁上部は柱の直後にノンブルが
+// 別テキスト要素として来ることが普通にあるため、この判定は適用しない。
+function isIsolatedNumeral(band, it){
+  const y=it.transform[5], x0=it.transform[4], x1=x0+(it.width||0);
+  for(const other of band){
+    if(other===it) continue;
+    if(Math.abs(other.transform[5]-y) > 3) continue;
+    const ox0=other.transform[4], ox1=ox0+(other.width||0);
+    const gap = Math.max(ox0-x1, x0-ox1);
+    if(gap > 70) continue;
+    const t=other.str.trim();
+    if(!t) continue;
+    if(!/^[\d\uFF10-\uFF19\s\u3000]+$/.test(toHalfWidthDigits(t))) return false;
+  }
+  return true;
+}
+function findNombreInBand(items, pageH, xMin, xMax, top){
+  const cutoff = top ? pageH*0.82 : pageH*0.22;
+  const band=items.filter(it=>{
     const y=it.transform[5], x=it.transform[4];
-    if(y>cutoff) continue;
-    if(xMin!=null && x<xMin) continue;
-    if(xMax!=null && x>=xMax) continue;
+    if(top ? y<cutoff : y>cutoff) return false;
+    if(xMin!=null && x<xMin) return false;
+    if(xMax!=null && x>=xMax) return false;
+    return true;
+  });
+  let best=null;
+  // 柱とノンブルが同一テキスト要素内で連結されているケース（例:「タイトル　　3」）
+  for(const it of band){
+    const hw=toHalfWidthDigits(it.str);
+    const m=hw.match(/^(.*?)[ \u3000]+(\d{1,4})[ \u3000]*$/);
+    if(m && m[1].replace(/[\s\u3000]/g,'').length>=2){
+      const val=parseInt(m[2],10);
+      if(!best || it.transform[5]>best.y) best={y:it.transform[5], val};
+    }
+  }
+  if(best) return best;
+  // 独立した数字のみのテキスト要素（柱とノンブルが別要素になっている場合を含む）
+  for(const it of band){
     const t=toHalfWidthDigits(it.str).trim();
     if(!/^[\-–—.]?\d{1,4}[\-–—.]?$/.test(t)) continue;
+    if(!top && !isIsolatedNumeral(band, it)) continue;
     const digits=t.match(/\d+/); if(!digits) continue;
-    if(!best || y<best.y) best={y, val:parseInt(digits[0],10)};
+    const val=parseInt(digits[0],10);
+    if(!best || it.transform[5]>best.y) best={y:it.transform[5], val};
   }
   return best;
 }
@@ -326,7 +375,7 @@ function headerText(items, pageH, xMin, xMax){
 
 async function detectSide(p){
   const {items}=await getItems(p.num);
-  const nb=findNombre(items, p.h);
+  const nb=(p._selfNombre!==undefined) ? p._selfNombre : findNombre(items, p.h);
   if(nb){
     const parity = (nb.val%2===1) ? 'odd' : 'even';
     p.nombreVal=nb.val; p.nombreParity=parity;
@@ -334,6 +383,28 @@ async function detectSide(p){
     p.method='nombre'; p.detail=`ノンブル ${nb.val}（${parity==='odd'?'奇数':'偶数'}）・${bindLabel(bindingMode)}前提`;
     return;
   }
+
+  // このページ自身にノンブルが無い場合：書籍全体でどこか1箇所でもノンブルが読み取れていれば、
+  // 物理ページの通し番号(ord。見開き=2枚分・単ページ=1枚分で進む)の差分から値を逆算する。
+  // 表裏は物理的に必ず1ページごとに交互になるため、ファイルの綴じ目で単ページが2つ連続しても、
+  // 近傍の見開きページの柱に頼ることなく確実に左右を決められる。
+  if(nombreAnchors.length){
+    let best=null, bestDist=Infinity;
+    for(const a of nombreAnchors){
+      const d=Math.abs(a.ord - p.ordStart);
+      if(d<bestDist){ bestDist=d; best=a; }
+    }
+    if(best){
+      const inferredVal = best.val + (p.ordStart - best.ord);
+      const parity = (((inferredVal%2)+2)%2===1) ? 'odd' : 'even';
+      p.inferVal=inferredVal; p.inferParity=parity; p.inferAnchorPage=best.pageNum;
+      p.side = sideForParity(parity, bindingMode);
+      p.method='infer';
+      p.detail=`このページ自体にノンブルは無いが、p.${best.pageNum}のノンブル${best.val}から逆算し ${inferredVal}（${parity==='odd'?'奇数':'偶数'}）と推定・${bindLabel(bindingMode)}前提`;
+      return;
+    }
+  }
+
   const hdr=normText(headerText(items, p.h, null, null));
   if(hdr.length>=2){
     // 直近の見開きページがノンブル・柱とも無い(画像/アウトライン化ページ等)場合に備え、
@@ -365,21 +436,41 @@ async function detectSide(p){
     : `ノンブル・柱とも情報なし（章扉等の可能性が高く、${bindLabel(bindingMode)}前提で${p.side==='left'?'左':'右'}を初期値に設定・要確認）`;
 }
 
-/* 見開きページの左右半分それぞれでノンブルを検出し、奇数/偶数がどちら側に来ているかで
-   右綴じ／左綴じを自動判定する */
-async function autoDetectBinding(){
-  const spreads=pages.filter(p=>!p.isSingle);
-  for(const sp of spreads){
-    const {items}=await getItems(sp.num);
-    const leftNb=findNombre(items, sp.h, 0, spreadW/2);
-    const rightNb=findNombre(items, sp.h, spreadW/2, spreadW);
-    if(leftNb && rightNb && (leftNb.val%2) !== (rightNb.val%2)){
-      bindingMode = (leftNb.val%2===1) ? 'right' : 'left';
-      document.querySelectorAll('.bindbtn').forEach(b=>b.classList.toggle('on', b.dataset.bind===bindingMode));
-      return true;
+/* 書籍全体を1回走査し、
+   ①見開きページの左右半分それぞれでノンブルを検出して奇数/偶数の出方から綴じ方向を自動判定し、
+   ②見開き・単ページを問わず読み取れたノンブルすべてを「物理ページ通し番号(ord)→値」の
+     アンカーとして記録する。ord は見開き=2枚分・単ページ=1枚分で進む通し番号。
+   奇数(recto)は必ず偶数(verso)の直後の物理ページであるという製本上の原則により、
+   見開きの左右どちらのノンブルであっても、値の奇偶だけでそれが見開き内の手前側(ord)か
+   奥側(ord+1)かを綴じ方向に関わらず一意に決められる。 */
+async function scanNombres(){
+  nombreAnchors=[];
+  let ord=0, bindingDetected=false;
+  for(let i=0;i<pages.length;i++){
+    const p=pages[i];
+    banner(true,`ノンブルを解析中… (${i+1}/${pages.length})`, 38+(i/Math.max(1,pages.length))*22);
+    p.ordStart=ord;
+    if(p.isSingle){
+      const {items}=await getItems(p.num);
+      const nb=findNombre(items, p.h);
+      p._selfNombre=nb;
+      if(nb) nombreAnchors.push({ord, val:nb.val, pageNum:p.num});
+      ord+=1;
+    }else{
+      const {items}=await getItems(p.num);
+      const leftNb=findNombre(items, p.h, 0, spreadW/2);
+      const rightNb=findNombre(items, p.h, spreadW/2, spreadW);
+      if(!bindingDetected && leftNb && rightNb && (leftNb.val%2)!==(rightNb.val%2)){
+        bindingMode=(leftNb.val%2===1) ? 'right' : 'left';
+        document.querySelectorAll('.bindbtn').forEach(b=>b.classList.toggle('on', b.dataset.bind===bindingMode));
+        bindingDetected=true;
+      }
+      if(leftNb) nombreAnchors.push({ord:(leftNb.val%2===0)?ord:ord+1, val:leftNb.val, pageNum:p.num});
+      if(rightNb) nombreAnchors.push({ord:(rightNb.val%2===0)?ord:ord+1, val:rightNb.val, pageNum:p.num});
+      ord+=2;
     }
   }
-  return false;
+  nombreAnchors.sort((a,b)=>a.ord-b.ord);
 }
 
 async function analyze(){
@@ -404,17 +495,16 @@ async function analyze(){
   spreadW=maxW; spreadH=bestH;
   pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; });
 
-  banner(true,"綴じ方向を自動判定中…",38);
-  await autoDetectBinding();
+  await scanNombres();
 
   const singles=pages.filter(p=>p.isSingle);
   for(let i=0;i<singles.length;i++){
-    banner(true,`単ページを判定中… (${i+1}/${singles.length})`, 40+(i/Math.max(1,singles.length))*30);
+    banner(true,`単ページを判定中… (${i+1}/${singles.length})`, 60+(i/Math.max(1,singles.length))*20);
     await detectSide(singles[i]);
   }
   // サムネイル生成（全ページ）
   for(let i=0;i<pages.length;i++){
-    banner(true,`サムネイルを生成中… (${i+1}/${pages.length})`, 70+(i/Math.max(1,pages.length))*30);
+    banner(true,`サムネイルを生成中… (${i+1}/${pages.length})`, 80+(i/Math.max(1,pages.length))*20);
     await makeThumb(pages[i]);
   }
 }
@@ -452,8 +542,8 @@ function renderList(){
       el.appendChild(row);
       return;
     }
-    const tagClass=p.method==='nombre'?'nombre':(p.method==='hashira'?'hashira':(p.method==='guess'?'guess':'manual'));
-    const tagLabel=p.method==='nombre'?'ノンブル判定':(p.method==='hashira'?'柱で判定':(p.method==='guess'?'推定(要確認)':'要手動選択'));
+    const tagClass=p.method==='nombre'?'nombre':(p.method==='infer'?'infer':(p.method==='hashira'?'hashira':(p.method==='guess'?'guess':'manual')));
+    const tagLabel=p.method==='nombre'?'ノンブル判定':(p.method==='infer'?'ノンブル逆算':(p.method==='hashira'?'柱で判定':(p.method==='guess'?'推定(要確認)':'要手動選択')));
     row.innerHTML=`
       <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
       <div class="pinfo">
