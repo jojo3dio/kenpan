@@ -226,11 +226,11 @@ body.editing .iconbtn .del{display:flex}
 #compactBtn .show-comp{display:none}
 body.compact #compactBtn .show-full{display:none}
 body.compact #compactBtn .show-comp{display:inline-flex}
-#colBtn{display:none}
-body.compact #colBtn{display:inline-flex}
-#colBtn .show-col{display:none}
-body.compact.col #colBtn .show-grid{display:none}
-body.compact.col #colBtn .show-col{display:inline-flex}
+#rowBtn{display:none}
+body.compact #rowBtn{display:inline-flex}
+#rowBtn .show-row{display:none}
+body.compact.row #rowBtn .show-grid{display:none}
+body.compact.row #rowBtn .show-row{display:inline-flex}
 #reloadBtn .ric{font-size:14px}
 
 /* ============================================================
@@ -246,7 +246,7 @@ body.compact #editBtn{display:none}
 body.compact .tbtn{padding:6px 9px;font-size:12px}
 body.compact #reloadBtn .rtext{display:none}   /* 更新はアイコンのみ */
 body.compact #compactBtn .t{display:none}       /* 切替もアイコンのみ */
-body.compact #colBtn .t{display:none}           /* 切替もアイコンのみ */
+body.compact #rowBtn .t{display:none}           /* 切替もアイコンのみ */
 
 body.compact .app{display:block;max-width:none;margin:0;padding:12px 12px 14px}
 body.compact .detail{display:none}
@@ -260,12 +260,14 @@ body.compact .zone-divider{margin:13px 0 11px}
 body.compact .foot{display:none}
 body.compact .addcell{display:none}            /* 「追加」タイルは隠す */
 
-/* ── 縦一列モード（コンパクト時のみ・アイコンのみ／名前はホバーtitleで表示） ── */
-body.compact.col .top{gap:6px}
-body.compact.col .brand .wm{display:none}      /* 細い窓ではマークのみ */
-body.compact.col .app{padding:10px 6px 12px}
-body.compact.col .tiles{grid-template-columns:1fr;gap:10px;justify-items:center}
-body.compact.col .cap{display:none}            /* 名前はアイコンのホバーで表示 */
+/* ── 横一列モード（コンパクト時のみ・アイコンのみ／名前はホバーtitleで表示） ──
+   点検ゾーンと編集ゾーンを横に並べ、縦罫線で仕切って1本の横バーにする */
+body.compact.row .app{padding:8px 12px}
+body.compact.row .right{display:flex;flex-direction:row;align-items:center;
+  justify-content:center;gap:12px;flex-wrap:nowrap;overflow-x:auto}
+body.compact.row .tiles{display:flex;flex-direction:row;flex-wrap:nowrap;gap:12px;grid-template-columns:none}
+body.compact.row .zone-divider{width:1px;height:40px;margin:0 2px;flex:0 0 auto}  /* 横バーでは縦罫線に */
+body.compact.row .cap{display:none}            /* 名前はアイコンのホバーで表示 */
 </style>
 </head>
 <body>
@@ -288,9 +290,9 @@ body.compact.col .cap{display:none}            /* 名前はアイコンのホバ
     <span class="lbl show-full"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></span><span class="t">コンパクト</span></span>
     <span class="lbl show-comp"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span><span class="t">通常表示</span></span>
   </button>
-  <button class="tbtn mbtn" id="colBtn" title="グリッド／縦一列を切り替え">
-    <span class="lbl show-grid"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="3" width="8" height="5" rx="1"/><rect x="8" y="10" width="8" height="5" rx="1"/><rect x="8" y="17" width="8" height="5" rx="1"/></svg></span><span class="t">縦一列</span></span>
-    <span class="lbl show-col"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span><span class="t">グリッド</span></span>
+  <button class="tbtn mbtn" id="rowBtn" title="グリッド／横一列を切り替え">
+    <span class="lbl show-grid"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="5" height="10" rx="1"/><rect x="10" y="7" width="4" height="10" rx="1"/><rect x="16" y="7" width="5" height="10" rx="1"/></svg></span><span class="t">横一列</span></span>
+    <span class="lbl show-row"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span><span class="t">グリッド</span></span>
   </button>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
@@ -431,17 +433,17 @@ function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); 
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
 $('#themeBtn').onclick=()=>{ const d=document.documentElement.getAttribute('data-theme')==='dark'; applyTheme(d?'light':'dark'); };
 
-/* コンパクト表示：手動トグル（記憶する）＋狭い小窓では自動適用。縦一列はコンパクト時のみ有効 */
-const COMPACT='kenpan-hub-compact', COL='kenpan-hub-col';
+/* コンパクト表示：手動トグル（記憶する）＋狭い小窓では自動適用。横一列はコンパクト時のみ有効 */
+const COMPACT='kenpan-hub-compact', ROW='kenpan-hub-row';
 const mqCompact=window.matchMedia('(max-width:480px)');
-let userCompact=false, userCol=false;
+let userCompact=false, userRow=false;
 try{ userCompact=localStorage.getItem(COMPACT)==='1'; }catch(e){}
-try{ userCol=localStorage.getItem(COL)==='1'; }catch(e){}
+try{ userRow=localStorage.getItem(ROW)==='1'; }catch(e){}
 function isCompact(){ return userCompact || mqCompact.matches; }
 function applyCompact(){
   const c=isCompact();
   document.body.classList.toggle('compact', c);
-  document.body.classList.toggle('col', c && userCol);
+  document.body.classList.toggle('row', c && userRow);
 }
 if(mqCompact.addEventListener) mqCompact.addEventListener('change', applyCompact);
 else if(mqCompact.addListener) mqCompact.addListener(applyCompact);
@@ -449,7 +451,7 @@ else if(mqCompact.addListener) mqCompact.addListener(applyCompact);
 function resizeForState(){
   try{
     if(!isCompact()) window.resizeTo(1180,840);
-    else if(userCol)  window.resizeTo(120,560);   // 縦一列：細長い
+    else if(userRow)  window.resizeTo(560,150);   // 横一列：横長・短尺のバー
     else              window.resizeTo(300,480);   // グリッド：小窓
   }catch(e){}
 }
@@ -458,9 +460,9 @@ $('#compactBtn').onclick=()=>{
   try{ localStorage.setItem(COMPACT, userCompact?'1':'0'); }catch(e){}
   applyCompact(); resizeForState();
 };
-$('#colBtn').onclick=()=>{
-  userCol=!userCol;
-  try{ localStorage.setItem(COL, userCol?'1':'0'); }catch(e){}
+$('#rowBtn').onclick=()=>{
+  userRow=!userRow;
+  try{ localStorage.setItem(ROW, userRow?'1':'0'); }catch(e){}
   applyCompact(); resizeForState();
 };
 applyCompact();
