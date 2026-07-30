@@ -217,6 +217,42 @@ body.editing .iconbtn .del{display:flex}
 .detail.rev .dicon, [data-theme="dark"] .detail.rev .dicon{
   background:var(--accent); border-color:var(--accent); color:#fff;
 }
+
+/* コンパクト切替ボタンの2状態アイコン／ラベル */
+#compactBtn{display:inline-flex;align-items:center}
+#compactBtn .lbl{display:inline-flex;align-items:center;gap:5px}
+#compactBtn .cmi{display:inline-flex}
+#compactBtn .cmi svg{width:14px;height:14px}
+#compactBtn .show-comp{display:none}
+body.compact #compactBtn .show-full{display:none}
+body.compact #compactBtn .show-comp{display:inline-flex}
+#reloadBtn .ric{font-size:14px}
+
+/* ============================================================
+   コンパクト表示（デスクトップの片隅に置く小窓ランチャー用）
+   ・詳細パネル／説明文／見出し／フッタを畳み、アイコン＋名前だけの密なグリッドに
+   ・body.compact（手動トグル）または狭い小窓（幅≤480px）で自動的に適用
+   ============================================================ */
+body.compact .top{padding:8px 12px;gap:8px;flex-wrap:wrap}
+body.compact .brand .tag{display:none}
+body.compact .brand .wm{font-size:15px;letter-spacing:.14em}
+body.compact .mark{width:22px;height:19px}
+body.compact #editBtn{display:none}
+body.compact .tbtn{padding:6px 9px;font-size:12px}
+body.compact #reloadBtn .rtext{display:none}   /* 更新はアイコンのみ */
+body.compact #compactBtn .t{display:none}       /* 切替もアイコンのみ */
+
+body.compact .app{display:block;max-width:none;margin:0;padding:12px 12px 14px}
+body.compact .detail{display:none}
+body.compact .right h1,
+body.compact .right .sub{display:none}
+body.compact .tiles{grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:12px 8px}
+body.compact .iconbtn{width:46px;height:46px;border-radius:12px}
+body.compact .iconbtn svg{width:20px;height:20px}
+body.compact .cap{font-size:10.5px;max-width:62px;line-height:1.25}
+body.compact .zone-divider{margin:13px 0 11px}
+body.compact .foot{display:none}
+body.compact .addcell{display:none}            /* 「追加」タイルは隠す */
 </style>
 </head>
 <body>
@@ -234,7 +270,11 @@ body.editing .iconbtn .del{display:flex}
   </div>
   <div class="sp"></div>
   <button class="tbtn" id="reloadBtn" title="ハブを最新版に更新（キャッシュを無視して再読み込み）">
-    <span class="ric" aria-hidden="true">⟳</span> 更新</button>
+    <span class="ric" aria-hidden="true">⟳</span> <span class="rtext">更新</span></button>
+  <button class="tbtn" id="compactBtn" title="コンパクト表示／通常表示を切り替え">
+    <span class="lbl show-full"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></span><span class="t">コンパクト</span></span>
+    <span class="lbl show-comp"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span><span class="t">通常表示</span></span>
+  </button>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
 </div>
@@ -374,6 +414,22 @@ function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); 
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
 $('#themeBtn').onclick=()=>{ const d=document.documentElement.getAttribute('data-theme')==='dark'; applyTheme(d?'light':'dark'); };
 
+/* コンパクト表示：手動トグル（記憶する）＋狭い小窓では自動適用 */
+const COMPACT='kenpan-hub-compact';
+const mqCompact=window.matchMedia('(max-width:480px)');
+let userCompact=false; try{ userCompact=localStorage.getItem(COMPACT)==='1'; }catch(e){}
+function applyCompact(){ document.body.classList.toggle('compact', userCompact || mqCompact.matches); }
+if(mqCompact.addEventListener) mqCompact.addEventListener('change', applyCompact);
+else if(mqCompact.addListener) mqCompact.addListener(applyCompact);
+$('#compactBtn').onclick=()=>{
+  userCompact=!userCompact;
+  try{ localStorage.setItem(COMPACT, userCompact?'1':'0'); }catch(e){}
+  applyCompact();
+  /* インストール済みアプリ窓では自分のサイズを変えられる（不可の環境では無視される） */
+  try{ if(userCompact) window.resizeTo(300,480); else window.resizeTo(1180,840); }catch(e){}
+};
+applyCompact();
+
 function renderDetail(){
   const t=tools.find(x=>x.url===shownUrl);
   const d=$('#detail');
@@ -450,7 +506,7 @@ function renderTiles(group){
     const cap=document.createElement('span'); cap.className='cap'; cap.innerHTML=capHtml(t.name);
     cell.appendChild(b); cell.appendChild(cap); g.appendChild(cell);
   });
-  const acell=document.createElement('div'); acell.className='cell';
+  const acell=document.createElement('div'); acell.className='cell addcell';
   const add=document.createElement('button'); add.className='iconbtn add'; add.type='button'; add.title='ツールを追加';
   add.innerHTML=`<span class="plus">＋</span>`;
   add.addEventListener('click',()=>openModal(group));
