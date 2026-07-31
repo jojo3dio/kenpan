@@ -102,6 +102,12 @@
     border-color:var(--shu); color:#fff;
   }
   .hdr-btn-accent:hover:not(:disabled){filter:brightness(1.06); color:#fff; background:linear-gradient(160deg, var(--shu), var(--shu-deep));}
+  /* 階層エディタの編集が出力に未反映のときの目印（押せば作り直して出力される） */
+  #btnExport.dirty{position:relative;}
+  #btnExport.dirty::after{
+    content:""; position:absolute; top:-3px; right:-3px; width:9px; height:9px; border-radius:50%;
+    background:#fbbf24; border:2px solid var(--panel); box-shadow:0 0 0 1px rgba(0,0,0,.15);
+  }
   .hdr-btn:disabled{opacity:.4; cursor:not-allowed;}
   .hdr-btn-accent:disabled{background:var(--panel2); border-color:var(--line); color:var(--faint);}
   .tagline{margin:2px 0 0;color:var(--sub);font-size:12.5px;max-width:560px;}
@@ -476,6 +482,18 @@
     display:flex; align-items:flex-start; justify-content:center;
   }
   #tpvCanvas{background:#fff; box-shadow:var(--shadow); display:block; max-width:100%;}
+  /* 目次テキストのモーダル：ページ送りは左下（プレビューのページ送りバーと同じ位置・見た目） */
+  .tt-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; flex-wrap:wrap;}
+  .tt-foot-btns{display:flex; align-items:center; gap:8px; margin-left:auto;}
+  .tt-nav{
+    display:flex; align-items:center; gap:6px;
+    background:var(--panel); border:1px solid var(--line); border-radius:9px;
+    padding:0 8px; height:30px; box-shadow:var(--shadow);
+  }
+  .tt-nav .bm-btn{width:22px; height:22px;}
+  .tt-pagelabel{
+    font-family:var(--mono); font-size:12px; color:var(--ink); min-width:34px; text-align:center;
+  }
   #tocTextArea{
     width:100%; height:300px; resize:vertical; box-sizing:border-box;
     font-family:var(--mono); font-size:12.5px; line-height:1.6;
@@ -557,7 +575,6 @@
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     margin-bottom:10px; flex-wrap:wrap; flex:none;
   }
-  .pv-nav{display:flex; align-items:center; gap:8px;}
   .pv-actions{display:flex; align-items:center; gap:8px;}
   .pv-pagelabel{font-family:var(--mono); font-size:12px; color:var(--sub); min-width:64px; text-align:center;}
   .preview-canvas-row{display:flex; gap:14px; align-items:stretch; flex:1; min-height:0;}
@@ -848,13 +865,6 @@
   <div class="preview-left">
     <div class="preview-toolbar">
       <button id="pvBack" class="bm-reset" type="button">← 設定に戻る</button>
-      <div class="pv-nav">
-        <button id="pvPrev" class="bm-btn" type="button" title="前のページ">◀</button>
-        <input type="text" id="pvPageInput" class="pv-pageinput" title="ページラベルを入力してEnter">
-        <span class="pv-pagesep">/</span>
-        <span id="pvPageTotal" class="pv-pagetotal">-</span>
-        <button id="pvNext" class="bm-btn" type="button" title="次のページ">▶</button>
-      </div>
       <div class="pv-actions">
         <button id="pvToggleToc" class="bm-reset" type="button" title="目次ページを横に並べて表示"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg><span id="pvToggleTocLabel">目次を並べる</span></button>
       </div>
@@ -885,6 +895,14 @@
       <div class="preview-canvas-wrap">
         <div class="pv-canvas-stage" id="pvStage">
           <canvas id="pvCanvas"></canvas>
+          <div class="pv-navbar">
+            <span class="pv-navbar-label">本文</span>
+            <button id="pvPrev" class="bm-btn" type="button" title="前のページ">◀</button>
+            <input type="text" id="pvPageInput" class="pv-pageinput" title="ページラベルを入力してEnter">
+            <span class="pv-pagesep">/</span>
+            <span id="pvPageTotal" class="pv-pagetotal">-</span>
+            <button id="pvNext" class="bm-btn" type="button" title="次のページ">▶</button>
+          </div>
           <div class="pv-zoombar">
             <button id="pvZOut" type="button" title="縮小">−</button><button id="pvZFit" class="zfit" type="button" title="全体表示">全体</button><button id="pvZIn" type="button" title="拡大">＋</button>
           </div>
@@ -929,10 +947,21 @@
       <button id="btnCloseTocText" class="modal-x" type="button" aria-label="閉じる">×</button>
     </div>
     <div style="padding:14px 18px 18px;">
-      <p class="hint" id="tocTextStatus" style="margin:0 0 8px;">下のテキストは選択済みです。ボタンを押すか、⌘C（Windowsは Ctrl+C）でコピーしてください。</p>
+      <p class="hint" id="tocTextStatus" style="margin:0 0 8px;">必要な部分を選択して「選択部分をコピー」を押すか、⌘C（Windowsは Ctrl+C）でコピーしてください。</p>
       <textarea id="tocTextArea" readonly></textarea>
-      <div style="display:flex; justify-content:flex-end; margin-top:10px;">
-        <button id="btnCopyTocText" class="bm-add" type="button">選択部分をコピー</button>
+      <div class="tt-foot">
+        <div class="tt-nav">
+          <span class="pv-navbar-label">目次</span>
+          <button id="btnTocTextPrev" class="bm-btn" type="button" title="前の目次ページ">◀</button>
+          <span id="tocTextPageLabel" class="tt-pagelabel">-</span>
+          <span class="pv-pagesep">/</span>
+          <span id="tocTextPageTotal" class="pv-pagetotal">-</span>
+          <button id="btnTocTextNext" class="bm-btn" type="button" title="次の目次ページ">▶</button>
+        </div>
+        <div class="tt-foot-btns">
+          <button id="btnCopyTocTextAll" class="bm-reset" type="button" title="全ての目次ページのテキストをまとめてコピー">全ページ分をコピー</button>
+          <button id="btnCopyTocText" class="bm-add" type="button">選択部分をコピー</button>
+        </div>
       </div>
     </div>
   </div>
@@ -956,6 +985,8 @@ const supportsFSAccess = (typeof window.showOpenFilePicker === "function");
 let txtFile = null;
 let resultBlob = null;
 let resultName = "";
+let resultSignature = null;   // 出力済みBlobを作った時点の階層エディタの内容（変更検知用）
+let labelResolver = null;     // ページラベル→物理ページindex（runBookmark実行後に有効）
 let previewPdfjsDoc = null;   // 実行時に読み込んだPDF（ページプレビュー用に保持）
 let currentPreviewPage = 1;
 let currentTocPreviewPage = 1; // 目次側ペインで現在表示中のページ（本文側とは独立）
@@ -1163,12 +1194,29 @@ async function copyTextToClipboard(text){
   document.execCommand("copy");
   document.body.removeChild(ta);
 }
-function openTocTextModal(text){
-  $("tocTextArea").value = text;
+// 目次テキストは目次ページごとに保持し、モーダル内でページを切り替えて見られるようにする
+let tocTextPages = [];   // [{page: 物理ページ番号, text}]
+let tocTextIdx = 0;
+function renderTocTextPage(idx){
+  if(tocTextPages.length === 0) return;
+  tocTextIdx = Math.max(0, Math.min(idx, tocTextPages.length - 1));
+  const cur = tocTextPages[tocTextIdx];
+  $("tocTextArea").value = cur.text;
+  $("tocTextArea").scrollTop = 0;
+  $("tocTextPageLabel").textContent = pageLabelFor(cur.page);
+  $("tocTextPageTotal").textContent = tocTextPages.length;
+  $("btnTocTextPrev").disabled = tocTextIdx === 0;
+  $("btnTocTextNext").disabled = tocTextIdx === tocTextPages.length - 1;
   $("tocTextStatus").textContent = "必要な部分を選択して「選択部分をコピー」を押すか、⌘C（Windowsは Ctrl+C）でコピーしてください。";
+}
+function openTocTextModal(pages, startIdx){
+  tocTextPages = pages;
   $("tocTextModalBg").classList.add("show");
+  renderTocTextPage(typeof startIdx === "number" ? startIdx : 0);
   requestAnimationFrame(() => { $("tocTextArea").focus(); });
 }
+$("btnTocTextPrev").addEventListener("click", () => renderTocTextPage(tocTextIdx - 1));
+$("btnTocTextNext").addEventListener("click", () => renderTocTextPage(tocTextIdx + 1));
 function closeTocTextModal(){ $("tocTextModalBg").classList.remove("show"); }
 $("btnCloseTocText").addEventListener("click", closeTocTextModal);
 $("tocTextModalBg").addEventListener("click", e => { if(e.target === $("tocTextModalBg")) closeTocTextModal(); });
@@ -1181,7 +1229,17 @@ $("btnCopyTocText").addEventListener("click", async () => {
     await copyTextToClipboard(target);
     $("tocTextStatus").textContent = hasSelection
       ? "✓ 選択部分をコピーしました。"
-      : "✓ 全文をコピーしました（範囲が選択されていなかったため）。";
+      : "✓ このページの全文をコピーしました（範囲が選択されていなかったため）。";
+  }catch(e){
+    $("tocTextStatus").textContent = "自動コピーに失敗しました。コピーしたい範囲を選択して ⌘C（Windowsは Ctrl+C）でコピーしてください。";
+  }
+});
+$("btnCopyTocTextAll").addEventListener("click", async () => {
+  if(tocTextPages.length === 0) return;
+  const all = tocTextPages.map(p => `── ${pageLabelFor(p.page)} ──\n${p.text}`).join("\n\n");
+  try{
+    await copyTextToClipboard(all);
+    $("tocTextStatus").textContent = `✓ 全 ${tocTextPages.length} ページ分のテキストをコピーしました。`;
   }catch(e){
     $("tocTextStatus").textContent = "自動コピーに失敗しました。コピーしたい範囲を選択して ⌘C（Windowsは Ctrl+C）でコピーしてください。";
   }
@@ -1190,17 +1248,18 @@ $("btnCopyTocText").addEventListener("click", async () => {
 async function copyTocPageText(){
   if(!previewPdfjsDoc || previewTocPages.length === 0) return;
   try{
-    const blocks = [];
+    const pages = [];
     for(const physPage of previewTocPages){
       const lines = await extractLines(previewPdfjsDoc, physPage);
-      blocks.push(lines.map(l => l.text).join("\n"));
+      pages.push({page: physPage, text: lines.map(l => l.text).join("\n").trim()});
     }
-    const text = blocks.join("\n\n").trim();
-    if(!text){
+    if(pages.every(p => !p.text)){
       log("⚠ 目次ページからテキストを抽出できませんでした（画像化されている可能性があります）。", "warn");
       return;
     }
-    openTocTextModal(text);
+    // 目次プレビューで今見ているページから開く
+    const start = Math.max(0, previewTocPages.indexOf(currentTocPreviewPage));
+    openTocTextModal(pages, start);
   }catch(e){
     log(`  テキスト抽出でエラーが発生しました：${e.message || e}`, "err");
   }
@@ -1664,29 +1723,33 @@ function kanjiToArabic(s){
 // 戻り値: {title, label(アラビア数字文字列)} または null
 const LABEL_TOKEN = "(?:[0-9０-９]{1,4}|[ivxlcdmIVXLCDM]{1,7}|[〇零一二三四五六七八九十百千]{1,6})";
 // 見出しとして妥当か（数字・記号だけの文字列は見出しとして扱わない）
-function looksLikeRealTitle(title){
-  if(title.length < 2 || title.length > 50) return false;
+function looksLikeRealTitle(title, maxLen){
+  if(title.length < 2 || title.length > (maxLen || 50)) return false;
   if(/^[0-9０-９\s.\u2024\u2025\u2026\u30FB･·ー\-]+$/.test(title)) return false;
   if(title.includes("／")) return false; // 本文中の説明文（改行しきれなかった続き）を誤って拾わないため
   return true;
 }
 
-function splitTitleLabel(raw){
-  let line = raw.replace(/\u3000/g, " ").trim();
-  if(!line) return null;
+function splitTitleLabel(raw, maxLen){
+  // 見出しは印刷面どおりのアキ（全角スペース）を残したいので、照合用と切り出し用で文字列を分ける。
+  // 照合用は全角スペースを半角に置き換えるだけ（1文字→1文字で長さが変わらない）なので、
+  // 一致した見出し部分の長さで元の文字列から切り出せば、全角アキがそのまま残る。
+  const src = raw.replace(/[\r\n\t]+/g, " ").trim();
+  if(!src) return null;
+  const line = src.replace(/\u3000/g, " ");
   // ① 区切り（空白・ドットリーダー等）を挟んだ通常パターン（横組みのTOCに多い）
   let m = line.match(new RegExp(`^(.+?)[\\s.\\u2024\\u2025\\u2026\\u30FB･·]*\\s+(${LABEL_TOKEN})\\s*$`));
   // ② 区切りなしでそのまま末尾にトークンが続くパターン（縦組みを列単位で連結した場合に多い）
   if(!m) m = line.match(new RegExp(`^(.+?)(${LABEL_TOKEN})$`));
   if(!m) return null;
-  const title = m[1].replace(/[\s.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
+  const title = src.slice(0, m[1].length).replace(/[\s\u3000.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
   let token = m[2];
   const kanjiNum = kanjiToArabic(token);
   const label = normalizeLabel(kanjiNum !== null ? String(kanjiNum) : token);
-  if(!title || !label || !looksLikeRealTitle(title)) return null;
+  if(!title || !label || !looksLikeRealTitle(title, maxLen)) return null;
   return {title, label};
 }
-function parseTocLine(text){ return splitTitleLabel(text); }
+function parseTocLine(text, maxLen){ return splitTitleLabel(text, maxLen); }
 
 // ページ全体の文字配置から縦組み／横組みを判定する。
 // 縦組みでは1文字ずつが正立（回転なし）のまま縦一列に並ぶ版面が多いため、
@@ -1730,26 +1793,117 @@ function clusterCoords(items, coordFn, tol){
 async function extractLines(pdfjsDoc, physIdx){
   const page = await pdfjsDoc.getPage(physIdx);
   const tc = await page.getTextContent();
-  const items = tc.items.filter(it => it.str && it.str.trim());
-  if(items.length === 0) return [];
+  // pdf.js は「⑴」と「諸外国」の間の全角アキなどを空白だけの独立アイテムとして返す。
+  // 行テキストにはこれも含めて連結し、印刷面どおりのアキを見出しに残す。
+  // 一方で、行頭x座標（＝階層推定）と組み方向の判定は空白を除いた実体のある文字から求める。
+  const all = tc.items.filter(it => it.str && it.str.length > 0);
+  const solid = all.filter(it => it.str.trim());
+  if(solid.length === 0) return [];
 
-  const orientation = classifyOrientation(items);
+  const orientation = classifyOrientation(solid);
+
+  const buildLine = (group, vertical) => {
+    const byRead = vertical
+      ? [...group].sort((a, b) => b.transform[5] - a.transform[5])   // 上→下
+      : [...group].sort((a, b) => a.transform[4] - b.transform[4]);  // 左→右
+    const solids = byRead.filter(it => it.str.trim());
+    if(solids.length === 0) return null;   // 空白だけの行は行として扱わない
+
+    // pdf.js は字間の空きを幅1pt程度の半角スペースとして合成して返すため、空白アイテムはいったん捨て、
+    // 実体のある文字どうしの字送り（＝空き幅）から全角アキ／半角アキを判定して入れ直す。
+    // これで「⑴　諸外国の…」のように、印刷面どおりのアキが見出しに残る。
+    const posOf = it => (vertical ? -it.transform[5] : it.transform[4]);
+    const advOf = it => (vertical ? (it.height || 0) : (it.width || 0));
+    let text = solids[0].str;
+    for(let i = 1; i < solids.length; i++){
+      const prev = solids[i - 1], next = solids[i];
+      const em = Math.max(prev.height || 0, next.height || 0);
+      const gap = posOf(next) - (posOf(prev) + advOf(prev));
+      if(em > 0 && gap >= em * 0.7) text += "\u3000";
+      else if(em > 0 && gap >= em * 0.22) text += " ";
+      text += next.str;
+    }
+    return {
+      x: solids[0].transform[4],
+      // yは行間（＝折り返し判定）に使う。行内のブレを拾わないよう最も上の値を代表値とする
+      y: Math.max(...solids.map(o => o.transform[5])),
+      text,
+      vertical
+    };
+  };
 
   if(orientation === "vertical"){
     // 縦組み：X座標が近いものを1つの列としてクラスタ化し、右→左の列順・列内は上→下（Y降順）に並べる
-    const columns = clusterCoords(items, it => it.transform[4], 6);
-    return columns.map(col => {
-      const sorted = [...col].sort((a, b) => b.transform[5] - a.transform[5]); // 上→下
-      return {x: sorted[0].transform[4], text: sorted.map(o => o.str).join(""), vertical: true};
-    });
+    const columns = clusterCoords(all, it => it.transform[4], 6);
+    return columns.map(col => buildLine(col, true)).filter(Boolean);
   }else{
     // 横組み：Y座標が近いものを1つの行としてクラスタ化し、上→下の行順・行内は左→右に並べる
-    const rows = clusterCoords(items, it => it.transform[5], 4);
-    return rows.map(row => {
-      const sorted = [...row].sort((a, b) => a.transform[4] - b.transform[4]); // 左→右
-      return {x: sorted[0].transform[4], text: sorted.map(o => o.str).join(""), vertical: false};
-    });
+    const rows = clusterCoords(all, it => it.transform[5], 4);
+    return rows.map(row => buildLine(row, false)).filter(Boolean);
   }
+}
+
+// 目次項目が2行以上に折り返されている場合（1行目に見出しの前半だけがあり、ページ番号は2行目の末尾にある）、
+// ページ番号を持たない行を次のページ番号行の前に連結して1項目にまとめる。
+// 柱（ランニングヘッド）やノンブルを巻き込まないよう、次の条件をすべて満たす行だけを継続行とみなす：
+//   ・直後の行との行間が、そのページの行送り（行間の中央値）の1.5倍以内
+//   ・行頭のx座標が、ページ番号を持つ行の行頭位置（インデント位置）のいずれかと一致（±8pt）
+//   ・数字だけ（＝ノンブル）ではなく、2文字以上の実体がある
+// 階層推定に使うx座標は1行目（＝本来の項目行頭）のものを採用する。
+function mergeWrappedTocLines(lines){
+  if(lines.length < 2 || lines.some(ln => ln.vertical)) return lines;
+
+  const numberedX = [];
+  for(const ln of lines) if(parseTocLine(ln.text)) numberedX.push(ln.x);
+  if(numberedX.length < 2) return lines;
+
+  const gaps = [];
+  for(let i = 1; i < lines.length; i++){
+    const g = lines[i - 1].y - lines[i].y; // 上→下の順なのでyは減っていく
+    if(g > 0.5) gaps.push(g);
+  }
+  gaps.sort((a, b) => a - b);
+  const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+  const maxGap = medianGap > 0 ? medianGap * 1.5 : 0;
+
+  const entryXs = [...new Set(numberedX)];
+  const isEntryIndent = x => entryXs.some(ex => Math.abs(x - ex) <= 8);
+  const isFolioOnly = t => /^[\s\u3000]*[0-9０-９ivxlcdmIVXLCDM]{1,7}[\s\u3000]*$/.test(t);
+  const trimEnds = t => t.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, "");
+
+  const out = [];
+  let pending = [];   // ページ番号を持たない保留行
+  for(const ln of lines){
+    if(!parseTocLine(ln.text)){ pending.push(ln); continue; }
+    // このページ番号行から上へ遡り、続きとして繋がる保留行を集める（3行以上の折り返しにも対応）
+    const chain = [];
+    let cur = ln;
+    for(let k = pending.length - 1; k >= 0; k--){
+      const p = pending[k];
+      const gap = p.y - cur.y;
+      if(!(maxGap > 0 && gap > 0.5 && gap <= maxGap)) break;
+      if(!isEntryIndent(p.x)) break;
+      if(isFolioOnly(p.text) || p.text.replace(/[\s\u3000]/g, "").length < 2) break;
+      chain.unshift(p);
+      cur = p;
+    }
+    let merged = null;
+    if(chain.length > 0){
+      const text = chain.map(p => trimEnds(p.text)).join("") + ln.text.replace(/^[\s\u3000]+/, "");
+      const r = parseTocLine(text, 120); // 連結後は見出しが長くなるため上限を緩める
+      if(r) merged = {...ln, x: chain[0].x, y: chain[0].y, text, parsed: r};
+    }
+    if(merged){
+      for(const p of pending.slice(0, pending.length - chain.length)) out.push(p); // 柱等はそのまま残す
+      out.push(merged);
+    }else{
+      for(const p of pending) out.push(p);
+      out.push(ln);
+    }
+    pending = [];
+  }
+  for(const p of pending) out.push(p);
+  return out;
 }
 
 
@@ -1817,12 +1971,14 @@ async function autoDetectToc(){
     previewTocPages = pages.slice(); // プレビューで「目次を並べる」際に使用
 
     const rawLines = [];
-    for(const p of pages) rawLines.push(...await extractLines(pdfjsDoc, p));
+    // 折り返し行の連結はページ単位で行う（行間の基準はページごとに求める）
+    for(const p of pages) rawLines.push(...mergeWrappedTocLines(await extractLines(pdfjsDoc, p)));
 
     const parsed = [];
-    let skipped = 0;
+    let skipped = 0, wrapped = 0;
     for(const ln of rawLines){
-      const r = parseTocLine(ln.text);
+      const r = ln.parsed || parseTocLine(ln.text);
+      if(ln.parsed) wrapped++;
       if(r) parsed.push({...r, x: ln.x, vertical: ln.vertical});
       else if(ln.text.trim()) skipped++;
     }
@@ -1837,23 +1993,36 @@ async function autoDetectToc(){
     }
 
     const anyVertical = parsed.some(e => e.vertical);
-    let levelOf = () => 0;
-    if(!anyVertical){
-      // 横組み：行頭のx座標をクラスタリングして階層レベルを推定（許容誤差 6pt）
-      const xs = [...new Set(parsed.map(e => e.x))].sort((a,b) => a-b);
-      const clusters = [];
-      for(const x of xs){
-        if(clusters.length === 0 || x - clusters[clusters.length-1] > 6) clusters.push(x);
+    // ①行頭の記号から段を決める（左右ページで左マージンが違う本でもずれない）
+    // ②記号がほとんど無い目次では、従来どおり行頭x座標のクラスタリングで推定する
+    const markerLevels = levelsFromMarkers(parsed);
+    let levelNote;
+    if(markerLevels){
+      bmEntries = parsed.map((e, i) => ({title: e.title, label: e.label, level: markerLevels[i]}));
+      levelNote = "  階層：行頭の記号（第n章／1／⑴／① など）から推定しました";
+    }else{
+      let levelOf = () => 0;
+      if(!anyVertical){
+        // 横組み：行頭のx座標をクラスタリングして階層レベルを推定（許容誤差 6pt）
+        const xs = [...new Set(parsed.map(e => e.x))].sort((a,b) => a-b);
+        const clusters = [];
+        for(const x of xs){
+          if(clusters.length === 0 || x - clusters[clusters.length-1] > 6) clusters.push(x);
+        }
+        levelOf = x => { let lv=0; clusters.forEach((cx,i)=>{ if(x-cx > -6) lv=i; }); return lv; };
+        levelNote = "  階層：行頭のインデント位置から推定しました（記号が見つからないため）";
+      }else{
+        levelNote = "  階層：縦組みで記号も見つからないため、フラットで読み込みました";
       }
-      levelOf = x => { let lv=0; clusters.forEach((cx,i)=>{ if(x-cx > -6) lv=i; }); return lv; };
+      bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
-
-    bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     normalizeLevels(bmEntries);
 
     log(`  認識：${bmEntries.length} 件`, "ok");
+    if(wrapped > 0) log(`  （2行以上に折り返された項目を連結：${wrapped} 件）`);
     if(skipped > 0) log(`  （パターンに合わず読み飛ばした行：${skipped}）`);
-    if(anyVertical) log("  （縦組みのため階層はフラットで読み込みました。プレビュー画面の階層エディタで調整できます）");
+    log(levelNote);
+    log("  （階層はプレビュー画面の階層エディタで調整できます）");
 
     await runBookmark();
   }catch(e){
@@ -1864,6 +2033,60 @@ async function autoDetectToc(){
   }
 }
 $("btnAutoToc").addEventListener("click", autoDetectToc);
+
+// ───────────────────────────────────────────
+//  階層推定：見出し行頭の記号から段を決める
+// ───────────────────────────────────────────
+// 左右ページで版面の左マージンが違う（ノド寄せ）本では、行頭x座標のクラスタリングだと
+// 同じ段の項目が別クラスタに割れて階層がずれていく。和文の目次は行頭の記号の種類で
+// 段が決まっているので、記号から段を決めるほうが確実。
+// rankは小さいほど上位。数値そのものではなくスタックの深さで段を決めるため、
+// 「第1章の直下に⑴が来る」「第2章の直下は1→⑴→①」のように章ごとに段数が違っても正しく並ぶ。
+const LV_RANK = {bu: 1, sho: 2, setsu: 3, num: 4, paren: 5, circle: 6, kana: 7};
+const LV_KANSUJI = "0-9０-９一二三四五六七八九十百";
+function markerRank(title){
+  const t = String(title || "").replace(/^[\s\u3000]+/, "");
+  if(!t) return null;
+  if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*部`).test(t)) return LV_RANK.bu;
+  if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*章`).test(t)) return LV_RANK.sho;
+  if(/^(序章|終章|補章|序論|結論)/.test(t)) return LV_RANK.sho;
+  if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*節`).test(t)) return LV_RANK.setsu;
+  if(/^[\u2474-\u247F\u3220-\u3229]/.test(t)) return LV_RANK.paren;             // ⑴ ㈠
+  if(/^[\u2460-\u2473]/.test(t)) return LV_RANK.circle;                          // ①
+  if(/^[（(][\s\u3000]*[0-9０-９]{1,3}[\s\u3000]*[）)]/.test(t)) return LV_RANK.paren; // (1) （1）
+  if(/^[0-9０-９]{1,3}[\s\u3000]*[）)]/.test(t)) return LV_RANK.paren;            // 1) １）
+  if(/^[0-9０-９]{1,3}(?:[.．]|[\s\u3000])/.test(t)) return LV_RANK.num;          // 1　/ 1.
+  // 「事例①」「資料⑴」のように短い語に記号が付くもの（記号だけの項目と同じ段に置く）
+  if(/^[^\s\u3000\d０-９]{1,4}[\u2460-\u2473]/.test(t)) return LV_RANK.circle;
+  if(/^[^\s\u3000\d０-９]{1,4}[\u2474-\u247F]/.test(t)) return LV_RANK.paren;
+  if(/^[ア-ン][\s\u3000.．、）)]/.test(t)) return LV_RANK.kana;                   // ア　イ　ウ
+  return null;   // 記号なし（はじめに・おわりに・引用文献 等）
+}
+// 記号の並びから各項目の段を求める。記号付きの項目が半分未満なら null を返し、座標方式に任せる。
+function levelsFromMarkers(entries){
+  if(entries.length === 0) return null;
+  const ranks = entries.map(e => markerRank(e.title));
+  const markedCount = ranks.filter(r => r !== null).length;
+  if(markedCount < Math.ceil(entries.length * 0.5)) return null;
+  const firstMarked = ranks.findIndex(r => r !== null);
+  let lastMarked = -1;
+  ranks.forEach((r, i) => { if(r !== null) lastMarked = i; });
+
+  const levels = [];
+  const stack = [];   // 現在たどっている記号rankの並び。深さがそのまま段になる
+  ranks.forEach((r, i) => {
+    if(r === null){
+      // 記号なし：前付・後付（はじめに／おわりに等）は最上位に、途中のものは直前と同じ段に置く
+      if(i < firstMarked || i > lastMarked){ stack.length = 0; levels.push(0); }
+      else levels.push(levels.length > 0 ? levels[levels.length - 1] : 0);
+      return;
+    }
+    while(stack.length > 0 && stack[stack.length - 1] >= r) stack.pop();
+    levels.push(stack.length);
+    stack.push(r);
+  });
+  return levels;
+}
 
 // 階層の正規化：先頭は0、直前の行より2段以上深くならないようにする
 function normalizeLevels(entries){
@@ -1934,8 +2157,51 @@ function moveGroupTo(group, dropIndex){
   renderBmList();
 }
 
+// 通し番号チップの表示（entry.physIdx の現在値をそのまま映す）
+function showSerial(e, serialEl){
+  if(typeof e.physIdx === "number"){
+    serialEl.textContent = String(e.physIdx + 1);
+    serialEl.disabled = false;
+    serialEl.title = "このページをプレビュー（通し番号）";
+  }else{
+    serialEl.textContent = "—";
+    serialEl.disabled = true;
+    serialEl.title = "ページ未解決";
+  }
+}
+// ページラベル欄の入力を、PDFのページラベル対応表で物理ページ（通し番号）に変換して反映する。
+// 変換表は「▶ しおりを追加する」実行時に作られるので、それ以前は通し番号は変えられない。
+function syncSerial(e, serialEl, labelEl){
+  if(!labelResolver){
+    if(labelEl) labelEl.classList.remove("bad");
+    return;
+  }
+  const raw = (e.label || "").trim();
+  const phys = raw ? labelResolver(raw) : null;
+  if(phys === null || phys === undefined) delete e.physIdx;
+  else e.physIdx = phys;
+  showSerial(e, serialEl);
+  if(labelEl) labelEl.classList.toggle("bad", raw !== "" && (phys === null || phys === undefined));
+}
+
+// 再描画（innerHTMLの作り直し）でスクロール位置が先頭に戻ってしまうのを防ぐため、
+// 描画前にスクロール量と「編集中だったフィールド＋カーソル位置」を退避し、描画後に復元する。
+let restoringBmFocus = false;   // プログラムによるfocus復元中は focus ハンドラの副作用を止める
+
 function renderBmList(focusIndex){
   const list = $("bmList");
+  const keepScroll = list.scrollTop;
+  let keepFocus = null;
+  const ae = document.activeElement;
+  if(ae && list.contains(ae) && (ae.classList.contains("bm-title") || ae.classList.contains("bm-label"))){
+    const rowEl = ae.closest(".bm-row");
+    const idx = rowEl ? [...list.children].indexOf(rowEl) : -1;
+    if(idx >= 0) keepFocus = {
+      idx,
+      cls: ae.classList.contains("bm-title") ? "bm-title" : "bm-label",
+      start: ae.selectionStart, end: ae.selectionEnd
+    };
+  }
   list.innerHTML = "";
   // 削除済みentryが選択セットに残らないよう掃除
   for(const e of [...selectedEntries]) if(!bmEntries.includes(e)) selectedEntries.delete(e);
@@ -2034,10 +2300,11 @@ function renderBmList(focusIndex){
     title.placeholder = "見出しを入力";
     title.spellcheck = false;
     title.addEventListener("focus", () => {
+      if(restoringBmFocus) return;   // 再描画に伴う自動復帰では履歴もプレビューも動かさない
       pushUndo();
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
     });
-    title.addEventListener("input", () => { e.title = title.value; });
+    title.addEventListener("input", () => { e.title = title.value; updateExportDirty(); });
 
     const label = document.createElement("input");
     label.className = "bm-label";
@@ -2047,12 +2314,14 @@ function renderBmList(focusIndex){
     label.spellcheck = false;
     if(unresolvedLabels.has(normalizeLabel(e.label))) label.classList.add("bad");
     label.addEventListener("focus", () => {
+      if(restoringBmFocus) return;   // 再描画に伴う自動復帰では履歴もプレビューも動かさない
       pushUndo();
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
     });
     label.addEventListener("input", () => {
       e.label = label.value;
-      label.classList.remove("bad"); // 修正し始めたらハイライト解除
+      syncSerial(e, serial, label);   // 入力したページラベルに対応する通し番号へ即座に追随させる
+      updateExportDirty();
     });
 
     const btnAdd = document.createElement("button");
@@ -2072,15 +2341,11 @@ function renderBmList(focusIndex){
     // 通し番号（このPDF内の物理ページ順・背景色チップ）→ ページラベル（長円の白窓）の順で右端に並べる
     const serial = document.createElement("button");
     serial.type = "button"; serial.className = "bm-serial";
-    if(typeof e.physIdx === "number"){
-      serial.textContent = String(e.physIdx + 1);
-      serial.title = "このページをプレビュー（通し番号）";
-      serial.addEventListener("click", () => renderPreviewPage(e.physIdx + 1));
-    }else{
-      serial.textContent = "—";
-      serial.disabled = true;
-      serial.title = "ページ未解決";
-    }
+    // クリック時に現在のphysIdxを読むので、ラベル編集で解決先が変わっても追随する
+    serial.addEventListener("click", () => {
+      if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+    });
+    showSerial(e, serial);
     row.appendChild(serial);
     row.appendChild(label);
 
@@ -2118,6 +2383,21 @@ function renderBmList(focusIndex){
     ? `${bmEntries.length} 件　／　最大 ${maxDepth + 1} 階層`
     : "しおりがありません。「＋ しおりを追加」から作成できます。";
   updateMoveButtons();
+  updateExportDirty();
+
+  // スクロール位置の復元（行の高さは階層を変えても変わらないため、見ていた位置がそのまま保たれる）
+  list.scrollTop = Math.max(0, Math.min(keepScroll, list.scrollHeight - list.clientHeight));
+  // 編集中だったフィールドへ復帰（focusIndex指定時＝新規行にカーソルを置く場合はそちらを優先）
+  if(focusIndex === undefined && keepFocus && list.children.length > 0){
+    const rowEl = list.children[Math.min(keepFocus.idx, list.children.length - 1)];
+    const input = rowEl && rowEl.querySelector("." + keepFocus.cls);
+    if(input){
+      restoringBmFocus = true;
+      input.focus({preventScroll: true});
+      try{ input.setSelectionRange(keepFocus.start, keepFocus.end); }catch(err){}
+      restoringBmFocus = false;
+    }
+  }
 }
 
 // ツールバーの上下移動ボタン：選択が1件以上ある時のみ有効
@@ -2230,7 +2510,37 @@ function showResult(success, msg){
   $("btnExport").disabled = !success;
 }
 
+// 階層エディタの内容の指紋。これが出力済みBlobの作成時と違えば、出力前に作り直す。
+function bmSignature(){
+  return JSON.stringify(bmEntries.map(e => [e.title, e.label, e.level]));
+}
+// 未反映の編集があることを「PDFを出力」ボタンに表示する
+function updateExportDirty(){
+  const btn = $("btnExport");
+  if(!btn) return;
+  const dirty = !!resultBlob && resultSignature !== null && resultSignature !== bmSignature();
+  btn.classList.toggle("dirty", dirty);
+  btn.title = dirty
+    ? "階層エディタの編集が未反映です。押すと編集内容でしおりを作り直して出力します。"
+    : "";
+}
+
 async function downloadResult(){
+  // 実行後に階層エディタを編集していた場合は、その内容でしおりを作り直してから出力する
+  if(resultBlob && resultSignature !== null && resultSignature !== bmSignature()){
+    log("── 階層エディタの編集を反映して作り直します ──");
+    const btn = $("btnExport"), lbl = btn.querySelector("span");
+    const prev = lbl ? lbl.textContent : "";
+    if(lbl) lbl.textContent = "反映中…";
+    btn.disabled = true;
+    try{
+      await runBookmark({keepPreview: true});
+    }finally{
+      if(lbl) lbl.textContent = prev;
+      btn.disabled = !resultBlob;
+    }
+    if(!resultBlob) return;   // 作り直しに失敗した場合はログを見てもらう
+  }
   if(!resultBlob){
     log("⚠ まだ出力がありません。先に「▶ しおりを追加する」を実行してください。", "warn");
     return;
@@ -2534,9 +2844,12 @@ function writeOutlines(pdfDoc, tree){
 // ───────────────────────────────────────────
 //  実行（run_bookmark 相当）
 // ───────────────────────────────────────────
-async function runBookmark(){
+async function runBookmark(opts){
+  const keepPreview = !!(opts && opts.keepPreview);
   resultBlob = null;
+  resultSignature = null;
   $("btnExport").disabled = true;
+  $("btnExport").classList.remove("dirty");
   $("resultBar").className = "";
   $("resultBar").style.display = "none";
   unresolvedLabels.clear();
@@ -2611,6 +2924,7 @@ async function runBookmark(){
       }
       return null;
     };
+    labelResolver = resolveLabel;   // ラベル欄の編集に通し番号を追随させるために保持
 
     // 未解決ラベルの事前確認（該当行は赤くハイライトし、スキップして続行）
     const unresolved = [];
@@ -2658,6 +2972,7 @@ async function runBookmark(){
     const outBytes = await pdfDoc.save({useObjectStreams: false});
     resultName = pdfFile.name;
     resultBlob = new Blob([outBytes], {type: "application/pdf"});
+    resultSignature = bmSignature();   // この内容で出力済み（以後の編集を検知するため）
 
     log("── 完了 ──", "ok");
     if(ngLabels.length > 0){
@@ -2670,8 +2985,11 @@ async function runBookmark(){
       ? `しおり付きPDFを作成しました（${okCount} 件追加・${ngLabels.length} 件スキップ）。`
       : `しおり付きPDFを作成しました（${okCount} 件）。`);
 
-    const firstResolved = items.length > 0 ? items[0].physIdx + 1 : 1;
-    enterPreviewMode(firstResolved);
+    updateExportDirty();
+    if(!keepPreview && !previewApp_isShown()){
+      const firstResolved = items.length > 0 ? items[0].physIdx + 1 : 1;
+      enterPreviewMode(firstResolved);
+    }
 
   }catch(e){
     log(`  エラー：${e.message || e}`, "err");
@@ -2685,6 +3003,7 @@ function resetAll(){
   if(previewApp_isShown() && !confirm("すべてリセットします。よろしいですか？")) return;
 
   pdfFile = null; pdfFileHandle = null; txtFile = null; resultBlob = null; resultName = "";
+  resultSignature = null; labelResolver = null;
   previewPdfjsDoc = null; currentPreviewPage = 1; currentTocPreviewPage = 1; currentTocIndex = 0;
   previewPageLabels = null;
   mainViewer.clear(); tocViewer.clear();
@@ -2699,6 +3018,7 @@ function resetAll(){
   $("btnRunList").disabled = true;
   $("btnExport").disabled = true;
   previewTocPages = [];
+  tocTextPages = []; tocTextIdx = 0;
   resetUndoHistory();
 
   // 入力画面をSTEP1（対象PDF選択）に戻す
