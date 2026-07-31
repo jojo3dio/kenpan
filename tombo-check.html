@@ -241,7 +241,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
       </span>
-      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-07-15</small></span>
+      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-07-31</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -697,13 +697,26 @@ async function extractLines(page){
   return out;
 }
 
-/* ---------- CLASSIFY ---------- */
-function classify(raw, pgW, pgH){
-  const tolPt=(parseFloat($("#clTol").value)||2.0)*MM2PT;
-  const midX=pgW/2, midY=pgH/2;
-  const cornerEdgePt=20*MM2PT;
-  const mX=cornerEdgePt, mY=cornerEdgePt;
-
+/* ---------- FRAME ----------
+   トンボの外側に広い余白（白場）が付いたPDFでは、ページ端から
+   一定距離という基準ではコーナートンボを拾えない。
+   そこで検出線全体の外接矩形をコーナー判定の基準枠として使う。
+   余白が無いPDFでは枠≒ページ端になるため従来と同じ挙動になる。 */
+function frameOf(lines, pgW, pgH){
+  const full={x0:0,y0:0,x1:pgW,y1:pgH,w:pgW,h:pgH};
+  if(!lines||!lines.length) return full;
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  for(const l of lines){
+    x0=Math.min(x0,l.x1,l.x2); x1=Math.max(x1,l.x1,l.x2);
+    y0=Math.min(y0,l.y1,l.y2); y1=Math.max(y1,l.y1,l.y2);
+  }
+  const w=x1-x0, h=y1-y0;
+  // 枠が極端に小さい/不正な場合はページ全体にフォールバック
+  if(!isFinite(w)||!isFinite(h)||w<10*MM2PT||h<10*MM2PT) return full;
+  return {x0,y0,x1,y1,w,h};
+}
+/* H/V線のみ抽出（frameOfと分類で共用） */
+function hvLines(raw){
   const lines=[];
   for(const l of raw){
     const dx=l.x2-l.x1, dy=l.y2-l.y1;
@@ -713,9 +726,21 @@ function classify(raw, pgW, pgH){
     const cx=(l.x1+l.x2)/2, cy=(l.y1+l.y2)/2;
     lines.push({...l,dir,cx,cy});
   }
+  return lines;
+}
+
+/* ---------- CLASSIFY ---------- */
+function classify(raw, pgW, pgH){
+  const tolPt=(parseFloat($("#clTol").value)||2.0)*MM2PT;
+  const cornerEdgePt=20*MM2PT;
+  const mX=cornerEdgePt, mY=cornerEdgePt;
+
+  const lines=hvLines(raw);
+  const fr=frameOf(lines,pgW,pgH);
+  const midX=(fr.x0+fr.x1)/2, midY=(fr.y0+fr.y1)/2;
 
   const getZone=(cx,cy)=>{
-    const nL=cx<mX,nR=cx>pgW-mX,nT=cy<mY,nB=cy>pgH-mY;
+    const nL=cx<fr.x0+mX,nR=cx>fr.x1-mX,nT=cy<fr.y0+mY,nB=cy>fr.y1-mY;
     if(nT&&nL) return 'TL';
     if(nT&&nR) return 'TR';
     if(nB&&nL) return 'BL';
@@ -731,10 +756,10 @@ function classify(raw, pgW, pgH){
     if(z!=='nc'){
       cornerGrps[z+'_'+l.dir].push(l);
     } else {
-      const nL=l.cx<mX, nR=l.cx>pgW-mX;
-      const nT=l.cy<mY, nB=l.cy>pgH-mY;
-      if(l.dir==='H'&&!nT&&!nB&&nL&&Math.abs(l.cy-pgH/2)>=pgH*0.15) foldLH.push(l);
-      else if(l.dir==='H'&&!nT&&!nB&&nR&&Math.abs(l.cy-pgH/2)>=pgH*0.15) foldRH.push(l);
+      const nL=l.cx<fr.x0+mX, nR=l.cx>fr.x1-mX;
+      const nT=l.cy<fr.y0+mY, nB=l.cy>fr.y1-mY;
+      if(l.dir==='H'&&!nT&&!nB&&nL&&Math.abs(l.cy-midY)>=fr.h*0.15) foldLH.push(l);
+      else if(l.dir==='H'&&!nT&&!nB&&nR&&Math.abs(l.cy-midY)>=fr.h*0.15) foldRH.push(l);
       else nonCorner.push(l);
     }
   }
@@ -774,25 +799,25 @@ function classify(raw, pgW, pgH){
   if(cornerHinner.length){
     const topCorners=cornerHinner.filter(l=>l.cy<midY);
     if(topCorners.length){
-      const avgMargin=topCorners.reduce((s,l)=>s+l.cy,0)/topCorners.length;
+      const avgMargin=topCorners.reduce((s,l)=>s+(l.cy-fr.y0),0)/topCorners.length;
       bandPt=Math.max(avgMargin*4, 30*MM2PT);
     }
   }
+  const bandT=fr.y0+bandPt, bandB=fr.y1-bandPt;
 
   return merged.map(l=>{
     if(roleMap.has(l)) return{...l,role:roleMap.get(l)};
     if(l._foldSide==='L') return{...l,role:'fold-L-H'};
     if(l._foldSide==='R') return{...l,role:'fold-R-H'};
     const{cx,cy,dir}=l;
-    const nL=cx<mX, nR=cx>pgW-mX;
-    const inTopBand=cy<=bandPt, inBotBand=cy>=pgH-bandPt;
+    const nL=cx<fr.x0+mX, nR=cx>fr.x1-mX;
     let role='unknown';
     if(dir==='H'){
-      const nT=cy<mY, nB=cy>pgH-mY;
+      const nT=cy<fr.y0+mY, nB=cy>fr.y1-mY;
       if(nT) role='center-T';
       else if(nB) role='center-B';
-      else if(nL&&Math.abs(cy-pgH/2)<pgH*0.15) role='center-L-H';
-      else if(nR&&Math.abs(cy-pgH/2)<pgH*0.15) role='center-R-H';
+      else if(nL&&Math.abs(cy-midY)<fr.h*0.15) role='center-L-H';
+      else if(nR&&Math.abs(cy-midY)<fr.h*0.15) role='center-R-H';
       else if(nL) role='fold-L-H';
       else if(nR) role='fold-R-H';
       else role='inner-H';
@@ -801,14 +826,14 @@ function classify(raw, pgW, pgH){
       else if(nR) role='center-R';
       else{
         const span=Math.abs(l.y2-l.y1);
-        if(span>=pgH*0.5) role='inner-V';
-        else if(Math.min(l.y1,l.y2)<=bandPt||Math.max(l.y1,l.y2)>=pgH-bandPt)
+        if(span>=fr.h*0.5) role='inner-V';
+        else if(Math.min(l.y1,l.y2)<=bandT||Math.max(l.y1,l.y2)>=bandB)
           role='inner-V-single';
         else role='content-V';
       }
     }
     const span=Math.abs(l.y2-l.y1);
-    const edgeZone=span>=pgH*0.5?'M':Math.min(l.y1,l.y2)<=bandPt?'T':'B';
+    const edgeZone=span>=fr.h*0.5?'M':Math.min(l.y1,l.y2)<=bandT?'T':'B';
     return{...l,role,_edgeZone:edgeZone,_bandPt:bandPt};
   });
 }
@@ -844,6 +869,8 @@ const VC_R=['#1a4fa0','#6a20a0','#c07000'];
 
 function computeDims(tl,pgW,pgH){
   const dims=[];
+  const fr=frameOf(tl,pgW,pgH);
+  const midY=(fr.y0+fr.y1)/2;
   const byRole={};
   for(const l of tl){if(!byRole[l.role])byRole[l.role]=[];byRole[l.role].push(l);}
   const aX=r=>{const ls=byRole[r]||[];return ls.length?ls.reduce((s,l)=>s+l.cx,0)/ls.length:null;};
@@ -896,8 +923,8 @@ function computeDims(tl,pgW,pgH){
 
   const yTopRef=fY('corner-TL-H','corner-TR-H');
   const yBotRef=fY('corner-BL-H','corner-BR-H');
-  const aboveBase=yTopRef!==null?yTopRef:pgH*0.05;
-  const belowBase=yBotRef!==null?yBotRef:pgH*0.95;
+  const aboveBase=yTopRef!==null?yTopRef:fr.y0;
+  const belowBase=yBotRef!==null?yBotRef:fr.y1;
   const rowOffset=18;
   const yPos=aboveBase-rowOffset;
 
@@ -921,10 +948,10 @@ function computeDims(tl,pgW,pgH){
     const vpts=[];
     const yT=fY('corner-'+sideT+'-H');
     const yB=fY('corner-'+sideB+'-H');
-    const foldHT=tl.filter(l=>(l.role.startsWith('fold-'+sideT+'-H'))&&l.cy<pgH/2).sort((a,b)=>a.cy-b.cy);
-    const foldHB=tl.filter(l=>(l.role.startsWith('fold-'+sideB+'-H'))&&l.cy>pgH/2).sort((a,b)=>a.cy-b.cy);
-    const edgeFoldT=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy<pgH/2).sort((a,b)=>a.cy-b.cy);
-    const edgeFoldB=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy>pgH/2).sort((a,b)=>a.cy-b.cy);
+    const foldHT=tl.filter(l=>(l.role.startsWith('fold-'+sideT+'-H'))&&l.cy<midY).sort((a,b)=>a.cy-b.cy);
+    const foldHB=tl.filter(l=>(l.role.startsWith('fold-'+sideB+'-H'))&&l.cy>midY).sort((a,b)=>a.cy-b.cy);
+    const edgeFoldT=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy<midY).sort((a,b)=>a.cy-b.cy);
+    const edgeFoldB=tl.filter(l=>l.role==='fold-'+edgeSide+'-H'&&l.cy>midY).sort((a,b)=>a.cy-b.cy);
     const allFoldT=[...foldHT,...edgeFoldT].sort((a,b)=>a.cy-b.cy);
     const allFoldB=[...foldHB,...edgeFoldB].sort((a,b)=>a.cy-b.cy);
     const dedupFoldT=allFoldT.filter((l,i,a)=>i===0||Math.abs(l.cy-a[i-1].cy)>2);
@@ -939,8 +966,8 @@ function computeDims(tl,pgW,pgH){
 
   const xCLv=fX('corner-TL-V','corner-BL-V');
   const xCRv=fX('corner-TR-V','corner-BR-V');
-  const xDimL=(xCLv!==null?xCLv:0)-18;
-  const xDimR=(xCRv!==null?xCRv:pgW)+18;
+  const xDimL=(xCLv!==null?xCLv:fr.x0)-18;
+  const xDimR=(xCRv!==null?xCRv:fr.x1)+18;
 
   const vpL=buildVside('TL','BL','L');
   for(let i=0;i<vpL.length-1;i++){
