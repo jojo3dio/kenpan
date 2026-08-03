@@ -236,6 +236,12 @@
   }
   .toc-input-sm:focus{outline:none; border-color:var(--shu); background:var(--panel);}
   .toc-page-row{display:flex; gap:6px; align-items:stretch;}
+  .toc-opt{
+    display:flex; align-items:flex-start; gap:6px; margin-top:6px;
+    font-size:11px; line-height:1.45; color:var(--sub); cursor:pointer; user-select:none;
+  }
+  .toc-opt input{flex:none; margin:1px 0 0; accent-color:var(--shu); cursor:pointer;}
+  .toc-opt:hover{color:var(--ink);}
   .toc-preview-btn{
     flex:none; width:34px; display:flex; align-items:center; justify-content:center;
     border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--sub);
@@ -814,6 +820,10 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
+          <label class="toc-opt" for="optSubheads" title="目次で「／」で区切って列挙されている小見出しを、本文から探して1段下のしおりにします">
+            <input type="checkbox" id="optSubheads" checked>
+            <span>小見出しも追加する（目次の「／」区切り項目を本文から検出）</span>
+          </label>
         </div>
       </div>
       <div class="enc-override" id="encOverride" style="display:none;">
@@ -826,7 +836,7 @@
         </select>
         <span class="enc-hint">読み込んだ文字が化けている場合はここで指定し直せます</span>
       </div>
-      <p class="hint method-hint">しおりリストは見出し（タブ）ページラベルのタブ区切りテキスト。目次ページを指定または空欄のまま自動認識すると、印字ページ番号からPDFの実ページを解決してしおりを自動生成します（縦組み・漢数字ノンブルにも対応）。</p>
+      <p class="hint method-hint">しおりリストは見出し（タブ）ページラベルのタブ区切りテキスト。目次ページを指定または空欄のまま自動認識すると、印字ページ番号からPDFの実ページを解決してしおりを自動生成します（縦組み・漢数字ノンブルにも対応）。目次に「故郷姫路／近江黒田氏と福岡黒田氏／…」のように小見出しが列挙されている場合は、本文から該当箇所を探して1段下のしおりにします。</p>
     </div>
   </section>
 
@@ -1757,6 +1767,12 @@ function parseTocLine(text, maxLen){ return splitTitleLabel(text, maxLen); }
 // pdf.js は同一ラン内の連続文字を1つのアイテム（1文字とは限らない）にまとめて返すため、
 // 座標の密度ではアイテムのwidth/heightの比で判定する：縦組みは「幅=1文字分・高さ=文字数分」に、
 // 横組みは「幅=文字数分・高さ=1文字分」になる（1文字だけのアイテムは判定材料にしない）
+// アイテムの「1文字分の大きさ」（＝フォントサイズ）を返す。
+// pdf.js の item.height は、縦組みで複数文字が1アイテムにまとまっている場合「文字数分の高さ」に
+// なってしまうため、字間の空き（全角アキ／半角アキ）の判定基準には使えない。
+// 変換行列のスケール値を使えば、まとまり方に関係なく常に1文字分の大きさが得られる。
+const ITEM_FONT_SIZE = it => Math.abs(it.transform[0]) || Math.abs(it.transform[3]) || it.height || 0;
+
 function classifyOrientation(items){
   let vertVotes = 0, horizVotes = 0;
   for(const it of items){
@@ -1814,10 +1830,25 @@ async function extractLines(pdfjsDoc, physIdx){
     // これで「⑴　諸外国の…」のように、印刷面どおりのアキが見出しに残る。
     const posOf = it => (vertical ? -it.transform[5] : it.transform[4]);
     const advOf = it => (vertical ? (it.height || 0) : (it.width || 0));
+
+    // 行頭に混入した柱（ランニングヘッド）を落とす。
+    // 柱は版面の列とわずかに重なることがあり、そのまま連結すると
+    // 「次　第二章　播磨の麒麟児」のように見出しの頭にゴミが付いて記号判定が効かなくなる。
+    // 柱の特徴（数文字以内・本文と文字サイズが違う・本文から2文字分以上離れている）が
+    // すべて揃った行頭のアイテムだけを対象にする。末尾は目次のページ番号があるため触らない。
+    while(solids.length >= 2){
+      const head = solids[0], next = solids[1];
+      const hs = ITEM_FONT_SIZE(head), ns = ITEM_FONT_SIZE(next);
+      const gap = posOf(next) - (posOf(head) + advOf(head));
+      const sizeDiff = Math.abs(hs - ns) / Math.max(hs, ns, 1);
+      if(head.str.trim().length <= 3 && sizeDiff > 0.15 && gap > ns * 2) solids.shift();
+      else break;
+    }
+
     let text = solids[0].str;
     for(let i = 1; i < solids.length; i++){
       const prev = solids[i - 1], next = solids[i];
-      const em = Math.max(prev.height || 0, next.height || 0);
+      const em = Math.max(ITEM_FONT_SIZE(prev), ITEM_FONT_SIZE(next));
       const gap = posOf(next) - (posOf(prev) + advOf(prev));
       if(em > 0 && gap >= em * 0.7) text += "\u3000";
       else if(em > 0 && gap >= em * 0.22) text += " ";
@@ -1841,6 +1872,260 @@ async function extractLines(pdfjsDoc, physIdx){
     const rows = clusterCoords(all, it => it.transform[5], 4);
     return rows.map(row => buildLine(row, false)).filter(Boolean);
   }
+}
+
+// ───────────────────────────────────────────
+//  小見出し（目次で「／」区切りで列挙される項目）の自動検出
+// ───────────────────────────────────────────
+// extractLines は1列（1行）を丸ごと1本のテキストにまとめるため、柱（ランニングヘッド）や
+// ノンブルが版面の列とわずかに重なっている本では、それらが行テキストに混ざってしまう。
+// 小見出しの照合は「行テキストが小見出しと完全一致するか」で判定するため、この混入が致命的になる。
+// そこで、列の中を「文字送りの大きな空き」と「文字サイズの急変」で区切って“ラン”に分割し、
+// 柱・ノンブル・図キャプションを本文の行から切り離した状態で扱う。
+//   ・空きが1文字分の1.6倍を超えたら分割（「１　黒田氏発祥の地」の全角アキ1つでは切れない値）
+//   ・サイズが15%以上変わり、かつ0.3文字分以上空いていたら分割（柱7.09pt／小見出し9.21pt の切り離し）
+// 逆に、ラン分割すると目次の「見出し＋大きなアキ＋ページ番号」も切れてしまうため、
+// 目次項目そのものの解析には従来どおり extractLines を使い、ここでは小見出しの検出だけに使う。
+let runsCache = new Map();
+let runsCacheDoc = null;
+function resetRunsCache(){ runsCache = new Map(); runsCacheDoc = null; }
+
+async function extractRuns(pdfjsDoc, physIdx){
+  if(runsCacheDoc !== pdfjsDoc){ runsCache = new Map(); runsCacheDoc = pdfjsDoc; }
+  if(runsCache.has(physIdx)) return runsCache.get(physIdx);
+
+  const page = await pdfjsDoc.getPage(physIdx);
+  const tc = await page.getTextContent();
+  const solid = tc.items.filter(it => it.str && it.str.trim());
+  let result = {vertical: false, runs: []};
+
+  if(solid.length > 0){
+    const vertical = classifyOrientation(solid) === "vertical";
+    const posOf = it => (vertical ? -it.transform[5] : it.transform[4]);   // 行内（字送り）方向
+    const advOf = it => (vertical ? (it.height || 0) : (it.width || 0));
+    const clusters = vertical
+      ? clusterCoords(solid, it => it.transform[4], 6)
+      : clusterCoords(solid, it => it.transform[5], 4);
+
+    const runs = [];
+    clusters.forEach((cl, blockIdx) => {
+      const seq = [...cl].sort((a, b) => posOf(a) - posOf(b));
+      let cur = [];
+      const flush = () => {
+        if(cur.length === 0) return;
+        let text = cur[0].str;
+        for(let i = 1; i < cur.length; i++){
+          const prev = cur[i-1], next = cur[i];
+          const em = Math.max(ITEM_FONT_SIZE(prev), ITEM_FONT_SIZE(next));
+          const gap = posOf(next) - (posOf(prev) + advOf(prev));
+          if(em > 0 && gap >= em * 0.7) text += "\u3000";
+          else if(em > 0 && gap >= em * 0.22) text += " ";
+          text += next.str;
+        }
+        runs.push({
+          text,
+          chars: text.replace(/[\s\u3000]/g, "").length,
+          indent: posOf(cur[0]),   // 大きいほど深いインデント（縦組みは-y、横組みはx）
+          block: blockIdx
+        });
+        cur = [];
+      };
+      for(const it of seq){
+        if(cur.length > 0){
+          const prev = cur[cur.length - 1];
+          const em = Math.max(ITEM_FONT_SIZE(prev), ITEM_FONT_SIZE(it));
+          const gap = posOf(it) - (posOf(prev) + advOf(prev));
+          const sizeJump = Math.abs(ITEM_FONT_SIZE(it) - ITEM_FONT_SIZE(prev)) / Math.max(ITEM_FONT_SIZE(it), ITEM_FONT_SIZE(prev), 1) > 0.15;
+          if(em > 0 && (gap > em * 1.6 || (sizeJump && gap > em * 0.3))) flush();
+        }
+        cur.push(it);
+      }
+      flush();
+    });
+    result = {vertical, runs};
+  }
+  runsCache.set(physIdx, result);
+  return result;
+}
+
+// 照合用の正規化（空白・全角スペースを落とす。1文字も欠けない完全一致で判定するため）
+const normText = s => String(s == null ? "" : s).replace(/[\s\u3000]/g, "");
+// 数字だけ（ノンブル・漢数字ノンブル）の行は小見出しとして扱わない
+const NUM_ONLY_RE = /^[\s\u30000-9０-９ivxlcdmIVXLCDM〇零一二三四五六七八九十百千･・．.\u2010-\u2015ー]+$/;
+const SUB_SPLIT_RE = /[／/]/;
+
+// 目次ページから、各項目にぶら下がる小見出し行を集めて配列で返す（parsed と同じ並び・同じ長さ）
+// 判定は「その項目行より深いインデントにあり、ページ番号を持たない行」。
+// 折り返しは同じインデントで続くため、単純に連結してから「／」で分割すればよい。
+async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
+  const result = parsed.map(() => []);
+  if(parsed.length === 0) return result;
+  let ptr = -1;   // 現在対象にしている parsed のindex（読み順で進める）
+
+  for(const p of tocPages){
+    const {runs} = await extractRuns(pdfjsDoc, p);
+    if(runs.length === 0) continue;
+
+    // このページ上で「目次項目の見出し」に該当するランを特定し、その最も深いインデントを境界にする
+    const entryIndents = [];
+    const isEntryRun = run => {
+      const n = normText(run.text);
+      if(!n) return -1;
+      for(let i = Math.max(ptr, 0); i < parsed.length; i++){
+        const t = normText(parsed[i].title);
+        if(!t) continue;
+        // ページ番号がランに含まれたままの場合もあるため、前方一致（余剰6文字以内）も許す
+        if(n === t || (n.startsWith(t) && n.length - t.length <= 6)) return i;
+        if(i > ptr + 40) break;   // 読み順から大きく離れた項目までは探さない
+      }
+      return -1;
+    };
+    const matched = runs.map(isEntryRun);
+    matched.forEach((i, k) => { if(i >= 0) entryIndents.push(runs[k].indent); });
+    if(entryIndents.length === 0) continue;
+    const bound = Math.max(...entryIndents);
+
+    for(let k = 0; k < runs.length; k++){
+      if(matched[k] >= 0){ ptr = matched[k]; continue; }
+      const run = runs[k];
+      if(ptr < 0) continue;
+      if(!(run.indent > bound + 4)) continue;         // 項目行より深いインデントでなければ対象外
+      if(run.chars < 2) continue;
+      if(NUM_ONLY_RE.test(run.text)) continue;        // ノンブル・折り返しページ番号
+      result[ptr].push(run.text.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, ""));
+    }
+  }
+
+  return result.map(arr => {
+    if(arr.length === 0) return [];
+    return arr.join("").split(SUB_SPLIT_RE)
+      .map(s => s.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, ""))
+      .filter(s => s.length >= 2 && !NUM_ONLY_RE.test(s));
+  });
+}
+
+// 1ページ分のランから「小見出しになりうる独立した短い行」だけを取り出す
+// 本文の行は版面いっぱいの長さになるので、そのページの最長行の3/4未満を目安にする
+function shortRunsOf(runs){
+  if(runs.length === 0) return [];
+  const maxChars = Math.max(...runs.map(r => r.chars));
+  return runs.filter(r => r.chars >= 2 && r.chars <= 40 && r.chars < maxChars * 0.75);
+}
+
+// 小見出しに与えるページラベルを決める（①PDF自身のページラベル → ②節ラベルからの相対計算）
+// どちらも「そのラベルを解決すると目的の物理ページに戻る」ことを確認してから採用する
+function shiftLabel(label, delta){
+  const t = normalizeLabel(String(label == null ? "" : label));
+  const m = t.match(/^(.*?)(\d+)$/);
+  if(!m) return null;
+  const n = parseInt(m[2], 10) + delta;
+  if(!isFinite(n) || n < 0) return null;
+  return m[1] + String(n);
+}
+function labelForPhys(physIdx, parentLabel, parentPhys, resolveLabel, pageLabels){
+  if(pageLabels && pageLabels[physIdx] != null){
+    const l = normalizeLabel(String(pageLabels[physIdx]));
+    if(l && resolveLabel(l) === physIdx) return l;
+  }
+  const s = shiftLabel(parentLabel, physIdx - parentPhys);
+  if(s && resolveLabel(s) === physIdx) return s;
+  return null;
+}
+
+// 各項目が持つ小見出しの本文ページを特定し、1段下の階層として list に挿入する。戻り値は挿入件数。
+// 小見出しは必ず本文に出現順で並ぶため、先頭から1回だけ通し走査して順番に拾う（誤検出を防ぐ）。
+// 拾えなかったものだけ、あとから節の範囲内を個別に再検索する。
+async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabels){
+  const physList = list.map(e => {
+    const p = resolveLabel(e.label);
+    return (p === null || p === undefined) ? null : p;
+  });
+
+  const queue = [];
+  for(let i = 0; i < list.length; i++){
+    const subs = list[i]._subs;
+    if(!subs || subs.length === 0) continue;
+    const start = physList[i];
+    if(start === null){
+      log(`  ⚠ 「${list[i].title}」はページを解決できないため、小見出しの検出を見送りました`, "warn");
+      continue;
+    }
+    let limit = totalPages - 1;
+    for(let j = i + 1; j < list.length; j++){
+      if(physList[j] !== null && physList[j] > start){ limit = physList[j]; break; }
+    }
+    for(const s of subs) queue.push({ownerIdx: i, sub: s, key: normText(s), start, limit, phys: null});
+  }
+  if(queue.length === 0) return 0;
+
+  const fromPage = Math.min(...queue.map(q => q.start)) + 1;   // 1始まり
+  log(`── 小見出しを本文から検出中（${queue.length} 件 / ${fromPage}〜${totalPages}ページを走査） ──`);
+
+  // ① 通し走査（出現順に前方一致で拾う。少し先まで見て、飛ばされた項目は後段に回す）
+  let qi = 0;
+  for(let p = fromPage; p <= totalPages && qi < queue.length; p++){
+    const {runs} = await extractRuns(pdfjsDoc, p);
+    const cands = shortRunsOf(runs);
+    if(cands.length === 0) continue;
+    const physIdx = p - 1;
+    for(const c of cands){
+      const n = normText(c.text);
+      if(!n) continue;
+      for(let k = qi; k < Math.min(qi + 4, queue.length); k++){
+        const q = queue[k];
+        if(q.phys !== null) continue;
+        if(physIdx < q.start || physIdx > q.limit) continue;
+        if(q.key !== n) continue;
+        q.phys = physIdx;
+        qi = k + 1;
+        break;
+      }
+      if(qi >= queue.length) break;
+    }
+  }
+
+  // ② 取りこぼしを、その節の範囲内だけで個別に再検索（順序制約なし）
+  for(const q of queue){
+    if(q.phys !== null) continue;
+    for(let p = q.start + 1; p <= Math.min(q.limit + 1, totalPages); p++){
+      const {runs} = await extractRuns(pdfjsDoc, p);
+      const hit = shortRunsOf(runs).find(r => normText(r.text) === q.key);
+      if(hit){ q.phys = p - 1; q.viaFallback = true; break; }
+    }
+  }
+
+  // ③ 挿入（後ろの項目から処理してindexのずれを避ける）
+  const byOwner = new Map();
+  for(const q of queue){
+    if(q.phys === null) continue;
+    if(!byOwner.has(q.ownerIdx)) byOwner.set(q.ownerIdx, []);
+    byOwner.get(q.ownerIdx).push(q);
+  }
+  let added = 0, noLabel = 0;
+  for(const ownerIdx of [...byOwner.keys()].sort((a, b) => b - a)){
+    const parent = list[ownerIdx];
+    const rows = [];
+    for(const q of byOwner.get(ownerIdx)){
+      const label = labelForPhys(q.phys, parent.label, physList[ownerIdx], resolveLabel, pageLabels);
+      if(!label){ noLabel++; continue; }
+      rows.push({title: q.sub, label, level: (parent.level || 0) + 1, physIdx: q.phys});
+    }
+    if(rows.length > 0){ list.splice(ownerIdx + 1, 0, ...rows); added += rows.length; }
+  }
+  for(const e of list) if(e._subs) delete e._subs;
+
+  const missed = queue.filter(q => q.phys === null);
+  const fallback = queue.filter(q => q.viaFallback).length;
+  log(`  小見出しを追加：${added} 件`, added > 0 ? "ok" : "warn");
+  if(fallback > 0) log(`  （出現順では拾えず、節の範囲内を再検索して特定：${fallback} 件）`);
+  if(noLabel > 0) log(`  ⚠ ページラベルを決められず見送った小見出し：${noLabel} 件`, "warn");
+  if(missed.length > 0){
+    log(`  ⚠ 本文中に一致する行が見つからなかった小見出し：${missed.length} 件`, "warn");
+    for(const q of missed.slice(0, 20)) log(`    「${q.sub}」（PDF ${q.start + 1}ページ以降を探索）`, "warn");
+    if(missed.length > 20) log(`    …ほか ${missed.length - 20} 件`, "warn");
+    log("  （本文の表記が目次と異なる場合は、階層エディタで手動追加してください）", "warn");
+  }
+  return added;
 }
 
 // 目次項目が2行以上に折り返されている場合（1行目に見出しの前半だけがあり、ページ番号は2行目の末尾にある）、
@@ -2017,6 +2302,26 @@ async function autoDetectToc(){
       bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
     normalizeLevels(bmEntries);
+
+    // 小見出し（目次で「／」区切りで列挙される項目）を各項目に持たせておき、
+    // 本文からの位置特定は runBookmark 内（ページラベルの解決が済んだあと）で行う
+    if($("optSubheads").checked){
+      try{
+        const subsByIndex = await collectTocSubheads(pdfjsDoc, pages, parsed);
+        let subTotal = 0, withSub = 0;
+        subsByIndex.forEach((subs, i) => {
+          if(!subs || subs.length === 0 || !bmEntries[i]) return;
+          bmEntries[i]._subs = subs;
+          subTotal += subs.length;
+          withSub++;
+        });
+        if(subTotal > 0) log(`  小見出しを検出：${subTotal} 件（${withSub} 項目の下に「／」区切りで列挙）`);
+        else log("  （目次に「／」区切りの小見出し行は見つかりませんでした）");
+      }catch(e){
+        log(`  ⚠ 小見出しの読み取りに失敗しました：${e.message || e}`, "warn");
+        console.error(e);
+      }
+    }
 
     log(`  認識：${bmEntries.length} 件`, "ok");
     if(wrapped > 0) log(`  （2行以上に折り返された項目を連結：${wrapped} 件）`);
@@ -2856,7 +3161,7 @@ async function runBookmark(opts){
 
   try{
     log("── ファイル読み込み中 ──");
-    const entries = bmEntries.filter(e => e.title.trim() && e.label.trim());
+    let entries = bmEntries.filter(e => e.title.trim() && e.label.trim());
     const skipped = bmEntries.length - entries.length;
     log(`  しおりリスト：${entries.length} 件（階層エディタの内容を使用）`);
     if(skipped > 0){
@@ -2925,6 +3230,24 @@ async function runBookmark(opts){
       return null;
     };
     labelResolver = resolveLabel;   // ラベル欄の編集に通し番号を追随させるために保持
+
+    // 目次から拾った小見出しの本文ページを特定し、節の1段下のしおりとして挿入する
+    if(bmEntries.some(e => e._subs && e._subs.length > 0)){
+      try{
+        const added = await expandSubheads(bmEntries, pdfjsDoc, totalPages, resolveLabel, previewPageLabels);
+        if(added > 0){
+          normalizeLevels(bmEntries);
+          renderBmList();
+          entries = bmEntries.filter(e => e.title.trim() && e.label.trim());
+          log(`  しおりリスト：${entries.length} 件（小見出しを含む）`);
+        }
+      }catch(e){
+        // 小見出しの検出に失敗しても、目次から読んだ本体のしおりはそのまま作る
+        for(const en of bmEntries) if(en._subs) delete en._subs;
+        log(`  ⚠ 小見出しの検出に失敗したため、小見出しなしで続行します：${e.message || e}`, "warn");
+        console.error(e);
+      }
+    }
 
     // 未解決ラベルの事前確認（該当行は赤くハイライトし、スキップして続行）
     const unresolved = [];
@@ -3006,6 +3329,7 @@ function resetAll(){
   resultSignature = null; labelResolver = null;
   previewPdfjsDoc = null; currentPreviewPage = 1; currentTocPreviewPage = 1; currentTocIndex = 0;
   previewPageLabels = null;
+  resetRunsCache();
   mainViewer.clear(); tocViewer.clear();
   bmEntries = []; unresolvedLabels.clear();
 
