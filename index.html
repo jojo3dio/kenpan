@@ -213,6 +213,23 @@ body.editing .iconbtn .del{display:flex}
 .navsel{width:100%;font-family:var(--ui);font-size:13px;padding:9px 11px;border:1px solid var(--line);
   border-radius:9px;background:var(--panel2);color:var(--ink)}
 .navsel:focus{outline:none;border-color:var(--amber);background:var(--panel)}
+
+/* タイトルバー一体表示（window-controls-overlay）で開かれた場合の保険。
+   ヘッダーが×・最小化ボタンと重ならないよう幅を制限し、
+   ヘッダーの空き部分をウインドウ移動用のドラッグ領域にする。
+   manifest から window-controls-overlay を外していれば、この指定は働かない。 */
+@media (display-mode: window-controls-overlay){
+  .top{
+    box-sizing:border-box;
+    margin-left:env(titlebar-area-x, 0px);
+    width:env(titlebar-area-width, 100%);
+    min-height:env(titlebar-area-height, 40px);
+    -webkit-app-region:drag; app-region:drag;
+  }
+  .top .tbtn,.top .brand,.top button,.top a,.top input,.top select{
+    -webkit-app-region:no-drag; app-region:no-drag;
+  }
+}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
 .iconrow{display:flex;gap:7px;flex-wrap:wrap}
 .iconrow button{width:42px;height:42px;border-radius:11px;border:1px solid var(--line);
@@ -404,8 +421,13 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
         <label class="navopt"><input type="radio" name="navmode" value="auto"><span><b>自動</b><small>アプリのウインドウから開いたときは同じウインドウ、ブラウザのタブから開いたときは別タブ</small></span></label>
         <label class="navopt"><input type="radio" name="navmode" value="same"><span><b>常に同じウインドウ</b><small>ハブが消えてツールだけが表示されます。ツールの「ハブへ」で戻ります</small></span></label>
         <label class="navopt"><input type="radio" name="navmode" value="tab"><span><b>常に別タブ</b><small>ハブは残ります。複数のツールを同時に開けます</small></span></label>
+        <label class="navopt"><input type="radio" name="navmode" value="win"><span><b>常に別ウインドウ</b><small>ハブは小さいまま、ツールは大きなウインドウで開きます。Windows の Chrome / Edge 向け（Safari ではポップアップ許可が必要な場合があります）</small></span></label>
       </div>
       <p class="navnow" id="navNow"></p>
+    </div>
+    <div class="field">
+      <label>ウインドウの大きさ</label>
+      <label class="navopt"><input type="checkbox" id="fWinMem"><span><b>ハブとツールで別々に覚える</b><small>同じウインドウで開く設定のとき、ハブは小さく・ツールは大きく、といった大きさを行き来しても保ちます。アプリのウインドウでのみ働き、ブラウザが拒否した場合は何も起きません</small></span></label>
     </div>
     <div class="field">
       <label>起動時に直接開くツール（任意）</label>
@@ -515,8 +537,9 @@ function bust(u){
     return base + hash;
   }catch(e){ return u; }
 }
-/* ---------- ウインドウの開き方（同一ウインドウ／別タブ） ---------- */
+/* ---------- ウインドウの開き方（同一ウインドウ／別タブ／別ウインドウ） ---------- */
 const NAVMODE='kenpan-hub-navmode', STARTUP='kenpan-hub-startup';
+const WINMEM='kenpan-hub-winmem', WIN_HUB='kenpan-win-hub', WIN_TOOL='kenpan-win-tool';
 function isStandalone(){
   try{ return (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: minimal-ui)').matches)) || navigator.standalone===true; }
   catch(e){ return false; }
@@ -534,12 +557,52 @@ function addParam(u,k,v){
   return base + hash;
 }
 function isExternal(u){ return /^[a-z][a-z0-9+.-]*:/i.test(u) && u.indexOf(location.origin)!==0; }
+
+/* ウインドウサイズの記憶。ハブ用とツール用を別々に覚え、切り替え時に復元を試みる。
+   アプリの独立ウインドウ以外ではブラウザが黙って無視する（害はない）。 */
+function winMemOn(){ try{ return localStorage.getItem(WINMEM)!=='0'; }catch(e){ return true; } }
+function readSize(k){
+  try{ const v=localStorage.getItem(k); if(!v) return null;
+    const [w,h]=v.split(',').map(n=>parseInt(n,10));
+    return (w>200&&h>200)?{w,h}:null; }catch(e){ return null; }
+}
+function saveSize(k){
+  if(!winMemOn()) return;
+  const w=window.outerWidth, h=window.outerHeight;
+  if(w>200&&h>200){ try{ localStorage.setItem(k, w+','+h); }catch(e){} }
+}
+function applySize(k){
+  if(!winMemOn() || !isStandalone()) return;
+  const s=readSize(k); if(!s) return;
+  if(Math.abs(s.w-window.outerWidth)<12 && Math.abs(s.h-window.outerHeight)<12) return;
+  try{ window.resizeTo(s.w,s.h); }catch(e){}
+}
+/* ツールを別ウインドウで開くときの寸法（覚えていればそれを使う） */
+function toolWinFeatures(){
+  const s=readSize(WIN_TOOL);
+  const aw=screen.availWidth||1280, ah=screen.availHeight||860;
+  const w=Math.min(s?s.w:Math.round(aw*0.86), aw);
+  const h=Math.min(s?s.h:Math.round(ah*0.90), ah);
+  const l=Math.max(0,Math.round((aw-w)/2)), t=Math.max(0,Math.round((ah-h)/2));
+  return 'width='+w+',height='+h+',left='+l+',top='+t;
+}
+
 function openUrl(u){
   if(!u) return;
-  if(useSameWindow() && !isExternal(u)){ location.href=addParam(bust(u),'hub','1'); return; }
-  /* 別タブ。自作の同一オリジンなら noopener を付けず、ツール側の window.close() を可能にする */
   const ext=isExternal(u);
-  window.open(addParam(bust(u),'hub',ext?'ext':'tab'),'_blank', ext?'noopener':'');
+  if(ext){ window.open(addParam(bust(u),'hub','ext'),'_blank','noopener'); return; }
+  const m=navMode();
+  if(useSameWindow()){
+    saveSize(WIN_HUB);                 /* 戻ってきたときにハブの大きさを取り戻すため */
+    applySize(WIN_TOOL);
+    location.href=addParam(bust(u),'hub','1');
+    return;
+  }
+  /* 別タブ／別ウインドウ。自作の同一オリジンなので noopener は付けず、
+     ツール側の window.close() を使えるようにする */
+  const target=addParam(bust(u),'hub','tab');
+  if(m==='win'){ window.open(target,'_blank',toolWinFeatures()); return; }
+  window.open(target,'_blank','');
 }
 
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{localStorage.setItem(THEME,t);}catch(e){} }
@@ -809,6 +872,7 @@ function navLabel(){
   const m=navMode();
   if(m==='same') return '現在：常に同じウインドウで開きます。';
   if(m==='tab')  return '現在：常に別タブで開きます。';
+  if(m==='win')  return '現在：常に別ウインドウで開きます。ハブの大きさはそのまま保たれます。';
   return '現在：自動 — '+(isStandalone()
     ? 'アプリのウインドウで表示中なので、同じウインドウで開きます。'
     : 'ブラウザのタブで表示中なので、別タブで開きます。');
@@ -829,6 +893,7 @@ function buildStartupSel(){
 function openNav(){
   document.querySelectorAll('input[name=navmode]').forEach(r=>{ r.checked=(r.value===navMode()); });
   $('#navNow').textContent=navLabel();
+  $('#fWinMem').checked=winMemOn();
   buildStartupSel();
   $('#navWrap').classList.add('show');
 }
@@ -841,6 +906,14 @@ document.querySelectorAll('input[name=navmode]').forEach(r=>{
     setNavMode(r.value); $('#navNow').textContent=navLabel(); applyOpenHint(); });
 });
 $('#fStartup').addEventListener('change',()=>{ setStartupUrl($('#fStartup').value); });
+$('#fWinMem').addEventListener('change',()=>{
+  try{ localStorage.setItem(WINMEM, $('#fWinMem').checked?'1':'0'); }catch(e){}
+  if($('#fWinMem').checked) saveSize(WIN_HUB);
+});
+
+/* ハブに戻ってきたとき、ハブ用に覚えた大きさへ戻す */
+if(new URLSearchParams(location.search).has('hub')) applySize(WIN_HUB);
+window.addEventListener('pagehide',()=>saveSize(WIN_HUB));
 document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#navWrap').classList.contains('show')) closeNav(); });
 
 /* マニュアル枠（iframe）内の「ツールを開く」からの依頼を受ける */

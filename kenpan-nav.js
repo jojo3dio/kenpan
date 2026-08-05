@@ -6,21 +6,31 @@
      <script src="kenpan-nav.js"></script>
 
    ■ ツールのページ（「ハブに戻る」リンクが無いページ）
-     「ハブへ」ボタンを自動で追加します。ハブが付けるクエリで挙動が変わります。
+     画面右下に「ハブへ」ボタンを追加します。色はそのツール自身の
+     メインカラー（--accent / --acc / --amber / --shu のいずれか）を
+     そのまま使うので、テーマ切替にも自動で追従します。
+
+     ハブが付けるクエリで挙動が変わります。
        ?hub=1    ハブが同じウインドウで開いた → 押すとハブへ戻る
-       ?hub=tab  ハブが別タブで開いた         → 押すとこのタブを閉じる
+       ?hub=tab  別タブ／別ウインドウで開いた → 押すとこのタブを閉じる
                                                 （閉じられなければハブへ遷移）
        クエリ無し 直接ブックマークで開いた     → 押すとハブへ遷移
 
-     設置場所は .kp-strip → .foot → footer → .top → .bar … の順に自動で探します。
-     位置を指定したいときは、置きたい要素に data-kenpan-nav 属性を付けてください。
+     設置先は .kp-strip → .foot → footer … の順に探し、その帯を
+     右そろえにして最後に置きます。帯が画面外（スクロールしないと
+     見えない）ページでは、右下に固定表示へ自動で切り替えます。
+     位置を指定したいときは、置きたい要素に data-kenpan-nav を付けてください。
 
    ■ マニュアルのページ（a.back の「ハブに戻る」があるページ）
      ボタンは追加せず、既存リンクを賢くします。
        ・ハブのマニュアル枠（iframe）内では「ハブに戻る」を隠します
-         （枠の中にハブが二重表示されるのを防ぐため）
-       ・「ツールを開く」は、ハブの設定に合わせて同じウインドウ／別タブを切り替えます
-       ・iframe 内からツールを開くときは、親のハブに依頼して開きます
+       ・「ツールを開く」はハブの設定に合わせて開き方を切り替えます
+       ・iframe 内からツールを開くときは親のハブに依頼します
+
+   ■ ウインドウサイズの記憶
+     同じウインドウで使う設定のとき、ハブ用とツール用のウインドウサイズを
+     別々に覚え、切り替え時に復元を試みます（アプリのウインドウのみ／
+     ブラウザが拒否した場合は何も起きません）。
 
    ■ 作業中の離脱確認（任意）
      このスクリプトより前に次を定義しておくと、確認ダイアログが出ます。
@@ -33,13 +43,18 @@
   window.__kenpanNavReady = true;
 
   var HUB = 'index.html';
-  var NAVMODE_KEY = 'kenpan-hub-navmode';
+  var K_NAVMODE = 'kenpan-hub-navmode';
+  var K_WINMEM  = 'kenpan-hub-winmem';
+  var K_WINTOOL = 'kenpan-win-tool';
 
   var inFrame = (function(){
     try { return window.self !== window.top; } catch(e){ return true; }
   })();
 
   /* ---------- 状態の取得 ---------- */
+
+  function ls(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+  function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
 
   /* ハブがこのページを開いたときに付けたクエリ（'1' / 'tab' / '' ） */
   function hubParam(){
@@ -51,17 +66,17 @@
     try {
       return (window.matchMedia &&
               (matchMedia('(display-mode: standalone)').matches ||
-               matchMedia('(display-mode: minimal-ui)').matches)) ||
+               matchMedia('(display-mode: minimal-ui)').matches ||
+               matchMedia('(display-mode: window-controls-overlay)').matches)) ||
              navigator.standalone === true;
     } catch(e){ return false; }
   }
 
   /* ハブ側の設定を読む（同一オリジンなので localStorage を共有できる） */
   function preferSameWindow(){
-    var m = 'auto';
-    try { m = localStorage.getItem(NAVMODE_KEY) || 'auto'; } catch(e){}
+    var m = ls(K_NAVMODE) || 'auto';
     if (m === 'same') return true;
-    if (m === 'tab')  return false;
+    if (m === 'tab' || m === 'win') return false;
     return isStandalone();
   }
 
@@ -74,9 +89,29 @@
     return base + hash;
   }
 
-  function hubUrl(){
-    return HUB + '?_v=' + Date.now() + '&hub=1';
+  function hubUrl(){ return HUB + '?_v=' + Date.now() + '&hub=1'; }
+
+  /* ---------- ウインドウサイズの記憶 ---------- */
+
+  function winMemOn(){
+    return ls(K_WINMEM) !== '0' && isStandalone() && hubParam() === '1';
   }
+  function saveToolSize(){
+    if (!winMemOn()) return;
+    var w = window.outerWidth, h = window.outerHeight;
+    if (w > 200 && h > 200) lsSet(K_WINTOOL, w + ',' + h);
+  }
+  function restoreToolSize(){
+    if (!winMemOn()) return;
+    var v = ls(K_WINTOOL); if (!v) return;
+    var p = v.split(','), w = parseInt(p[0],10), h = parseInt(p[1],10);
+    if (!(w > 200 && h > 200)) return;
+    if (Math.abs(w - window.outerWidth) < 12 && Math.abs(h - window.outerHeight) < 12) return;
+    /* アプリのウインドウ以外ではブラウザが黙って無視する */
+    try { window.resizeTo(w, h); } catch(e){}
+  }
+
+  /* ---------- ハブへ戻る ---------- */
 
   function confirmLeave(){
     try {
@@ -87,12 +122,12 @@
     return true;
   }
 
-  /* ---------- ハブへ戻る ---------- */
   function goHub(){
     if (!confirmLeave()) return;
+    saveToolSize();
 
     if (hubParam() === 'tab') {
-      /* ハブが別タブで開いたウインドウ。スクリプトで開かれているので閉じられる。
+      /* 別タブ／別ウインドウ。スクリプトで開かれているので閉じられる。
          ブラウザ側で拒否された場合に備え、少し待ってからハブへ遷移する。 */
       try { window.close(); } catch(e){}
       setTimeout(function(){
@@ -104,24 +139,39 @@
   }
 
   /* ---------- スタイル ---------- */
+
+  /* ツール自身のメインカラーを使う。var() の入れ子で「定義されている
+     最初の変数」が選ばれるので、テーマ切替にもそのまま追従する。 */
+  var ACCENT = 'var(--accent, var(--acc, var(--amber, var(--shu, #b9791a))))';
+
   function injectStyle(){
     if (document.getElementById('kenpan-nav-style')) return;
     var css = ''
-      + '.kenpan-navbtn{display:inline-flex;align-items:center;gap:5px;'
-      + 'font-family:inherit;font-size:12px;line-height:1;cursor:pointer;'
-      + 'padding:6px 11px;margin:0 10px 0 0;vertical-align:middle;'
-      + 'border:1px solid rgba(128,120,104,.45);border-radius:8px;'
-      + 'background:rgba(255,255,255,.75);color:#3a3226;'
-      + 'transition:border-color .15s,background .15s;-webkit-appearance:none;appearance:none}'
-      + '.kenpan-navbtn:hover{border-color:#b9791a;background:#f6ead2;color:#2b2419}'
-      + '.kenpan-navbtn:focus-visible{outline:2px solid #b9791a;outline-offset:2px}'
-      + '.kenpan-navbtn svg{width:13px;height:13px;flex:0 0 auto}'
-      + '[data-theme="dark"] .kenpan-navbtn{border-color:rgba(200,190,170,.35);'
-      + 'background:rgba(255,255,255,.07);color:#ece5d8}'
-      + '[data-theme="dark"] .kenpan-navbtn:hover{border-color:#e8a33d;'
-      + 'background:rgba(232,163,61,.16);color:#fff}'
-      + '.kenpan-navstrip{flex:0 0 auto;padding:8px 16px;text-align:right;'
-      + 'border-top:1px solid rgba(128,120,104,.22)}';
+      + '.kenpan-navbtn{--kn:' + ACCENT + ';'
+      + 'display:inline-flex;align-items:center;gap:6px;'
+      + 'font-family:inherit;font-size:12.5px;font-weight:700;line-height:1;'
+      + 'cursor:pointer;padding:9px 15px;margin:0;vertical-align:middle;white-space:nowrap;'
+      + 'border:0;border-radius:10px;background:var(--kn);color:#fff;'
+      + 'box-shadow:0 2px 6px color-mix(in srgb, var(--kn) 34%, transparent),'
+      + '0 0 0 1px color-mix(in srgb, var(--kn) 62%, transparent);'
+      + 'transition:filter .15s,transform .15s,box-shadow .15s;'
+      + '-webkit-appearance:none;appearance:none}'
+      + '.kenpan-navbtn:hover{filter:brightness(1.08);transform:translateY(-1px);'
+      + 'box-shadow:0 5px 14px color-mix(in srgb, var(--kn) 40%, transparent),'
+      + '0 0 0 1px color-mix(in srgb, var(--kn) 70%, transparent)}'
+      + '.kenpan-navbtn:active{transform:translateY(0);filter:brightness(.96)}'
+      + '.kenpan-navbtn:focus-visible{outline:2px solid var(--kn);outline-offset:3px}'
+      + '.kenpan-navbtn svg{width:14px;height:14px;flex:0 0 auto}'
+      /* 設置先の帯を右そろえにする（ツールをまたいで見た目をそろえる） */
+      + '.kenpan-navhost{display:flex!important;align-items:center;'
+      + 'justify-content:flex-end!important;gap:12px;text-align:right!important}'
+      /* 帯が画面下端まで来ないページ用：帯ごと下端に固定する。
+         z-index は控えめにして、各ツールのモーダルが上に来るようにする */
+      + '.kenpan-navhost.kenpan-pinned{position:fixed!important;left:0;right:0;bottom:0;'
+      + 'z-index:60;margin:0!important;padding:8px 18px!important;'
+      + 'background:var(--bg, #fff);'
+      + 'border-top:1px solid var(--line, rgba(128,120,104,.22));'
+      + 'backdrop-filter:saturate(1.05)}';
     var s = document.createElement('style');
     s.id = 'kenpan-nav-style';
     s.textContent = css;
@@ -135,52 +185,79 @@
     b.id = 'kenpanNavBtn';
     b.title = 'KENPAN ハブへ戻る';
     b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + 'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
       + '<path d="M10 19l-7-7 7-7"/><path d="M3 12h13a5 5 0 0 1 5 5v2"/></svg>'
       + '<span>ハブへ</span>';
     b.addEventListener('click', goHub);
     return b;
   }
 
-  /* 設置先を優先順に探す。固定オーバーレイは各ツールのズーム操作パネルと
-     干渉するため使わない。 */
-  function mount(btn){
-    var explicit = document.querySelector('[data-kenpan-nav]');
-    if (explicit){ explicit.insertBefore(btn, explicit.firstChild); return 'data-kenpan-nav'; }
+  /* 設置先を優先順に探し、その帯を右そろえに整える */
+  var navHost = null;
 
-    var sels = ['.kp-strip', '.foot', 'footer', '.footer', '.statusbar',
-                '.top', '.topbar', '.bar', '.toolbar', '.head', 'header'];
-    for (var i = 0; i < sels.length; i++){
-      var el = document.querySelector(sels[i]);
-      if (el){ el.insertBefore(btn, el.firstChild); return sels[i]; }
+  function mount(btn){
+    var host = document.querySelector('[data-kenpan-nav]');
+    var label = 'data-kenpan-nav';
+
+    if (!host){
+      var sels = ['.kp-strip', '.foot', 'footer', '.footer', '.statusbar'];
+      for (var i = 0; i < sels.length; i++){
+        var el = document.querySelector(sels[i]);
+        if (el){ host = el; label = sels[i]; break; }
+      }
     }
 
-    /* フォールバック：.app（100vh flex）の最後、または body の末尾に帯を追加 */
-    var strip = document.createElement('div');
-    strip.className = 'kenpan-navstrip';
-    strip.appendChild(btn);
-    var app = document.querySelector('.app');
-    if (app){ app.appendChild(strip); return '.app（自前の帯）'; }
-    document.body.appendChild(strip);
-    return 'body（自前の帯）';
+    if (!host){
+      /* 帯が無いページ：自前の帯を作って body の末尾へ */
+      host = document.createElement('div');
+      host.className = 'kenpan-navstrip';
+      document.body.appendChild(host);
+      label = '自前の帯';
+    }
+
+    host.classList.add('kenpan-navhost');
+    host.appendChild(btn);              /* 帯の右端＝画面の右下 */
+    navHost = host;
+
+    try {
+      var cs = getComputedStyle(host);
+      if ((parseFloat(cs.paddingRight) || 0) < 14) host.style.paddingRight = '18px';
+      if ((parseFloat(cs.paddingBottom) || 0) < 6) host.style.paddingBottom = '8px';
+    } catch(e){}
+
+    return label;
+  }
+
+  /* 帯が画面の下端まで来ないページ（内容が短い・スクロールする作りの
+     ページ）では、帯ごと下端に固定して「右下」をそろえる。 */
+  function pinIfNeeded(){
+    var host = navHost;
+    if (!host) return false;
+    try {
+      var pinned = host.classList.contains('kenpan-pinned');
+      if (pinned) return true;
+
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var r = host.getBoundingClientRect();
+      if (r.height > 0 && vh - r.bottom <= 48 && r.bottom <= vh + 4) return false;
+
+      host.classList.add('kenpan-pinned');
+      /* 固定した帯の下に本文が隠れないよう、その分だけ余白を足す */
+      var h = host.getBoundingClientRect().height || 40;
+      document.body.style.paddingBottom =
+        ((parseFloat(getComputedStyle(document.body).paddingBottom) || 0) + h) + 'px';
+      return true;
+    } catch(e){ return false; }
   }
 
   /* ---------- マニュアルページの扱い ---------- */
 
-  function backLink(){
-    return document.querySelector('a.back[href*="index.html"], a.back[href="./"], a.back');
-  }
-
-  /* マニュアル内の「ツールを開く」ボタン */
-  function toolLink(){
-    return document.querySelector('.hero a.open[href], a.open[href$=".html"]');
-  }
+  function backLink(){ return document.querySelector('a.back'); }
+  function toolLink(){ return document.querySelector('.hero a.open[href], a.open[href$=".html"]'); }
 
   function relabel(a, text){
-    /* 「（別タブ）」の表記だけを差し替える。文言が無ければ何もしない */
-    try {
-      a.innerHTML = a.innerHTML.replace('（別タブ）', text);
-    } catch(e){}
+    if (!a) return;
+    try { a.innerHTML = a.innerHTML.replace('（別タブ）', text); } catch(e){}
   }
 
   function setupManual(back){
@@ -189,7 +266,7 @@
     if (inFrame){
       /* ハブのマニュアル枠の中。枠内にハブを開くと二重になるので隠す */
       back.style.display = 'none';
-      relabel(tool || document.createElement('a'), '');
+      relabel(tool, '');
       if (tool){
         var href = tool.getAttribute('href');
         tool.addEventListener('click', function(e){
@@ -197,7 +274,6 @@
             e.preventDefault();
             window.parent.postMessage({ kenpan: 'openTool', url: href }, location.origin);
           } catch(err){
-            /* 親に渡せなければ従来どおり別タブで開く */
             window.open(href, '_blank');
           }
         });
@@ -206,8 +282,7 @@
     }
 
     /* 独立したウインドウ／タブで開かれたマニュアル */
-    var tabbed = (hubParam() === 'tab');
-    if (tabbed){
+    if (hubParam() === 'tab'){
       back.setAttribute('href', '#');
       back.addEventListener('click', function(e){ e.preventDefault(); goHub(); });
     } else {
@@ -231,6 +306,7 @@
   }
 
   /* ---------- 初期化 ---------- */
+
   function init(){
     var back = backLink();
     var where;
@@ -238,8 +314,14 @@
     if (back){
       where = setupManual(back);
     } else {
+      restoreToolSize();
       injectStyle();
-      where = mount(makeButton());
+      var btn = makeButton();
+      where = mount(btn);
+      /* レイアウト確定後に、帯が画面下端に来ているかを確認する */
+      setTimeout(function(){ if (pinIfNeeded()) console.debug('[kenpan-nav] pinned'); }, 0);
+      window.addEventListener('resize', pinIfNeeded);
+      window.addEventListener('pagehide', saveToolSize);
     }
 
     if (window.console && console.debug){
