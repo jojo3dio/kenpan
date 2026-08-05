@@ -14,6 +14,22 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<!-- 起動時に開くツールへの転送。描画前に判定するため head 内に置く。
+     ?hub= が付いていれば「ハブへ戻ってきた」ときなので転送しない（＝脱出口）。 -->
+<script>
+(function(){
+  try{
+    if(new URLSearchParams(location.search).has('hub')) return;
+    var url=localStorage.getItem('kenpan-hub-startup')||'';
+    if(!url) return;
+    var mode=localStorage.getItem('kenpan-hub-navmode')||'auto';
+    var app=(window.matchMedia&&(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: minimal-ui)').matches))||navigator.standalone===true;
+    if(!(mode==='same'||(mode==='auto'&&app))) return;
+    var h=url.indexOf('#'), hash=h>=0?url.slice(h):'', base=h>=0?url.slice(0,h):url;
+    location.replace(base+(base.includes('?')?'&':'?')+'_v='+Date.now()+'&hub=1'+hash);
+  }catch(e){}
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -183,6 +199,20 @@ body.editing .iconbtn .del{display:flex}
 .field input:focus,.field textarea:focus{outline:none;border-color:var(--amber);background:var(--panel)}
 .field .mono{font-family:var(--mono);font-size:12px}
 .field textarea{resize:vertical;min-height:54px}
+.navopts{display:flex;flex-direction:column;gap:8px}
+.navopt{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);
+  border-radius:10px;background:var(--panel2);cursor:pointer;transition:.15s}
+.navopt:hover{border-color:var(--amber)}
+.navopt input{margin:2px 0 0;flex:0 0 auto;accent-color:var(--amber)}
+.navopt span{display:block}
+.navopt b{display:block;font-size:13px;font-weight:500}
+.navopt small{display:block;font-size:11px;color:var(--ink-dim);line-height:1.5;margin-top:2px}
+.navopt:has(input:checked){border-color:var(--amber);background:var(--amber-bg)}
+.navnow{margin:9px 0 0;font-size:11px;color:var(--ink-dim);line-height:1.6}
+.navnow code{font-family:var(--mono);font-size:10.5px;background:var(--panel2);padding:1px 5px;border-radius:4px}
+.navsel{width:100%;font-family:var(--ui);font-size:13px;padding:9px 11px;border:1px solid var(--line);
+  border-radius:9px;background:var(--panel2);color:var(--ink)}
+.navsel:focus{outline:none;border-color:var(--amber);background:var(--panel)}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
 .iconrow{display:flex;gap:7px;flex-wrap:wrap}
 .iconrow button{width:42px;height:42px;border-radius:11px;border:1px solid var(--line);
@@ -316,6 +346,9 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
     <span class="lbl show-grid"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="5" height="10" rx="1"/><rect x="10" y="7" width="4" height="10" rx="1"/><rect x="16" y="7" width="5" height="10" rx="1"/></svg></span><span class="t">横一列</span></span>
     <span class="lbl show-row"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span><span class="t">グリッド</span></span>
   </button>
+  <button class="tbtn mbtn" id="navBtn" title="ツールを同じウインドウで開くか、別タブで開くかを設定">
+    <span class="lbl"><span class="cmi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span><span class="t">ウインドウ</span></span>
+  </button>
   <button class="tbtn" id="editBtn">並べ替え・削除</button>
   <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
 </div>
@@ -324,7 +357,7 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
   <aside class="detail" id="detail"></aside>
   <section class="right">
     <h1>点検ツールを選ぶ</h1>
-    <p class="sub">アイコンをクリックすると、そのツールが別タブで開きます。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。</p>
+    <p class="sub" id="subInspect">アイコンをクリックすると、そのツールが別タブで開きます。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。</p>
     <div class="tiles" id="tiles-inspect"></div>
 
     <div class="zone-divider"></div>
@@ -358,6 +391,28 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
     <div id="browserList"></div>
     <p class="hint" style="margin:2px 0 0">インストール後は、Dock／タスクバー／スタートメニューのアイコンから直接開けます。ツールを追加・改訂したら、ハブの「更新」ボタンか開き直しで反映されます。</p>
     <div class="modal-actions"><button class="tbtn primary" id="installClose">閉じる</button></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="navWrap">
+  <div class="modal">
+    <h2>ウインドウの使い方</h2>
+    <p class="hint">主に1つのツールを使う方は「同じウインドウ」、複数のツールを並べて使う方は「別タブ」が向いています。設定はこのブラウザ（またはアプリ）に保存されます。</p>
+    <div class="field">
+      <label>ツールを開くとき</label>
+      <div class="navopts">
+        <label class="navopt"><input type="radio" name="navmode" value="auto"><span><b>自動</b><small>アプリのウインドウから開いたときは同じウインドウ、ブラウザのタブから開いたときは別タブ</small></span></label>
+        <label class="navopt"><input type="radio" name="navmode" value="same"><span><b>常に同じウインドウ</b><small>ハブが消えてツールだけが表示されます。ツールの「ハブへ」で戻ります</small></span></label>
+        <label class="navopt"><input type="radio" name="navmode" value="tab"><span><b>常に別タブ</b><small>ハブは残ります。複数のツールを同時に開けます</small></span></label>
+      </div>
+      <p class="navnow" id="navNow"></p>
+    </div>
+    <div class="field">
+      <label>起動時に直接開くツール（任意）</label>
+      <select id="fStartup" class="navsel"></select>
+      <p class="navnow">指定すると、ハブを開いた瞬間にそのツールへ進みます。ハブは「ハブへ」を押したときだけ表示されます。<br>「同じウインドウ」で開く設定のときだけ働きます。うまく戻れなくなった場合は <code>index.html?hub=1</code> を開いてください。</p>
+    </div>
+    <div class="modal-actions"><button class="tbtn primary" id="navClose">閉じる</button></div>
   </div>
 </div>
 
@@ -460,7 +515,32 @@ function bust(u){
     return base + hash;
   }catch(e){ return u; }
 }
-function openUrl(u){ if(u) window.open(bust(u),'_blank','noopener'); }
+/* ---------- ウインドウの開き方（同一ウインドウ／別タブ） ---------- */
+const NAVMODE='kenpan-hub-navmode', STARTUP='kenpan-hub-startup';
+function isStandalone(){
+  try{ return (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: minimal-ui)').matches)) || navigator.standalone===true; }
+  catch(e){ return false; }
+}
+function navMode(){ try{ return localStorage.getItem(NAVMODE)||'auto'; }catch(e){ return 'auto'; } }
+function setNavMode(m){ try{ localStorage.setItem(NAVMODE,m); }catch(e){} }
+function startupUrl(){ try{ return localStorage.getItem(STARTUP)||''; }catch(e){ return ''; } }
+function setStartupUrl(u){ try{ u?localStorage.setItem(STARTUP,u):localStorage.removeItem(STARTUP); }catch(e){} }
+/* 同一ウインドウで開くか。auto はアプリ（独立ウインドウ）なら同一、ブラウザのタブなら別タブ */
+function useSameWindow(){ const m=navMode(); return m==='same' || (m==='auto' && isStandalone()); }
+function addParam(u,k,v){
+  if(!u) return u;
+  const h=u.indexOf('#'), hash=h>=0?u.slice(h):''; let base=h>=0?u.slice(0,h):u;
+  base += (base.includes('?')?'&':'?') + k + '=' + v;
+  return base + hash;
+}
+function isExternal(u){ return /^[a-z][a-z0-9+.-]*:/i.test(u) && u.indexOf(location.origin)!==0; }
+function openUrl(u){
+  if(!u) return;
+  if(useSameWindow() && !isExternal(u)){ location.href=addParam(bust(u),'hub','1'); return; }
+  /* 別タブ。自作の同一オリジンなら noopener を付けず、ツール側の window.close() を可能にする */
+  const ext=isExternal(u);
+  window.open(addParam(bust(u),'hub',ext?'ext':'tab'),'_blank', ext?'noopener':'');
+}
 
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{localStorage.setItem(THEME,t);}catch(e){} }
 applyTheme((()=>{ try{return localStorage.getItem(THEME)||'light';}catch(e){return 'light';} })());
@@ -724,6 +804,55 @@ $('#manPop').onclick=()=>{
 };
 document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#manWrap').classList.contains('show')) closeManual(); });
 
+/* ---------- ウインドウ設定モーダル ---------- */
+function navLabel(){
+  const m=navMode();
+  if(m==='same') return '現在：常に同じウインドウで開きます。';
+  if(m==='tab')  return '現在：常に別タブで開きます。';
+  return '現在：自動 — '+(isStandalone()
+    ? 'アプリのウインドウで表示中なので、同じウインドウで開きます。'
+    : 'ブラウザのタブで表示中なので、別タブで開きます。');
+}
+function applyOpenHint(){
+  const el=$('#subInspect'); if(!el) return;
+  el.innerHTML='アイコンをクリックすると、そのツールが'
+    + (useSameWindow()?'<b>同じウインドウ</b>で開きます（ツール側の「ハブへ」で戻れます）':'別タブで開きます')
+    + '。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。';
+}
+function buildStartupSel(){
+  const s=$('#fStartup'); if(!s) return;
+  const cur=startupUrl();
+  s.innerHTML='<option value="">指定しない（ハブを表示）</option>'
+    + tools.map(t=>`<option value="${esc(t.url)}">${esc(t.name)}</option>`).join('');
+  if(tools.some(t=>t.url===cur)){ s.value=cur; } else { s.value=''; if(cur) setStartupUrl(''); }
+}
+function openNav(){
+  document.querySelectorAll('input[name=navmode]').forEach(r=>{ r.checked=(r.value===navMode()); });
+  $('#navNow').textContent=navLabel();
+  buildStartupSel();
+  $('#navWrap').classList.add('show');
+}
+function closeNav(){ $('#navWrap').classList.remove('show'); }
+$('#navBtn').onclick=openNav;
+$('#navClose').onclick=closeNav;
+$('#navWrap').addEventListener('click',e=>{ if(e.target===$('#navWrap')) closeNav(); });
+document.querySelectorAll('input[name=navmode]').forEach(r=>{
+  r.addEventListener('change',()=>{ if(!r.checked) return;
+    setNavMode(r.value); $('#navNow').textContent=navLabel(); applyOpenHint(); });
+});
+$('#fStartup').addEventListener('change',()=>{ setStartupUrl($('#fStartup').value); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#navWrap').classList.contains('show')) closeNav(); });
+
+/* マニュアル枠（iframe）内の「ツールを開く」からの依頼を受ける */
+window.addEventListener('message', function(e){
+  if(e.origin!==location.origin) return;
+  const d=e.data;
+  if(!d || d.kenpan!=='openTool' || !d.url) return;
+  if(typeof d.url!=='string' || /^[a-z][a-z0-9+.-]*:/i.test(d.url)) return; // 相対パスのみ受け付ける
+  closeManual(); openUrl(d.url);
+});
+
+applyOpenHint();
 renderAll();
 </script>
 </body>
