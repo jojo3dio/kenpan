@@ -3142,7 +3142,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
 <div class="fbmodal" id="fbModal">
   <div class="fbcard">
     <h3>フィードバックを送信</h3>
-    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧からの場合は該当箇所の切り抜き画像、それ以外は表示中ページの画像を含みます。PDFファイル全体は送信されません。</p>
+    <p class="fbsub">この比較について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※指摘一覧からの場合は該当箇所の切り抜き画像、それ以外は表示中ページの画像を含みます。あわせて、そのページのA/B抽出テキストも自動で送られます（実PDFを別途もらわなくても原因調査ができるようにするため）。PDFファイル全体は送信されません。</p>
 
     <div class="fbfield">
       <label>検出結果は正しかった？<span class="req">*</span></label>
@@ -3199,7 +3199,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.5";
+  const APP_VERSION = "v1.6";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
@@ -3253,6 +3253,22 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     }catch(e){ return ""; }
   }
 
+  // 実PDFを都度もらわずに見逃し報告の原因調査ができるよう、表示中ページのpdf.js抽出テキスト
+  // （S.aText/S.bText＝実際に検出ロジックが読んでいる文字列そのもの）をそのまま自動添付する。
+  // 画像は「見た目」しか伝えないが、このテキストがあれば「A/Bのテキスト自体が一致しているか」
+  // 「どの文字が抜けているか」をスプレッドシート上だけで確認できる。長すぎる場合のみ末尾を省略
+  // する（Googleスプレッドシートの1セル文字数上限は5万字なので、実運用では省略は起きない想定）。
+  const FB_TEXT_MAX = 20000;
+  function capturePageText(){
+    try{
+      const st=(typeof S!=="undefined")?S:{};
+      const trunc=s=>(s.length>FB_TEXT_MAX? s.slice(0,FB_TEXT_MAX)+"…(省略)" : s);
+      const aStr=(st.aText||[]).map(t=>t.str).join("");
+      const bStr=(st.bText||[]).map(t=>t.str).join("");
+      return { aText: trunc(aStr), bText: trunc(bStr) };
+    }catch(e){ return { aText:"", bText:"" }; }
+  }
+
   function openModal(pre){
     pre = pre || {};
     fbRegionIndex = (pre.regionIndex != null) ? pre.regionIndex : null;
@@ -3281,7 +3297,9 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       verdict:"", kind:"", fileA:f.a, fileB:f.b, page:f.pg, comment:"",
       reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要・手動オープン時は空のまま）
-      ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:""
+      ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:"",
+      // 表示中ページのA/B抽出テキスト（自動添付・手入力不要）
+      aText:"", bText:""
     }, extra||{});
   }
   function renderInline(state){
@@ -3370,6 +3388,9 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       // ruleId/expected/actual/bboxは空のまま（社員側の操作は増やさない）。
       extra.thumb = await captureFullPageThumb();
     }
+    // 実PDFを都度もらわなくても原因調査ができるよう、表示中ページのA/B抽出テキストは
+    // 指摘一覧経由・見逃し報告のどちらでも常に自動添付する（社員側の操作は増やさない）。
+    Object.assign(extra, capturePageText());
     btn.textContent="送信中…";
     const payload = basePayload(extra);
     try{
