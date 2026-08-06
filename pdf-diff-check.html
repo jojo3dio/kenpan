@@ -2402,7 +2402,11 @@ function updatePageLabel(){
 function gotoPage(n){
   const mx=maxPages(); n=Math.max(1,Math.min(mx, Math.round(n)||1));
   if(n===S.page){ updatePageLabel(); return; }
-  S.page=n; S.activeRegion=-1; refreshPage(false);
+  // ページ移動時はオフセットを必ずリセットしてから再計算する。
+  // リセットしないと、位置合わせがボックス/トンボ基準で決まらないページ（既定の中央原点・トンボ無し等）では
+  // 直前に表示していた別ページのオフセット（手動ドラッグ残り・トンボ誤検出等）がそのまま引き継がれてしまい、
+  // 実際には仕上がりサイズが一致していて本来ズレが無いページでも数mm「ズレて見える」不具合があった。
+  S.page=n; S.activeRegion=-1; S.offX=0; S.offY=0; refreshPage(true);
 }
 
 /* ============ 2セクション並列パネル ============ */
@@ -3139,7 +3143,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.1";
+  const APP_VERSION = "v1.2";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
@@ -3332,7 +3336,5 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   $$("#fbSend").addEventListener("click", send);
 })();
 </script>
-<script>window.KENPAN_HAS_WORK=function(){ return !!(S.docA||S.docB); };</script>
-<script src="kenpan-nav.js"></script>
 </body>
 </html>
