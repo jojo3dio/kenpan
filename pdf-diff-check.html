@@ -897,6 +897,17 @@ function boxIsTrivial(boxes){
   const eps=1; // pt
   return (boxes.media.w-b.w)<=eps && (boxes.media.h-b.h)<=eps;
 }
+// 現在表示中のA/B論理ページ双方が、信頼できる仕上がり(TrimBox/BleedBox)情報を持っているか。
+// 画像からのトンボ検出（detectTomboRect/tryTomboAlign）はTrimBox情報が実質無いファイル向けの
+// 救済策であり、信頼できるBox情報が既にある場合にまで画像ヒューリスティックを走らせると、
+// トンボではない罫線・見出し飾り等を誤ってトンボと誤検出し、比較範囲マスクや検出枠が
+// おかしくなることがある（実データのp69で確認：小さな誤ったtrim矩形を検出し、差分の
+// 囲み枠が本来の文字範囲を囲えなくなった）。信頼できるBox情報がある時は画像検出を試みない。
+function currentPairTrimUsable(){
+  const ma=S.aLogical?S.planA[S.aLogical-1]:null, mb=S.bLogical?S.planB[S.bLogical-1]:null;
+  if(!ma||!mb) return false;
+  return !boxIsTrivial(S.boxesA[ma.src-1]) && !boxIsTrivial(S.boxesB[mb.src-1]);
+}
 // 起点モードに従いS.offX/offYを設定。合わせられたらtrue。
 // 見開き分割が絡む場合は綴じ位置（ノド）の断ち代差を吸収するため必ず仕上がり(trim)基準。
 // ただしtrim/bleedがmediaと同一（トンボ情報なし）の場合は無意味な角合わせになるため中央そろえへ自動フォールバック。
@@ -956,11 +967,18 @@ async function getTextItems(doc, pageNum, scale){
       }
       out.push({str:it.str, x, y, w:Math.max(w,1), h:Math.max(h,1)});
     }
-    // 同一文字が同じ位置に二重描画されているテキストを除去（ノンブル「2」→「22」化を防ぐ）
-    const seen=new Set(), uniq=[];
+    // 同一文字が同じ位置に二重描画されているテキストを除去（ノンブル「2」→「22」化・
+    // フェイクボールド等での本文丸ごと二重描画を防ぐ）。
+    // 判定は格子丸め（座標を2px単位に丸めてキー一致を見る）ではなく実距離で行う：
+    // 丸めだと1px程度のズレが丸めの境界（.5）をまたいだ時に別キーになってしまい、
+    // 重複が素通りすることがあった（実データで、太字を「同じ文字を1px前後ずらして
+    // 二重に描画する」方式で表現しているページがあり、この境界またぎで大量の重複行が
+    // 素通りし、文字比較（buildLines/文字変更検出）側で本文全体が誤って「変わった」と
+    // 判定される不具合があった）。
+    const uniq=[];
     for(const it of out){
-      const key=it.str+"@"+Math.round(it.x/2)+","+Math.round(it.y/2);
-      if(seen.has(key)) continue; seen.add(key); uniq.push(it);
+      const dup = uniq.find(u => u.str===it.str && Math.abs(u.x-it.x)<=3 && Math.abs(u.y-it.y)<=3);
+      if(!dup) uniq.push(it);
     }
     return uniq;
   }catch(e){ return []; }   // テキストを持たないPDF（画像のみ等）は空
@@ -1260,8 +1278,10 @@ async function refreshPage(suggestCenter){
     if(aligned){
       /* trim/bleed/背 基準でそろえた */
     } else {
-      // PDFのボックス情報が使えない（トンボ無し等）場合、画像からトンボを検出して仕上がり基準でそろえる
-      const auto=tryTomboAlign(a,b);
+      // PDFのボックス情報が使えない（トンボ無し等）場合のみ、画像からトンボを検出して仕上がり基準でそろえる。
+      // 信頼できるBox情報がある（起点モードが「中央」のまま等でapplyAlignmentが使わなかっただけ）場合は
+      // 画像ヒューリスティックの誤検出リスクを避けるため試みない（currentPairTrimUsable参照）。
+      const auto=currentPairTrimUsable()?null:tryTomboAlign(a,b);
       if(auto){ S.offX=auto.offX; S.offY=auto.offY; tomboRect=auto.aRect; }
       else if(S.originMode!=="center"){
         if(a && b && (a.w!==b.w||a.h!==b.h)){ S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2); }
@@ -2918,8 +2938,8 @@ async function loadPageForExport(pg){
   let alignedExp=false, tomboRectExp=null;
   if(a&&b){
     alignedExp=applyAlignment(a,b);
-    if(!alignedExp){   // 起点/見開き(=仕上がり)基準を優先、次にトンボ画像検出、不可なら中央
-      const auto=tryTomboAlign(a,b);
+    if(!alignedExp){   // 起点/見開き(=仕上がり)基準を優先、次にトンボ画像検出（信頼できるBox情報がある時は誤検出回避のため試みない）、不可なら中央
+      const auto=currentPairTrimUsable()?null:tryTomboAlign(a,b);
       if(auto){ S.offX=auto.offX; S.offY=auto.offY; tomboRectExp=auto.aRect; }
       else{ S.offX=Math.round((a.w-b.w)/2); S.offY=Math.round((a.h-b.h)/2); }
     }
@@ -3143,7 +3163,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.2";
+  const APP_VERSION = "v1.3";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
