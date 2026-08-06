@@ -3368,7 +3368,7 @@ $("btnReset").addEventListener("click", resetAll);
 // ====== フィードバック（ISBN検版・トンボ計測等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.0";
+  const FB_APP_VERSION = "v1.1";
   const modal = $("fbModal");
   let fbVerdict = "";
 
@@ -3379,6 +3379,19 @@ $("btnReset").addEventListener("click", resetAll);
       const cv = $("pvCanvas");
       if(!cv || !cv.width || !cv.height) return "";
       return cv.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  // 現在のしおり階層一覧をテキスト化する（見逃し・誤検知の調査用にスプレッドシートへ添付）
+  function bookmarkDetailText(){
+    try{
+      if(!bmEntries || bmEntries.length === 0) return "";
+      const lines = bmEntries.map((e, i) => {
+        const phys = (typeof e.physIdx === "number") ? String(e.physIdx + 1) : "(未解決)";
+        const bad = unresolvedLabels.has(normalizeLabel(e.label)) ? " ⚠未解決" : "";
+        return `${i+1}\tlv${e.level}\t${e.title}\t${e.label}\t物理p${phys}${bad}`;
+      });
+      return lines.join("\n");
     }catch(e){ return ""; }
   }
 
@@ -3427,7 +3440,7 @@ $("btnReset").addEventListener("click", resetAll);
       file: (pdfFile && pdfFile.name) || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "",
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "",
       bookmarkCount: (typeof bmEntries !== "undefined" && bmEntries) ? bmEntries.length : 0
     }, extra || {});
   }
@@ -3446,6 +3459,7 @@ $("btnReset").addEventListener("click", resetAll);
     };
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "画像を準備中…";
     extra.thumb = capturePageThumb();
+    extra.detailText = bookmarkDetailText();
     btn.textContent = "送信中…";
     const payload = basePayload(extra);
     try{

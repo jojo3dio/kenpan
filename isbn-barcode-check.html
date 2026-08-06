@@ -1610,7 +1610,7 @@ function renderResult(rec){
           ruleId: it.ruleId||"", expected: it.expected!=null?String(it.expected):"",
           actual: it.actual!=null?String(it.actual):"",
           box: (it.box && s.boxes) ? s.boxes[it.box] : null,
-          page: rec.page, msg: it.label+"："+it.detail
+          page: rec.page, msg: it.label+"："+it.detail, setIdx: idx
         });
         fbBtn=`<button class="issfb" title="この判定は誤検知だと報告する" onclick="event.stopPropagation();fbFromIssue(${fbIdx})">👎 誤検知?</button>`;
       }
@@ -2063,7 +2063,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
 // 判定ロジック（cross_check等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.0";
+  const FB_APP_VERSION = "v1.1";
   const modal = $("#fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -2101,6 +2101,33 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
     return "";
   }
   function fbCurPage(){ return (selected>=0 && pages[selected]) ? ("p"+pages[selected].page) : ""; }
+
+  // フィードバック用：現在ページで検出したバーコード/ISBN/Cコード等の値をプレーンテキスト化する。
+  // 実PDFを別途もらわなくても、見逃し・誤検知報告の原因調査がスプレッドシート上でできるように
+  // するため（下版PDF差分チェッカーのaText/bText相当）。判定ロジックは変更しない。
+  // issが指定されればその検出組(setIdx)のみ、無ければページ内の全組を書き出す。失敗時は空文字。
+  function buildDetailText(iss){
+    try{
+      const rec = (selected>=0) ? pages[selected] : null;
+      if(!rec || !rec.sets || !rec.sets.length) return "";
+      const targets = (iss && iss.setIdx!=null && rec.sets[iss.setIdx]) ? [rec.sets[iss.setIdx]] : rec.sets;
+      const lines=[];
+      if(iss) lines.push("期待値: "+(iss.expected||"-")+" / 実際: "+(iss.actual||"-"));
+      targets.forEach((s,i)=>{
+        lines.push("[組"+(i+1)+"] status="+(s.status||"?"));
+        if(s.jan) lines.push("  JAN: "+(s.jan.jan13||s.jan.raw||""));
+        if(s.isbn) lines.push("  ISBN(1段目): "+(s.isbn.isbn13||s.isbn.raw||""));
+        if(s.dnc) lines.push("  日本図書コード(2段目): 192-"+s.dnc.ccode+"-"+String(s.dnc.price).padStart(5,'0')+"　C"+s.dnc.ccode);
+        if(s.colophon){
+          const ci=s.colophon.isbn, cc=s.colophon.ccode;
+          lines.push("  奥付けISBN: "+(ci&&ci.isbn13?ci.isbn13:(ci&&ci.error?"読取異常："+ci.error:"（読取不可）")));
+          lines.push("  奥付けCコード: "+(cc!=null?("C"+cc):"（読取不可）"));
+        }
+        (s.items||[]).forEach(it=>lines.push("  ["+(it.ok?"OK":it.level)+"] "+it.label+"："+it.detail));
+      });
+      return lines.join("\n");
+    }catch(e){ return ""; }
+  }
   function setVerdict(v){
     fbVerdict = v;
     document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
@@ -2149,7 +2176,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
       file: fbFileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: ""
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: ""
     }, extra || {});
   }
 
@@ -2181,6 +2208,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
       extra.thumb = capturePageThumb();
       btn.textContent = "送信中…";
     }
+    extra.detailText = buildDetailText(iss);
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);

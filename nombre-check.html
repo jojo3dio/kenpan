@@ -1488,7 +1488,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
 // 判定ロジック（analyze()等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.0";
+  const FB_APP_VERSION = "v1.1";
   const modal = $("fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -1533,6 +1533,25 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
     return "";
   }
   function fbCurPage(){ return pdf ? ("p."+(cur+1)) : ""; }
+
+  // フィードバック用：判定ロジックが見ているノンブル連番（現在ページ周辺の検出値・状態）を
+  // プレーンテキスト化する。実PDFを別途もらわなくても、見逃し・誤検知報告の原因調査が
+  // スプレッドシート上でできるようにするため（下版PDF差分チェッカーのaText/bText相当）。
+  // 判定ロジック（analyze()等）は変更しない。取得失敗時は空文字を返す。
+  function buildFolioDetailText(pageNo){
+    try{
+      if(!records || !records.length) return "";
+      const lines=[];
+      lines.push("[検出ノンブル一覧（p."+pageNo+" 周辺 ±3ページ）]");
+      records.filter(r=>Math.abs(r.page-pageNo)<=3).sort((a,b)=>a.page-b.page).forEach(r=>{
+        const val = r.excluded ? "（ノンブル無し）" : (r.detected ? (r.folioRaw??r.folio) : "未検出");
+        const pos = r.pos ? (" 端からの距離="+r.pos.outer_mm.toFixed(1)+"mm") : "";
+        lines.push("  p."+r.page+": 検出値="+val+" status="+r.status+(r.manual?"（手動）":"")+pos
+          +(r.font?(" "+r.font+"/"+r.size+"pt"):""));
+      });
+      return lines.join("\n");
+    }catch(e){ return ""; }
+  }
   function setVerdict(v){
     fbVerdict = v;
     document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
@@ -1581,7 +1600,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
       file: fileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: ""
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "", detailText: ""
     }, extra || {});
   }
 
@@ -1613,6 +1632,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
       extra.thumb = capturePageThumb();
       btn.textContent = "送信中…";
     }
+    extra.detailText = buildFolioDetailText(iss ? iss.page : (cur+1));
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);

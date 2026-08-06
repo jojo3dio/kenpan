@@ -3465,7 +3465,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 // 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
 // デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
 const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-const FB_APP_VERSION = "v2.1";
+const FB_APP_VERSION = "v2.2";
 
 let pyodide = null, pyReady = null;
 let pdfDoc = null, rawData = null, result = null, fileName = "";
@@ -3565,6 +3565,30 @@ document.getElementById("buildId").textContent = "072209";
     }catch(e){ console.error("[toc-kenpan] capturePageSnapshot failed:", e); return ""; }
   }
 
+  // 目次一覧の照合結果をテキスト化する（見逃し・誤検知の調査用にスプレッドシートへ添付）
+  function buildTocText(){
+    try{
+      if(!result || !result.toc_entries || !result.toc_entries.length) return "";
+      return result.toc_entries.map((e, i) => {
+        const matched = (e.matched_page_index != null)
+          ? `物理p${e.matched_page_index + 1}「${e.matched_heading || ""}」`
+          : "未照合";
+        return `${i+1}\t目次記載p${e.page}\t${e.title}\t→${matched}`;
+      }).join("\n");
+    }catch(e){ console.error("[toc-kenpan] buildTocText failed:", e); return ""; }
+  }
+
+  // 指定した物理ページ（result.pages のインデックス）の見出し・ノンブル・柱をテキスト化する
+  function buildPageText(pageIndex){
+    try{
+      if(!result || !result.pages || pageIndex == null || !result.pages[pageIndex]) return "";
+      const p = result.pages[pageIndex];
+      const heads = (p.headings || []).map(h => h.text).join(" ／ ") || "(見出しなし)";
+      const nom = (p.nombre != null) ? (p.nombre_raw != null ? p.nombre_raw : p.nombre) : "(ノンブルなし)";
+      return `物理p${p.index + 1}\tノンブル:${nom}\t柱:${p.hashira || "(なし)"}\t見出し:${heads}`;
+    }catch(e){ console.error("[toc-kenpan] buildPageText failed:", e); return ""; }
+  }
+
   function reporterStore(get, val){
     try{ if(get) return localStorage.getItem("toc-kenpan-reporter") || "";
          localStorage.setItem("toc-kenpan-reporter", val); }catch(e){}
@@ -3627,7 +3651,8 @@ document.getElementById("buildId").textContent = "072209";
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要）
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: ""
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "",
+      tocText: "", pageText: ""
     }, extra || {});
   }
 
@@ -3650,16 +3675,19 @@ document.getElementById("buildId").textContent = "072209";
     const iss = (fbIssueIndex != null && result && result.issues)
       ? result.issues[fbIssueIndex] : null;
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";
+    extra.tocText = buildTocText();
     if(iss){
       extra.ruleId = iss.id || "";
       extra.expected = iss.expected || "";
       extra.actual = iss.actual || "";
       extra.bbox = JSON.stringify(iss.rects || []);
+      extra.pageText = buildPageText(iss.page_index);
       btn.textContent = "画像を準備中…";
       extra.thumb = await captureIssueThumb(iss);
       btn.textContent = "送信中…";
     } else {
       // 指摘に紐づかない送信（見逃し・全体の感想など）も、表示中のページ画像を添付する
+      extra.pageText = buildPageText(viewPage);
       extra.thumb = capturePageSnapshot();
     }
     const payload = basePayload(extra);

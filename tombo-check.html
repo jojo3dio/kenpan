@@ -1544,7 +1544,7 @@ cen.addEventListener('drop',e=>{
 // ====== フィードバック（ISBN検版・ノンブル検版等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.0";
+  const FB_APP_VERSION = "v1.1";
   const modal = $("#fbModal");
   let fbVerdict = "";
 
@@ -1570,6 +1570,26 @@ cen.addEventListener('drop',e=>{
     return "";
   }
   function fbCurPage(){ return pdfDoc ? ("p"+curPg) : ""; }
+
+  // フィードバック用：現在ページの計測結果（検出トンボ線の役割別位置・寸法一覧）をプレーンテキストで
+  // 書き出す。実PDFを別途もらわなくても、見逃し・誤検知報告の原因調査がスプレッドシート上で
+  // できるようにするため（下版PDF差分チェッカーのaText/bText相当）。取得失敗時は空文字を返す。
+  function captureDetailText(){
+    try{
+      const r = pgRes[curPg]; if(!r) return "";
+      const lines=[];
+      lines.push("ページ: "+fbCurPage()+" / 検出トンボ本数: "+(r.tl?r.tl.length:0));
+      lines.push("[寸法]");
+      (r.dims||[]).forEach(d=>{
+        lines.push("  "+(d.label||"?")+": "+(d.distPt*PT2MM).toFixed(2)+"mm"+(d.manual?"（手動）":""));
+      });
+      lines.push("[検出トンボ線: 役割別位置(mm)]");
+      (r.tl||[]).forEach(l=>{
+        lines.push("  "+(l.role||"?")+": x="+(l.cx*PT2MM).toFixed(2)+" y="+(l.cy*PT2MM).toFixed(2));
+      });
+      return lines.join("\n");
+    }catch(e){ return ""; }
+  }
   function setVerdict(v){
     fbVerdict = v;
     document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
@@ -1608,7 +1628,7 @@ cen.addEventListener('drop',e=>{
       file: fbFileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "",
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "",
       detectedLines: r ? r.tl.length : 0,
       settings: JSON.stringify({
         unit: $("#unitSel").value, minLen: $("#minLen").value,
@@ -1632,6 +1652,7 @@ cen.addEventListener('drop',e=>{
     };
     const btn = $("#fbSend"); btn.disabled = true; btn.textContent = "画像を準備中…";
     extra.thumb = capturePageThumb();
+    extra.detailText = captureDetailText();
     btn.textContent = "送信中…";
     const payload = basePayload(extra);
     try{
