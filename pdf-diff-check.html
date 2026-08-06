@@ -1905,13 +1905,23 @@ function isFullwidthCh(ch){
       || (cp>=0xFFE0 && cp<=0xFFE6);   // 全角記号
 }
 // 戻り値: {findings:[region風], explained:[共通座標bbox]}
-// テキスト片を読み順（行クラスタ→左→右、行は上→下）で1文字ずつに展開（空白は除外）
+// テキスト片を読み順（行クラスタ→左→右、行は上→下）で1文字ずつに展開。
+// 空白は「連続分をまとめて1文字」として保持する（完全除外ではない）。
+// 理由：以前は空白を完全に除外していたため、和文＋英字混植で「英単語間に半角スペースを
+// 入れる／外す」という実際の校正修正（例："SomethingwhereIcanbeproudof"→
+// "Something where I can be proud of"）が、空白除去後の文字列が偶然A/Bで一致してしまい
+// 検出漏れになっていた（下版差分チェッカーの本来の目的である「意図した修正の確認」に反する）。
+// 一方、PDF.js側が行内の隙間から推測して挿入する空白（実データの座在しない合成スペース）は
+// A/Bでラン分割が微妙に違うと連続個数がブレることがあるため、連続する空白は1文字に圧縮して
+// 「個数のブレ」はノイズとして吸収しつつ、「空白の有無そのもの」「全角/半角の種類」の変更は
+// 引き続き検出できるようにする。
 function orderedChars(items){
   if(!items||!items.length) return [];
   const sh=[...items].sort((a,b)=>a.h-b.h); const mh=sh[sh.length>>1].h||10;
   const tol=Math.max(3,mh*0.7);
   const its=items.slice().sort((a,b)=>{ const ra=Math.round((a.y+a.h/2)/tol),rb=Math.round((b.y+b.h/2)/tol); return ra-rb || a.x-b.x; });
   const out=[];
+  let lastWasSpace=false;
   for(const it of its){
     const s=it.str, n=s.length;
     // 1ラン内の文字位置は「文字数で均等割り」ではなく、全角=2/半角=1の重み配分で推定する。
@@ -1920,16 +1930,39 @@ function orderedChars(items){
     // 実際の字形より手前で終わってしまい、差分ボックスがその文字を含まずに描かれる
     // （＝見た目上「その文字の変更を拾っていない」ように見える）不具合があった。
     // 判定ロジック・検出閾値は変更せず、文字ごとのx/w推定精度のみを上げる。
+    //
+    // 縦書き対応：PDF.jsが縦書きの1列をまるごと1アイテムで返すケースでは、item.w＝列幅
+    // （1文字分＝ほぼ一定）、item.h＝列内の全文字分の高さ合計（横書きの幅と高さの関係が逆転する）。
+    // これを横書き前提のまま「幅方向」に均等割りすると、全文字がほぼ同じ極小幅・同じyに
+    // 押し込まれ、文字ごとのbboxの高さがページの列の高さ近い巨大値のまま残ってしまう。
+    // この巨大bboxが後段の画素検証(diffFracCommon)に使われると、実際に変わった1文字分の
+    // インクの割合が箱全体に対してごく僅かになり、閾値未満で「実差分なし」と誤判定され、
+    // 本文の1〜数文字の置換（校正指摘の典型パターン）が検出漏れになる不具合があった。
+    // buildLines()の縦書き判定（アイテムの高さ>幅*1.6）と同じ基準をアイテム単位で適用し、
+    // 縦書きアイテムは高さ方向に均等割りする（横書きは従来通り幅方向のまま）。
+    const vert = n>1 && it.h > it.w*1.6;
     const weights=[]; let totalW=0;
     for(let k=0;k<n;k++){ const w=isFullwidthCh(s[k])?2:1; weights.push(w); totalW+=w; }
     let acc=0;
     for(let k=0;k<n;k++){
       const ch=s[k]; const wt=weights[k];
-      const cx=it.x+(totalW>0? it.w*acc/totalW : 0);
-      const cw=totalW>0? it.w*wt/totalW : it.w;
+      let cx,cy,cw,chh;
+      if(vert){
+        cx=it.x; cy=it.y+(totalW>0? it.h*acc/totalW : 0);
+        cw=it.w; chh=totalW>0? it.h*wt/totalW : it.h;
+      }else{
+        cx=it.x+(totalW>0? it.w*acc/totalW : 0); cy=it.y;
+        cw=totalW>0? it.w*wt/totalW : it.w; chh=it.h;
+      }
       acc+=wt;
-      if(!ch.trim()) continue;
-      out.push({ch, x:cx, y:it.y, w:Math.max(1,cw), h:it.h});
+      if(!ch.trim()){
+        if(lastWasSpace) continue;    // 連続する空白は先頭の1文字だけ残す（個数ブレを吸収）
+        out.push({ch, x:cx, y:cy, w:Math.max(1,cw), h:Math.max(1,chh)});   // 元の空白文字（全角/半角の種類）を保持
+        lastWasSpace=true;
+        continue;
+      }
+      out.push({ch, x:cx, y:cy, w:Math.max(1,cw), h:Math.max(1,chh)});
+      lastWasSpace=false;
     }
   }
   return out;
@@ -2036,7 +2069,10 @@ function textDiff(p){
   const _cancelled=new Set();
   // (1a) ページ全体の文字集合がA/B一致なら「並び替えのみ＝内容は不変」として本文差分を全抑制。
   //  （本文の改行位置違い・脚注記号の移動・参考文献/索引の並び替え等を丸ごと無効化）
-  const _ms=arr=>{const m=new Map();for(const c of arr){const ch=c.ch;if(!ch||!ch.trim())continue;m.set(ch,(m.get(ch)||0)+1);}return m;};
+  // 空白（orderedCharsで連続分を1文字に圧縮済み）も集合に含める：和欧混植の単語間スペース
+  // 追加/削除のような「非空白文字は不変だが空白の有無だけが変わった」修正まで、この多重集合
+  // 一致による全抑制で相殺してしまうと、orderedChars側の空白保持修正が意味を失うため。
+  const _ms=arr=>{const m=new Map();for(const c of arr){const ch=c.ch;if(!ch)continue;m.set(ch,(m.get(ch)||0)+1);}return m;};
   const _msA=_ms(aC), _msB=_ms(bC);
   let _msEqual = _msA.size===_msB.size;
   if(_msEqual){ for(const [k,v] of _msA){ if(_msB.get(k)!==v){ _msEqual=false; break; } } }
@@ -3163,7 +3199,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.3";
+  const APP_VERSION = "v1.5";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
