@@ -1971,7 +1971,14 @@ function orderedChars(items){
 function diffChars(a,b){
   const n=a.length,m=b.length;
   if(!n&&!m) return [];
-  if(n*m>4000000){ const as=a.map(c=>c.ch).join(""),bs=b.map(c=>c.ch).join(""); return as===bs?[]:[{aChars:a,bChars:b}]; }
+  // O(n*m)のDPテーブルが大きくなりすぎる場合の簡易フォールバック。文字が密集した1ページ
+  // （奥付・索引など2000字超）でこの上限に達すると、ページ全体を丸ごと1個の置換ブロックとして
+  // 扱ってしまい、その巨大ブロックが下のreflow相殺(1c)の「相手PDF全体との一致率」判定に
+  // かかると、ページ内のごく一部（例：奥付の刷数・日付など数文字）だけが変わった実修正でも
+  // 「ほぼ全文字が一致＝別ページへ移動しただけ」と誤認されて検出漏れになる不具合があった
+  // （実データで確認・修正：v1.7）。上限を4,000,000→25,000,000に引き上げ、この規模のページ
+  // （文字数5000字程度まで）でも粗いフォールバックを使わず文字単位の正確なLCSで差分を取る。
+  if(n*m>25000000){ const as=a.map(c=>c.ch).join(""),bs=b.map(c=>c.ch).join(""); return as===bs?[]:[{aChars:a,bChars:b}]; }
   const W=m+1, dp=new Uint32Array((n+1)*W);
   for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--){
     dp[i*W+j] = a[i].ch===b[j].ch ? dp[(i+1)*W+(j+1)]+1 : Math.max(dp[(i+1)*W+j], dp[i*W+(j+1)]);
@@ -2103,9 +2110,16 @@ function textDiff(p){
     // 個別ブロックの相殺は、ある程度の長さ（このファイル内の他の閾値と合わせて16字）以上の
     // 文字列にのみ適用し、短い反復ラベルの抜け・追加は素直に検出させる。
     const _MINLEN=16;
-    for(const d of _dels){ if(!_cancelled.has(d) && _norm(d.aStr).length>=_MINLEN && _cov(d.aStr,S.gBgram)>=_RTH) _cancelled.add(d); }
-    for(const x of _inss){ if(!_cancelled.has(x) && _norm(x.bStr).length>=_MINLEN && _cov(x.bStr,S.gAgram)>=_RTH) _cancelled.add(x); }
-    for(const r of _reps){ if(!_cancelled.has(r) && _norm(r.aStr).length>=_MINLEN && _norm(r.bStr).length>=_MINLEN && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH) _cancelled.add(r); }
+    // 上限側の安全策（v1.7）：このreflow相殺はもともと「段落・脚注1個分程度の断片が隣ページに
+    // 流れ込んだ」ケースを想定した長さ感（数十〜数百字）のヒューリスティックで、ページの内容が
+    // ほぼ丸ごと（数千字）一致するようなブロックを「移動」とみなすのは本来の想定外。
+    // diffCharsのO(n*m)フォールバック（巨大ページで丸ごと1ブロックになる）等により想定外の
+    // 超長ブロックが来た場合に備え、この長さを超えるブロックは相殺対象から除外し、素直に
+    // 画素検証（diffFracCommon）まで進めて実差分の有無を判定させる。
+    const _MAXLEN=600;
+    for(const d of _dels){ if(!_cancelled.has(d) && _norm(d.aStr).length>=_MINLEN && _norm(d.aStr).length<_MAXLEN && _cov(d.aStr,S.gBgram)>=_RTH) _cancelled.add(d); }
+    for(const x of _inss){ if(!_cancelled.has(x) && _norm(x.bStr).length>=_MINLEN && _norm(x.bStr).length<_MAXLEN && _cov(x.bStr,S.gAgram)>=_RTH) _cancelled.add(x); }
+    for(const r of _reps){ if(!_cancelled.has(r) && _norm(r.aStr).length>=_MINLEN && _norm(r.bStr).length>=_MINLEN && _norm(r.aStr).length<_MAXLEN && _norm(r.bStr).length<_MAXLEN && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH) _cancelled.add(r); }
     // ページがreflow文脈（不一致テキストが十分多く＝40字以上、その大半が相手PDFに存在）なら、
     // 残った短い継ぎ目断片(<16字)も抑制。実変更ページは相手に存在せずカバレッジが低いので対象外。
     const _aMiss=_dels.concat(_reps).map(x=>_norm(x.aStr)).join("");
@@ -3199,7 +3213,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.6";
+  const APP_VERSION = "v1.7";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
