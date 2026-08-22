@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノド糊しろ白 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#00b4d8;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:700px;margin:0 auto;padding:24px 18px 60px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+h3{font-size:14.5px;margin:24px 0 8px}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+
+.tblwrap{overflow-x:auto;margin:12px 0}
+table.tbl{border-collapse:collapse;width:100%;font-size:13px;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.tbl th,table.tbl td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);
+  vertical-align:top;line-height:1.65}
+table.tbl th{background:var(--panel2);font-size:12px;color:var(--ink-dim);font-weight:700;white-space:nowrap}
+table.tbl tr:last-child td{border-bottom:0}
+table.tbl td b{color:var(--glow)}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--glow);
+  border-radius:12px;padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+.note.warn{border-left-color:#e0245e}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+.tree{background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+  padding:14px 16px;margin:12px 0;overflow-x:auto}
+.tree .cap{font-family:var(--ui);font-size:12px;font-weight:700;color:var(--ink-dim);
+  margin-bottom:8px;letter-spacing:.02em}
+.tree pre{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.95;
+  color:var(--ink);white-space:pre}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">ノド糊しろ白</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="15" rx="1.6"/><path d="M8.6 7.5v9M15.4 7.5v9" stroke-linecap="round" opacity=".5"/><path d="M12 4.5v15" stroke-width="3.6" stroke-linecap="round"/></svg></div>
+    <div>
+      <h1>ノド糊しろ白</h1>
+      <p>製本の糊しろになる白を、下版PDFのノド側に後から追加します。InDesign・Illustratorに戻らずPDF単体で処理でき、元ファイルとバイト単位で一致する状態まで削除できます。</p>
+      <a class="open" href="nodo-shiro.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p class='lead'>貼り込み・展開もののノド側には、製本時に糊が付く<b>白の帯</b>が必要になります。このツールは、製本方法とパーツから<b>必要な白を判定</b>し、分割入稿された複数PDFの並び順から<b>継ぎ目の位置を割り出して</b>、下版PDFに白を一括で入れます。白は元PDFの末尾に<b>追記されるだけ</b>なので、あとから削除すれば元ファイルと完全に一致するところまで戻せます。ファイルはブラウザの中だけで処理され、<b>どこにも送信されません</b>。</p>
+
+  <div class='note'><b>まず試すなら：</b><code>testset/</code> の5ファイル（別丁扉・本文A・片観音展開・Z折展開・本文B）をまとめてドロップしてみてください。構成が自動で組み上がるところから継ぎ目の選択まで、ひと通りの流れを実データ無しで確認できます。</div>
+
+  <h2>2つのタブ</h2>
+  <div class="cards">
+    <div class="c"><div class="t">判定</div><div class="d">1問1画面。製本方法 → パーツ → ノドの印刷 → 位置、の順に答えると「内側◯mm／ドブ側◯mm」の数値が出ます。</div></div>
+    <div class="c"><div class="t">ノドに白付加</div><div class="d">分割入稿されたPDFをまとめて投げ込み、構成を組んで継ぎ目を決め、白を入れて書き出します。</div></div>
+  </div>
+
+  <h3>判定タブ</h3>
+  <ul class="plain">
+    <li>選択肢は数字キー <span class='tag'>1</span> <span class='tag'>2</span> <span class='tag'>3</span> でも選べます。</li>
+    <li><b>戻るボタン</b>と <span class='tag'>Backspace</span> で一つ前へ。上部のパンくずはクリックでその段階まで戻れます。</li>
+    <li>中綴じを選んだ時点、「印刷なし」を選んだ時点で、そこから先は聞かずに終わります。</li>
+    <li>表2-3だけは「背厚分＋両側2.5mm」で表紙まわりの処理なので、本文PDFへの適用対象からは外れます。</li>
+  </ul>
+  <p>三つ折りは巻三つ折り・Z折りとも「片観音折」として同じ判定になります。必要な白の<b>寸法</b>は同じで、違うのは<b>入る位置</b>だけなので、そこは台割タブで決めます。</p>
+
+  <h2>白を入れる（ノドに白付加）</h2>
+  <ol class="steps">
+    <li><b>PDFをまとめて投げ込む。</b>分かれて入稿されたファイルは<b>まとめてドロップ</b>してください。<b>投げ込んだ順番がそのまま本の並び順</b>になります。並びが違えば ▲▼ で入れ替えます。</li>
+    <li><b>種別を確認する。</b>各ファイルにはファイル名と判型から種別が自動で付きます（本文／別丁扉・見返し／二つ折り・片観音・両観音）。違っていればプルダウンで直してください。総頁は本文ファイルのページ数から自動計算されるので入力不要です。</li>
+    <li><b>基本条件を決める。</b>製本方法／綴じ方向／ページ掛け／<b>継ぎ目の既定</b>（前で貼る／後ろで貼る）。既定は「前で貼る」で、製本会社によって変わります。一度倒せば全継ぎ目に反映されます。</li>
+    <li><b>継ぎ目を選ぶ。</b>右パネルの「継ぎ目」に、貼り込みになるパーツが1行ずつ並びます。行をクリックすると選択画面に切り替わり、貼る面を絵柄を見ながら選べます。</li>
+    <li><b>「この内容で確定」を押す。</b>画面下に貼り付いているボタンです。<b>展開もの（二つ折り・巻三つ折り・Z折り・両観音）は確定が必須</b>で、押すまで書き出せません。</li>
+    <li><b>「白を追加して保存」で書き出す。</b>ファイルごとに、元の名前＋<code>_糊しろ白</code> で保存されます。構成とファイル割当は「構成を保存」でJSONに残せます。</li>
+  </ol>
+
+  <div class='note warn'><b>三つ折りは折り方を必ず確認してください。</b>巻三つ折りとZ折り（蛇腹）は展開PDFの見た目が同じで、ファイルからは判別できません。ファイル名に「Z折」「蛇腹」があるときだけ自動でZ折りに寄せ、無ければ巻三つ折り扱いになります。違っていれば種別プルダウンで直してください。</div>
+
+  <h2>展開入稿のパーツ</h2>
+  <p class='lead'>観音や二つ折りは<b>展開の見開きPDF</b>で入稿されるため、頁数とPDFのページ数が一致しません。構成側でこの対応を持っています。</p>
+  <div class="tblwrap">
+  <table class="tbl">
+    <tr><th>形状</th><th>頁数</th><th>PDF</th><th>糊付け位置</th><th>白</th></tr>
+    <tr><td>二つ折り</td><td>4p</td><td>2</td><td>折スジ</td><td>内1.5mm</td></tr>
+    <tr><td>片観音（巻三つ折り）</td><td>6p</td><td>2</td><td>折スジ</td><td>内1.5mm</td></tr>
+    <tr><td>片観音（Z折り）</td><td>6p</td><td>2</td><td><b>展開紙の端</b></td><td><b>内1.5＋ドブ3mm</b></td></tr>
+    <tr><td>両観音</td><td>8p</td><td>2</td><td>折スジ</td><td>内1.5mm</td></tr>
+  </table>
+  </div>
+
+  <h3>糊が付く面の数は「本の中の位置」で変わる</h3>
+  <div class="tblwrap">
+  <table class="tbl">
+    <tr><th>位置</th><th>糊が付く側</th><th>必要な面</th></tr>
+    <tr><td>本文の途中</td><td>前後どちらか片側だけ</td><td><b>1面</b></td></tr>
+    <tr><td>巻頭・巻末</td><td>隣の折との継ぎ目 ＋ 見返し・表2-3の対向面</td><td><b>2面（前後とも）</b></td></tr>
+  </table>
+  </div>
+  <p>選択画面の上に、そのパーツの位置と必要な面数が表示されます。<b>折スジの左右の面は「前で貼る側／後ろで貼る側」にあたる</b>ので、本文の途中ならそのうち1つ、巻頭・巻末なら2つとも必要になります。自動選択もこの面数に従い、途中の位置で候補が2つとも絵柄ありのときは<b>絵柄の少ない方</b>を採ります。必要より多く選ぶと「この位置は1面でよい」と注意が出ます（書き出しは止めません）。</p>
+
+  <h3>巻き込み側・ノドになる端を選ぶ</h3>
+  <ul class="plain">
+    <li><b>巻三つ折り・両観音</b>…「左を巻き込む／右を巻き込む」を選んでから、その折スジの面を選びます。</li>
+    <li><b>二つ折り</b>…表裏×左右の4候補から、絵柄の少ない面を選びます。</li>
+    <li><b>Z折り（蛇腹）</b>…本体に貼られるのは折スジではなく<b>展開紙の左端か右端</b>です。①ノドになる端 →②その端の<b>外面／中面</b>、の2段で選びます。</li>
+  </ul>
+  <p>同じ紙の端でも、外面と中面ではPDF上の左右が入れ替わります（裏なので）。左端をノドにすると外面はPDFの左辺、中面は右辺に白が入ります。ツール側でこの反転を持っているので、面を選べばそのまま正しい辺に入ります。糊付け面のサムネイルは<b>端の帯を拡大</b>して表示します（展開全体の縮小では1.5mmの中身が見えないため）。</p>
+
+  <h2>継ぎ目の行の見かた</h2>
+  <div class="tblwrap">
+  <table class="tbl">
+    <tr><th>表示</th><th>意味</th></tr>
+    <tr><td>一択</td><td>候補が1つしかないので決める必要なし</td></tr>
+    <tr><td><span class='tag'>✓ 右巻き込み・外面(右)</span></td><td>確定済み。何を選んだかがそのまま出ます</td></tr>
+    <tr><td>左端・外面／未確定</td><td>選んではいるが<b>まだ確定していない</b></td></tr>
+    <tr><td>巻き込み側を選ぶ／ノドになる端を選ぶ</td><td>まだ何も選んでいない</td></tr>
+    <tr><td>赤い表示</td><td>実測の結果、別の候補の方が白の追加が少ない</td></tr>
+  </table>
+  </div>
+  <ul class="plain">
+    <li><b>確定したあとに面や巻き込み側を触ると、また未確定に戻ります。</b>変えたなら、もう一度確定を押してください。</li>
+    <li><b>二択を倒し直すと、選んでいた面は解除されます。</b>別の面になるためです。</li>
+    <li>ノド際の絵柄を測っているあいだは確定を押せません（測り終わると押せるようになります）。</li>
+    <li>確定済みの継ぎ目は、あとから測り直しても自動選択で勝手に書き換わりません。</li>
+    <li><b>選択の余地がない継ぎ目は自動で確定します。</b>巻頭の別丁扉、巻末の端数などです。</li>
+  </ul>
+
+  <h2>貼り合わせる面の考え方</h2>
+  <h3>本文途中の貼り込み — 片面だけでよい</h3>
+  <p><b>貼り込むパーツの表と裏の両面に白を作る必要はありません。</b>糊が付くのは前後どちらか一方の面だけなので、どちらの面で貼るかはレイアウトを見て選べます。ただし、<b>選んだ側は貼り合う相手のページも白である必要があります</b>（白と白で貼り合わせる）。</p>
+  <p class='lead'>例：ペラの表が地色ベタ・裏が全面白だとします。裏の面で貼ることにして、その次のページが白なら、どちらにも手を入れずに済みます。<b>白を作るのは最低限に。</b>すでに白い面があるなら、それを使うのが正解です。</p>
+  <h3>見返し・表2-3に対向する場合 — 両面必要</h3>
+  <p>見返しや表2-3に対向する別丁扉・ペラは、<b>前後の両側が貼り付けられる</b>形になります。この場合は表裏どちらにも糊が付くため、<b>両面に絵柄があれば両面とも白が必要</b>です。指示一覧でも、この2つは別の注意として出し分けています。</p>
+
+  <h2>元に戻す</h2>
+  <p><b>「白を削除して保存」</b>を押すと元に戻ります。このツールは元PDFのバイト列を一切書き換えず、<b>末尾に追記するだけ</b>で白を足しています。削除は追記部分を切り落とす処理なので、<b>元ファイルとバイト単位で完全に一致</b>します。</p>
+  <p class='lead'>Acrobatで一度上書き保存された後や、<b>RIP・面付けソフトを通過した後</b>でも削除できます。この場合は該当部分だけを消す処理に切り替わるため完全一致にはなりませんが、白は確実に消えます。削除は<b>レイヤー名「ノド糊しろ白」を手がかり</b>に、フォームXObjectの中まで探して行います。レイヤー名を変えて適用した場合は、削除時にも同じ名前を指定してください。</p>
+  <div class='note'><b>電子書籍に流用するときは：</b>レイヤーを非表示にするのではなく、<b>削除したファイルを渡してください</b>。変換ツールがレイヤーの表示状態を無視することがあります。</div>
+
+  <h2>対応しているPDF</h2>
+  <ul class="plain">
+    <li>トンボ付き（TrimBoxあり）／トンボなし（TrimBoxなし）どちらも</li>
+    <li>旧来の相互参照表／相互参照ストリーム＋オブジェクトストリーム（InDesign書き出しはこちら）どちらも</li>
+    <li><code>/Rotate</code> が付いたページも、見た目の左右でノド側を判定します</li>
+  </ul>
+  <div class='note warn'><b>対応していないもの：</b>暗号化（パスワード付き）PDFは読み込み時に弾きます。電子署名付きPDFは追記すると署名が無効になります。<b>面付け済み・見開きPDFは使えません</b>（ノドが中央に来るため）。単ページ書き出しに適用してください。<br>また、<b>RIP通過後のファイルには白を追加できません</b>。TrimBoxが失われMediaBoxだけになり、用紙サイズを仕上がりとみなしてしまうためです。白の追加は必ず下版前の元データに対して行ってください（削除はRIP後でも効きます）。</div>
+
+  <h2>フィードバックを送る</h2>
+  <p class='lead'>このツールは<b>実案件の条件をまだ集めている途中</b>です。特に分割入稿・観音・Z折りは実データでの確認がこれからなので、<b>使ってみて気づいたことをそのまま送ってください</b>。ヘッダー右上の <span class='tag'>フィードバック</span> ボタン、または書き出し直後に画面下に出る誘導から送れます。</p>
+  <ol class="steps">
+    <li><b>結果を3択で選ぶ。</b>「問題なし」「結果が違う」「迷った」のいずれか。ここだけ必須です。</li>
+    <li><b>種別・該当ページを補う。</b>判定ルール／構成の組み立て／継ぎ目・貼る面／展開もの／白の位置・寸法／書き出し・削除／要望、から選べます。</li>
+    <li><b>コメントを書く。</b>「製本部の指示と違った」「Z折りの端の選び方が分からなかった」など、短くて構いません。</li>
+    <li><b>送信する。</b>お名前欄は任意ですが、入れておくと次から自動で入ります。</li>
+  </ol>
+  <p>案件の条件（製本方法・綴じ方向・ページ掛け・総頁）、ファイル名と種別、組み上がった構成、継ぎ目でどの面を選んだか、実際に出力される白の一覧は<b>自動で添付されます</b>。手で書き写す必要はありません。何が送られるかは、送信画面の「一緒に送られる内容を確認する」で全文を確認できます。</p>
+  <div class='note'><b>PDFファイルそのものはアップロードされません。</b>送られるのは上記のテキストと、プレビュー中の1面を縮小した画像だけです。取引先名などが出ると困る場合は、送信前に内容を確認のうえ、コメント欄で補足してください。</div>
+
+  <h2>うまくいかないとき</h2>
+  <dl class="faq">
+    <dt>「白を追加して保存」が押せない・「未確定 ◯ 件」になっている</dt>
+    <dd>展開もの（二つ折り・巻三つ折り・Z折り・両観音）で、貼る面の確定がまだ残っています。ボタンにカーソルを合わせると、どの継ぎ目が未確定かが出ます。該当する継ぎ目の行をクリックして面を選び、画面下の「この内容で確定」を押してください。</dd>
+    <dt>「この内容で確定」が押せない</dt>
+    <dd>ノド際の絵柄を測っている最中です。測り終わると押せるようになります。</dd>
+    <dt>継ぎ目の行が赤くなっている</dt>
+    <dd>実測の結果、別の候補の方が白の追加が少なくて済む、という表示です。エラーではありません。レイアウト上その面で貼る必要があるなら、そのままで構いません。</dd>
+    <dt>構成の並び順が違う</dt>
+    <dd>投げ込んだ順番がそのまま本の並び順になります。ファイル一覧の ▲▼ で入れ替えてください。種別（本文／別丁扉／観音など）が誤って推定されている場合も、プルダウンで直すと構成が組み直されます。</dd>
+    <dt>物理ページの左右が逆に見える</dt>
+    <dd>ノドの左右は<b>通しページではなく物理ページ</b>の偶奇で決まります。別丁扉が巻頭に入ると以降の物理ページが2つずれるため、通しページの感覚とはずれます。構成欄で物理ページを確認してください。</dd>
+    <dt>ドブ側の白が入らない・警告が出る</dt>
+    <dd>TrimBoxが無く、かつドブも無いPDFは、ドブ側の白を入れる余地がありません（内側のみ有効）。この場合は Python版の <code>--grow-media</code> で用紙ごと広げてください。</dd>
+    <dt>Z折りなのに巻三つ折りとして扱われている</dt>
+    <dd>展開PDFからは自動判別できません。ファイル名に「Z折」「蛇腹」が無いと巻三つ折り扱いになります。種別プルダウンでZ折りに変更してください。入稿時に折り方を確認しておくのが確実です。</dd>
+    <dt>過去に書き出した観音のPDFが気になる</dt>
+    <dd>2026年8月22日より前のバージョンには、<b>折スジ基準の白が紙の端に描かれる不具合</b>がありました（二つ折り・巻三つ折り・両観音が該当。単ページの案件は影響ありません）。画面の指示一覧は正しい位置を出していたため、PDFを開かないと気づけません。該当しそうな案件は白の位置を確認してください。</dd>
+  </dl>
+
+  <div class="foot">検版ハブ｜ノド糊しろ白 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。 ｜ © FUJIWARA PRINTING.inc</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+<script src="kenpan-nav.js"></script>
+</body>
+</html>
