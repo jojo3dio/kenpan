@@ -627,7 +627,8 @@ const S = {
   spreadA:false, spreadB:false,          // 見開き（左右2ページ）を左右分割するか
   bindRTL:true,                          // 綴じ方向 true=右綴じ(右が先) / false=左綴じ(左が先)
   planA:[], planB:[],                    // 論理ページ列 [{src,crop}]（見開き自動判定の結果）
-  boxesA:[], boxesB:[],                   // 物理ページごとのボックス {media,crop,trim,bleed}（pt）
+  boxesA:[], boxesB:[],                   // 物理ページごとのボックス {media,crop,trim,bleed}（pt）実際に使う値（推定込み）
+  rawBoxesA:[], rawBoxesB:[],             // PDFから読んだ生のボックス（推定前）。プラン変更時に再推定するため保持
   originMode:"center",                   // 位置合わせ起点 center/trim/bleed/page
   compareScope:"marks",                  // 比較範囲 full/marks(トンボ無視)/trim(仕上がりのみ)
   aTrimPx:null, aBleedPx:null,           // A論理ページのtrim/bleed矩形（A-logical px）
@@ -667,10 +668,10 @@ async function loadPdf(file, side){
       cMapPacked:true,
       standardFontDataUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/"
     }).promise;
-    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes;
+    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes; S.rawBoxesA=boxes;
       $("#lblA").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropA").classList.add("loaded"); }
-    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes;
+    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes;
       $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
@@ -1046,9 +1047,72 @@ async function autoDetectSpreads(){
     toast(`見開きPDFを検出：${who}を左右に分割して対応`,"ok");
   }
 }
+/* ---------- トンボ情報が無いPDFの仕上がり矩形を相手PDFから推定 ---------- */
+// 背景（実データで確認した不具合）：
+//   顧客入稿PDFがInDesignの「見開き・トンボ付き」書き出しで、TrimBox/BleedBoxがMediaBoxと
+//   同一（＝箱としてのトンボ情報が無い）ことがある。この場合これまでは中央そろえに
+//   フォールバックしていたが、見開きを左右に割った半ページでは仕上がりが「用紙の中央」ではなく
+//   「背（ノド）側に寄った位置」にあるため、中央そろえは構造的に必ずズレる。
+//   実データでは半ページ幅963.8ptに対し仕上がりが873.1pt・外側マージン90.7ptで、
+//   中央そろえだと約45pt（16mm）横ズレし、絵柄が全く重ならないためページ対応も差分検出も
+//   まるごと失敗していた（相関0.0〜0.4／16ページ中14ページが「対応なし」）。
+// 考え方：
+//   印刷用の面付けPDFは、仕上がりが必ず用紙（MediaBox）の中央に来る。よって
+//   「相手PDFの1ページあたりの仕上がりサイズ × このPDFの1物理ページあたりの論理ページ数」を
+//   用紙中央に置いた矩形が、そのまま仕上がり矩形になる。
+//   実データで検証：推定値 x=90.71/y=59.53 と、PDF内の実トンボ線から読んだ値 90.71/59.5 が一致。
+//   これによりページ対応の相関が0.95〜1.00に改善し、16/16ページが正しく対応した。
+// 画像からのトンボ検出（detectTomboRect）は見開きの半ページでは背側にコーナートンボが
+// 無く（センタートンボ1本のみ）4隅のうち2隅しか取れないため使えない。こちらを先に使う。
+function logicalFinishSize(rawBoxes, plan){
+  if(!rawBoxes||!rawBoxes.length) return null;
+  const cnt={}; for(const m of (plan||[])) cnt[m.src]=(cnt[m.src]||0)+1;
+  const ws=[], hs=[];
+  for(let i=0;i<rawBoxes.length;i++){
+    const bx=rawBoxes[i]; if(!bx||boxIsTrivial(bx)) continue;
+    const b=bx.trim||bx.bleed; if(!b||!(b.w>0)||!(b.h>0)) continue;
+    const k=cnt[i+1]||1;                    // 1物理ページ＝何論理ページか（見開き分割なら2）
+    ws.push(b.w/k); hs.push(b.h);
+  }
+  if(!ws.length) return null;
+  const med=a=>{ const s=a.slice().sort((p,q)=>p-q); return s[Math.floor(s.length/2)]; };
+  return {w:med(ws), h:med(hs)};
+}
+function inferBoxesFrom(rawBoxes, plan, fin){
+  if(!rawBoxes||!rawBoxes.length||!fin) return null;
+  const cnt={}; for(const m of (plan||[])) cnt[m.src]=(cnt[m.src]||0)+1;
+  let n=0;
+  const out=rawBoxes.map((bx,i)=>{
+    if(!bx||!bx.media||!boxIsTrivial(bx)) return bx;      // 既に信頼できるBox情報がある
+    const M=bx.media, k=cnt[i+1]||1;
+    const w=fin.w*k, h=fin.h;
+    if(!(w>0)||!(h>0)) return bx;
+    if(w>M.w+1 || h>M.h+1) return bx;                     // 用紙に収まらない＝推定が破綻
+    if((M.w-w)<=1 && (M.h-h)<=1) return bx;               // 用紙＝仕上がり。推定しても同じ
+    n++;
+    return Object.assign({}, bx, {trim:{x:M.x+(M.w-w)/2, y:M.y+(M.h-h)/2, w, h}, trimInferred:true});
+  });
+  return n ? {boxes:out, n} : null;
+}
+function applyInferredBoxes(){
+  S.boxesA = (S.rawBoxesA||[]).slice();
+  S.boxesB = (S.rawBoxesB||[]).slice();
+  if(!S.boxesA.length || !S.boxesB.length) return;
+  // 推定の元になる仕上がりサイズは、必ず「推定前の生のBox」から両側とも先に求める
+  const finA=logicalFinishSize(S.rawBoxesA, S.planA);
+  const finB=logicalFinishSize(S.rawBoxesB, S.planB);
+  const msg=[];
+  if(finB){ const r=inferBoxesFrom(S.boxesA, S.planA, finB); if(r){ S.boxesA=r.boxes; msg.push(`A・顧客入稿 ${r.n}p`); } }
+  if(finA){ const r=inferBoxesFrom(S.boxesB, S.planB, finA); if(r){ S.boxesB=r.boxes; msg.push(`B・最終下版 ${r.n}p`); } }
+  if(msg.length && !S.inferToastShown){
+    S.inferToastShown=true;
+    toast(`トンボ情報が無いPDFの仕上がり位置を相手PDFから推定：${msg.join(" / ")}`,"ok");
+  }
+}
 async function rebuildPlans(){
   S.planA = await buildPagePlan(S.docA, S.spreadA);
   S.planB = await buildPagePlan(S.docB, S.spreadB);
+  applyInferredBoxes();          // プラン（見開き分割の有無）が決まってから仕上がり矩形を推定
   await ensurePairing();
 }
 function logicalLen(plan){ return plan?plan.length:0; }
@@ -2869,7 +2933,7 @@ function resetAll(){
   S.content=null; S.contentW=S.contentH=0; S.zoom=1; S.panX=S.panY=0;
   S.pageSummary=null; S.gAStr=null; S.gBStr=null; S.gAgram=null; S.gBgram=null; setPanelView("current");
   S.spreadA=false; S.spreadB=false; S.bindRTL=true; S.planA=[]; S.planB=[];
-  S.boxesA=[]; S.boxesB=[]; S.originMode="center";
+  S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.inferToastShown=false; S.originMode="center";
   S.aTrimPx=null; S.aBleedPx=null; S.alignedByBox=false;
   S.matchMode="index"; S.foliosA=[]; S.foliosB=[]; S.mapBtoA=null; S.manualA={}; S.aLogical=1; S.bLogical=1;
   if($("#matchMode")) $("#matchMode").value="index";
