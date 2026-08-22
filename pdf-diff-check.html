@@ -626,6 +626,7 @@ const S = {
   panelView:"current",                   // "current" | "all"
   spreadA:false, spreadB:false,          // 見開き（左右2ページ）を左右分割するか
   bindRTL:true,                          // 綴じ方向 true=右綴じ(右が先) / false=左綴じ(左が先)
+  bindManual:false,                      // 綴じ方向をユーザーが手動指定したか（trueなら自動判別しない）
   planA:[], planB:[],                    // 論理ページ列 [{src,crop}]（見開き自動判定の結果）
   boxesA:[], boxesB:[],                   // 物理ページごとのボックス {media,crop,trim,bleed}（pt）実際に使う値（推定込み）
   rawBoxesA:[], rawBoxesB:[],             // PDFから読んだ生のボックス（推定前）。プラン変更時に再推定するため保持
@@ -675,8 +676,10 @@ async function loadPdf(file, side){
       $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
+    clearSigCache();                                    // 別のPDFに差し替わったので指紋を破棄
     await autoDetectSpreads();   // 見開きを先に自動判別（誤って「ノンブル自動」に倒さないため）
     await rebuildPlans();
+    await autoDetectBindDir();   // 見開きの左右どちらが先のページかを絵柄で自動判別
     // 見開き分割後もA/Bのページ数が違う（Bが抜き出しページ等）場合は自動で対応付け。
     // まず『ノンブル自動』を試し、全ページ対応が取れなければ『絵柄で自動対応』にフォールバック。
     if(S.docA && S.docB){
@@ -1183,16 +1186,30 @@ async function ensurePairing(){
 
 /* ---------- 絵柄で自動対応（仕上がり画像の相関＋単調増加DP） ---------- */
 // 論理ページを小さくレンダリングし、仕上がり(trim)でクロップして正規化した指紋(Float32)を返す
-async function pageSig(doc, plan, logical, boxes){
+// 指紋のキャッシュ。綴じ方向の自動判別は同じ (物理ページ,左右) の組を順番だけ変えて2回試すため、
+// キャッシュが無いと重い画像PDFのデコードを丸ごと2倍やり直すことになる。
+// キーに仕上がり矩形を含めるので、仕上がりの推定結果が変わったら自然に別エントリになる。
+let sigCache=new Map();            // key -> Float32Array
+let sigPageCache=null;             // 1回のマッチング中だけ有効な描画キャッシュ（見開きの左右で共有）
+function clearSigCache(){ sigCache=new Map(); }
+async function pageSig(doc, plan, logical, boxes, side){
   const m=plan[logical-1]; if(!doc||!m) return null;
   try{
     const page=await doc.getPage(m.src);
     const base=page.getViewport({scale:1});
     const vs=Math.min(0.6, 190/Math.max(1, base.height));   // 小さく描画（高さ~190px）
-    const r0=await renderOne(doc, m.src, vs); if(!r0) return null;
+    const bx0=boxes&&boxes[m.src-1];
+    const box0=bx0?(bx0.trim||bx0.crop||bx0.media):null;
+    const ck=`${side||"?"}|${m.src}|${m.crop||"-"}|${box0?[box0.x,box0.y,box0.w,box0.h].map(v=>v.toFixed(2)).join(","):"none"}`;
+    if(sigCache.has(ck)) return sigCache.get(ck);
+    let r0=null;
+    const pk=`${side||"?"}|${m.src}|${vs}`;
+    if(sigPageCache && sigPageCache.has(pk)) r0=sigPageCache.get(pk);
+    else { r0=await renderOne(doc, m.src, vs); if(sigPageCache && r0) sigPageCache.set(pk, r0); }
+    if(!r0) return null;
     const view=page.view;                                    // [x0,y0,x1,y1] cropbox(pt)
-    const bx=boxes&&boxes[m.src-1];
-    const box=bx?(bx.trim||bx.crop||bx.media):null;
+    const bx=bx0;
+    const box=box0;
     let x, y, w, h;
     if(box){
       x=(box.x-view[0])*vs; y=(view[3]-(box.y+box.h))*vs; w=box.w*vs; h=box.h*vs;
@@ -1209,6 +1226,7 @@ async function pageSig(doc, plan, logical, boxes){
     for(let i=0;i<g.length;i++){ const v=255-(0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2]); g[i]=v; mean+=v; }
     mean/=g.length; let sd=0; for(let i=0;i<g.length;i++){ g[i]-=mean; sd+=g[i]*g[i]; } sd=Math.sqrt(sd/g.length)||1;
     for(let i=0;i<g.length;i++) g[i]/=sd;
+    sigCache.set(ck, g);
     return g;
   }catch(e){ return null; }
 }
@@ -1239,13 +1257,54 @@ async function computeVisualPairing(){
   S.mapBtoA=new Array(lenB+1).fill(null);
   if(!lenA||!lenB) return {matched:0, lenB};
   const sigA=[], sigB=[];
-  for(let a=1;a<=lenA;a++) sigA.push(await pageSig(S.docA,S.planA,a,S.boxesA));
-  for(let b=1;b<=lenB;b++) sigB.push(await pageSig(S.docB,S.planB,b,S.boxesB));
+  sigPageCache=new Map();          // 見開きの左右で同じ描画を使い回す（走査後に破棄）
+  try{
+    for(let a=1;a<=lenA;a++) sigA.push(await pageSig(S.docA,S.planA,a,S.boxesA,"A"));
+    for(let b=1;b<=lenB;b++) sigB.push(await pageSig(S.docB,S.planB,b,S.boxesB,"B"));
+  } finally { sigPageCache=null; }
   const C=[]; for(let b=0;b<lenB;b++){ C[b]=new Array(lenA); for(let a=0;a<lenA;a++) C[b][a]=sigCorr(sigB[b],sigA[a]); }
   const asg=monotonicAssign(C, lenB, lenA);
   const MIN=0.5;   // これ未満は「対応なし」
-  for(let b=0;b<lenB;b++){ const a=asg[b]; S.mapBtoA[b+1]=(a>=0 && C[b][a]>=MIN)?(a+1):null; }
-  return {matched:S.mapBtoA.filter(x=>x).length, lenB};
+  let corrSum=0;
+  for(let b=0;b<lenB;b++){ const a=asg[b]; const ok=(a>=0 && C[b][a]>=MIN);
+    S.mapBtoA[b+1]=ok?(a+1):null; if(ok) corrSum+=C[b][a]; }
+  S.pairCorrSum=corrSum;                      // 綴じ方向の自動判別で使う一致度の合計
+  return {matched:S.mapBtoA.filter(x=>x).length, lenB, corrSum};
+}
+
+/* ---------- 綴じ方向（見開きのどちら半分が先のページか）を絵柄で自動判別 ---------- */
+// 背景（実データで確認した不具合）：
+//   綴じ方向はこれまで既定＝右綴じ固定で、欧文組みの左綴じ本を読み込むと見開きの
+//   論理ページ順が [p1,ダミー,p3,p2,p5,p4,…] のように1見開きごとに前後入れ替わる。
+//   絵柄マッチングは「Aのページ番号が単調増加」という制約で対応付けるため、入れ替わった
+//   列では全ページを拾えず、実データでは16ページ中7ページが取り違え／対応なしになった
+//   （症状＝レポートのページが飛ぶ・別ページと突き合わされる）。
+//   綴じ方向は絵柄の一致度を両方向で比べれば確実に判別できるので、自動で選ぶ。
+async function autoDetectBindDir(){
+  if(S.bindManual) return;                        // 手動指定を尊重
+  if(!S.docA || !S.docB) return;
+  if(!(S.spreadA || S.spreadB)) return;           // 見開き分割が無ければ綴じ方向は無関係
+  const trial=async(rtl)=>{
+    S.bindRTL=rtl;
+    S.planA=await buildPagePlan(S.docA, S.spreadA);
+    S.planB=await buildPagePlan(S.docB, S.spreadB);
+    applyInferredBoxes();
+    const r=await computeVisualPairing();
+    return {rtl, matched:r.matched, corrSum:r.corrSum||0, map:S.mapBtoA.slice()};
+  };
+  const rtl=await trial(true), ltr=await trial(false);
+  // 一致ページ数を最優先、同数なら一致度の合計で決める
+  const better = (ltr.matched>rtl.matched || (ltr.matched===rtl.matched && ltr.corrSum>rtl.corrSum)) ? ltr : rtl;
+  S.bindRTL=better.rtl;
+  S.planA=await buildPagePlan(S.docA, S.spreadA);
+  S.planB=await buildPagePlan(S.docB, S.spreadB);
+  applyInferredBoxes();
+  S.mapBtoA=better.map;
+  if($("#bindDir")) $("#bindDir").value = better.rtl ? "rtl" : "ltr";
+  const loser = (better===ltr)?rtl:ltr;
+  if(better.matched>loser.matched){
+    toast(`綴じ方向を自動判別：${better.rtl?"右綴じ（右→左）":"左綴じ（左→右）"}（絵柄一致 ${better.matched} 対 ${loser.matched} ページ）`,"ok");
+  }
 }
 
 function navCount(){
@@ -2825,11 +2884,13 @@ $("#spreadMode").addEventListener("change",async e=>{
     if(v==="auto"){ await autoDetectSpreads(); }
     else { S.spreadA=(v==="A"); S.spreadB=(v==="B"); }
     await rebuildPlans();
+    await autoDetectBindDir();
   }finally{ showBusy(false); }
   if(S.docA||S.docB) refreshPage(true); else updatePageLabel();
 });
 $("#bindDir").addEventListener("change",async e=>{
   S.bindRTL=(e.target.value==="rtl");
+  S.bindManual=true;                       // 手動で選んだら以後は自動判別しない
   S.page=1; S.offX=0; S.offY=0; S.activeRegion=-1; invalidateScan();
   showBusy(true); try{ await rebuildPlans(); }finally{ showBusy(false); }
   if((S.spreadA||S.spreadB)&&(S.docA||S.docB)) refreshPage(true);
@@ -2932,7 +2993,7 @@ function resetAll(){
   S.place=null; S.overlay=null; S.regions=[]; S.activeRegion=-1;
   S.content=null; S.contentW=S.contentH=0; S.zoom=1; S.panX=S.panY=0;
   S.pageSummary=null; S.gAStr=null; S.gBStr=null; S.gAgram=null; S.gBgram=null; setPanelView("current");
-  S.spreadA=false; S.spreadB=false; S.bindRTL=true; S.planA=[]; S.planB=[];
+  S.spreadA=false; S.spreadB=false; S.bindRTL=true; S.bindManual=false; S.planA=[]; S.planB=[];
   S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.inferToastShown=false; S.originMode="center";
   S.aTrimPx=null; S.aBleedPx=null; S.alignedByBox=false;
   S.matchMode="index"; S.foliosA=[]; S.foliosB=[]; S.mapBtoA=null; S.manualA={}; S.aLogical=1; S.bLogical=1;
