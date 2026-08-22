@@ -458,6 +458,13 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
 <script>
 const $=s=>document.querySelector(s);
 const STORE='kenpan-hub-tools-v1', THEME='kenpan-hub-theme', SEEN='kenpan-hub-seen-defaults-v1';
+const RENAMED='kenpan-hub-renamed-v1';
+/* 既定ツールの改名。保存済みの一覧は load() が優先するため、ファイルを差し替えただけでは
+   すでに開いたブラウザの表示は変わらない。ここに書いた分だけ一度きり上書きする。
+   利用者が手で付け直した名前（from と一致しないもの）は触らない。 */
+const RENAMES=[
+  {url:'nodo-shiro.html', from:'ノド糊しろ白', to:'ノド側の白'}
+];
 
 const ICONS={
   barcode:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg>',
@@ -483,8 +490,7 @@ const NAME_BREAKS={
   '目次整合検版':'目次整合<wbr>検版',
   'トンボ計測':'トンボ<wbr>計測',
   'PDF しおり追加':'PDF<wbr>しおり追加',
-  '単ページ見開き化':'単ページ<wbr>見開き化',
-  'ノド糊しろ白':'ノド<wbr>糊しろ白'
+  '単ページ見開き化':'単ページ<wbr>見開き化'
 };
 function capHtml(name){ return NAME_BREAKS[name] || esc(name); }
 
@@ -503,7 +509,7 @@ const DEFAULTS=[
    desc:'テキストの目次リストからPDFにブックマーク（アウトライン）を階層構造で書き込みます。ページラベルのズレも自動補正します。'},
   {name:'単ページ見開き化', url:'single-to-spread.html', manual:'manual-spread.html', cat:'版面調整', icon:'spread', group:'edit',
    desc:'章扉・奥付などファイルを分けて作った単ページを、見開きサイズに自動拡張します。ノンブル・柱の位置と綴じ方向から左右を自動判定し、正しい側に白ページを追加します。判定できないページは手動で左右を選べます。'},
-  {name:'ノド糊しろ白', url:'nodo-shiro.html', manual:'manual-nodo.html', cat:'ノド白付加', icon:'gutter', group:'edit',
+  {name:'ノド側の白', url:'nodo-shiro.html', manual:'manual-nodo.html', cat:'ノド白付加', icon:'gutter', group:'edit',
    desc:'製本の糊しろになる白を、下版PDFのノド側に後から追加します。製本方法・パーツから必要な白を判定し、分割入稿された複数PDFの並び順から継ぎ目を割り出して一括で入れられます。元ファイルとバイト単位で一致するところまで削除できます。'}
 ];
 
@@ -521,6 +527,16 @@ function load(){
   let seen=[]; try{ seen=JSON.parse(localStorage.getItem(SEEN)||'[]'); }catch(e){}
   const set=new Set(seen); let changed=false;
   DEFAULTS.forEach(d=>{ if(!set.has(d.url)){ if(!saved.some(t=>t.url===d.url)) saved.push({...d}); set.add(d.url); changed=true; } });
+  /* 既定ツールの改名を一度だけ反映する */
+  let done=[]; try{ done=JSON.parse(localStorage.getItem(RENAMED)||'[]'); }catch(e){}
+  const dset=new Set(done); let rch=false;
+  RENAMES.forEach(r=>{
+    const key=r.url+'→'+r.to; if(dset.has(key)) return;
+    const t=saved.find(x=>x.url===r.url);
+    if(t && t.name===r.from){ t.name=r.to; changed=true; }
+    dset.add(key); rch=true;
+  });
+  if(rch){ try{ localStorage.setItem(RENAMED, JSON.stringify([...dset])); }catch(e){} }
   if(changed){ try{localStorage.setItem(SEEN,JSON.stringify([...set]));}catch(e){} try{localStorage.setItem(STORE,JSON.stringify(saved));}catch(e){} }
   // 既存の保存データに、後から追加したマニュアルを補完（削除済みツールは復活させない）
   const dmap=Object.fromEntries(DEFAULTS.map(d=>[d.url,d]));
