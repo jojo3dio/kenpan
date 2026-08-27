@@ -86,9 +86,26 @@ input[type=file]{display:none}
 .ptag.manual{background:var(--warn-bg);color:var(--warn)}
 .ptag.guess{background:var(--panel2);color:var(--ink-dim);border:1px dashed var(--line)}
 .ptag.spread{background:var(--panel2);color:var(--ink-dim)}
+.ptag.deleted{background:var(--err-bg);color:var(--err)}
 .side-pick{display:flex;gap:4px;flex:0 0 auto}
 .side-pick button{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--ink-dim);font-size:12px}
 .side-pick button.on{border-color:var(--acc);background:var(--acc);color:var(--acc-ink);font-weight:700}
+.delbtn{width:26px;height:26px;flex:0 0 auto;border-radius:7px;border:1px solid var(--line);background:var(--panel2);
+  color:var(--ink-faint);font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;font-family:var(--ui)}
+.delbtn:hover{border-color:var(--err);background:var(--err-bg);color:var(--err)}
+.prow.del .delbtn{border-color:var(--acc);color:var(--acc);background:var(--acc-bg)}
+.prow.del .delbtn:hover{border-color:var(--acc);background:var(--acc);color:var(--acc-ink)}
+.prow.del{opacity:.55}
+.prow.del .thumb{filter:grayscale(1)}
+.prow.del .thumb img{opacity:.6}
+.prow.del .pnum{text-decoration:line-through}
+.delbar{display:flex;align-items:center;gap:8px;padding:7px 14px;border-bottom:1px solid var(--line);
+  background:var(--err-bg);color:var(--err);font-size:11.5px}
+.delbar b{font-family:var(--mono);font-weight:600}
+.delbar .sp{flex:1}
+.delnote{display:flex;align-items:center;gap:8px;color:var(--err);font-size:11.5px}
+.delnote .undo{font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--err);background:transparent;color:var(--err);font-family:var(--ui)}
+.delnote .undo:hover{background:var(--err);color:#fff}
 
 .center{flex:1;position:relative;display:flex;flex-direction:column;min-width:0}
 .stage{flex:1;position:relative;display:flex;min-height:0;background:var(--stage)}
@@ -175,6 +192,10 @@ input[type=file]{display:none}
           <button class="navbtn" id="pNext" title="次のページ">▶</button>
           <button class="navbtn" id="pLast" title="最後のページ">▶|</button>
         </div>
+        <span class="delnote hidden" id="delnote">
+          <span>このページは削除指定されています（書き出しに含まれません）</span>
+          <button class="undo" id="btnUndelCur">削除を戻す</button>
+        </span>
         <div class="zoomctl hidden" id="zoomctl">
           <button id="zOut" title="縮小">−</button>
           <span id="zoomhint">100%</span>
@@ -193,11 +214,16 @@ input[type=file]{display:none}
           <span id="singleCount" style="font-family:var(--mono)"></span>
         </div>
       </div>
-      <div class="plist" id="plist"><div class="empty-msg">PDFを読み込むと全ページが一覧表示されます。見開きサイズと異なる単ページ（章扉・奥付など）には左右選択ボタンが表示されます。</div></div>
+      <div class="delbar hidden" id="delbar">
+        <span id="delText"></span>
+        <span class="sp"></span>
+        <button class="jumpbtn" id="btnUndelAll" title="削除指定をすべて解除">すべて戻す</button>
+      </div>
+      <div class="plist" id="plist"><div class="empty-msg">PDFを読み込むと全ページが一覧表示されます。見開きサイズと異なる単ページ（章扉・奥付など）には左右選択ボタンが表示されます。各行の×で不要なページを削除できます（書き出し時に除外されます）。</div></div>
     </div>
   </div>
 
-  <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：①そのページ自身のノンブル(奇数/偶数)→②書籍内の別ページのノンブルからの逆算(ファイル境目で単ページが連続する場合も対応)→③柱の位置を近傍の見開きページと照合→④手動選択、の順で判定します。</div>
+  <div class="foot">単ページは見開き最頻サイズを基準に自動検出されます。判定方式：①そのページ自身のノンブル(奇数/偶数)→②書籍内の別ページのノンブルからの逆算(ファイル境目で単ページが連続する場合も対応)→③柱の位置を近傍の見開きページと照合→④手動選択、の順で判定します。／不要なページは一覧の×（またはDeleteキー）で削除できます。削除は指定するだけで元PDFは変更されず、↩でいつでも戻せます。実際に取り除かれるのは「PDFを保存」時です。</div>
 <div class="kp-strip">© FUJIWARA PRINTING.inc</div>
 </div>
 
@@ -281,6 +307,8 @@ async function loadFile(file){
   banner(false);
   renderList();
   renderStat();
+  updateDelBar();
+  updateDelNote();
   $("#btnExport").disabled=false;
   $("#btnReset").disabled=false;
   if(pages.length){
@@ -496,7 +524,7 @@ async function analyze(){
   let bestH=null, bestC=-1;
   for(const k in hCounts) if(hCounts[k]>bestC){ bestC=hCounts[k]; bestH=Number(k); }
   spreadW=maxW; spreadH=bestH;
-  pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; });
+  pages.forEach(p=>{ p.isSingle = p.w < spreadW*0.7; p.side=null; p.method=null; p.detail=""; p.deleted=false; });
 
   await scanNombres();
 
@@ -523,42 +551,87 @@ async function makeThumb(p){
 }
 
 /* ---------------- UI ---------------- */
+function liveCount(){ return pages.filter(p=>!p.deleted).length; }
+function delCount(){ return pages.filter(p=>p.deleted).length; }
+
 function renderStat(){
-  const singles=pages.filter(p=>p.isSingle);
-  $("#singleCount").textContent=`全${pages.length}p・単ページ${singles.length}件`;
+  const singles=pages.filter(p=>p.isSingle && !p.deleted);
+  const d=delCount();
+  $("#singleCount").textContent=`全${pages.length}p・単ページ${singles.length}件`+(d?`・削除${d}p`:"");
 }
+
+/* 削除は「書き出しから除外する指定」で、元PDFには手を触れない。
+   pages配列の添字は元PDFのページ添字と1:1で対応しているため、
+   ここで配列から要素を取り除かず deleted フラグだけを立て、
+   書き出し時にまとめて removePages する。これにより解析結果
+   （ノンブル逆算のord等）を壊さずに、いつでも元に戻せる。 */
+function setDeleted(idx, val){
+  const p=pages[idx]; if(!p) return;
+  if(val && liveCount()<=1 && !p.deleted){
+    alert('残り1ページのため削除できません。');
+    return;
+  }
+  p.deleted=!!val;
+  renderList(); renderStat(); updateDelBar();
+  if(selected===idx) updateDelNote();
+}
+function toggleDeleted(idx){ setDeleted(idx, !pages[idx].deleted); }
+
+function updateDelBar(){
+  const d=delCount();
+  const bar=$("#delbar");
+  bar.classList.toggle('hidden', d===0);
+  if(d){
+    const nums=pages.filter(p=>p.deleted).map(p=>'p.'+p.num);
+    const shown=nums.slice(0,8).join(', ')+(nums.length>8?` ほか${nums.length-8}件`:'');
+    $("#delText").innerHTML=`<b>${d}ページ</b>を削除（${shown}）`;
+  }
+}
+function updateDelNote(){
+  const p=(selected>=0)?pages[selected]:null;
+  $("#delnote").classList.toggle('hidden', !(p&&p.deleted));
+}
+$("#btnUndelAll").onclick=()=>{
+  pages.forEach(p=>p.deleted=false);
+  renderList(); renderStat(); updateDelBar(); updateDelNote();
+};
+$("#btnUndelCur").onclick=()=>{ if(selected>=0) setDeleted(selected,false); };
 
 function renderList(){
   const el=$("#plist"); el.innerHTML="";
-  if(!pages.length){ el.innerHTML='<div class="empty-msg">PDFを読み込むと、見開きサイズと異なる単ページ（章扉・奥付など）がここに一覧表示されます。</div>'; return; }
+  if(!pages.length){ el.innerHTML='<div class="empty-msg">PDFを読み込むと、見開きサイズと異なる単ページ（章扉・奥付など）がここに一覧表示されます。各行の×で不要なページを削除できます（書き出し時に除外されます）。</div>'; return; }
   pages.forEach((p,idx)=>{
     const row=document.createElement('div');
-    row.className='prow'+(selected===idx?' sel':'');
+    row.className='prow'+(selected===idx?' sel':'')+(p.deleted?' del':'');
+    const delBtn=`<button class="delbtn" data-del="1" title="${p.deleted?'削除を取り消す':'このページを削除（書き出しから除外）'}">${p.deleted?'↩':'×'}</button>`;
     if(!p.isSingle){
       row.innerHTML=`
         <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
         <div class="pinfo">
           <div class="pnum">p.${p.num}</div>
-          <span class="ptag spread">見開き</span>
-        </div>`;
-      row.onclick=()=>{ selected=idx; renderList(); drawPreview(idx); };
-      el.appendChild(row);
-      return;
+          <span class="ptag ${p.deleted?'deleted':'spread'}">${p.deleted?'削除':'見開き'}</span>
+        </div>
+        ${delBtn}`;
+    }else{
+      const tagClass=p.method==='nombre'?'nombre':(p.method==='infer'?'infer':(p.method==='hashira'?'hashira':(p.method==='guess'?'guess':'manual')));
+      const tagLabel=p.method==='nombre'?'ノンブル判定':(p.method==='infer'?'ノンブル逆算':(p.method==='hashira'?'柱で判定':(p.method==='guess'?'推定(要確認)':'要手動選択')));
+      row.innerHTML=`
+        <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
+        <div class="pinfo">
+          <div class="pnum">p.${p.num}</div>
+          <span class="ptag ${p.deleted?'deleted':tagClass}">${p.deleted?'削除':tagLabel}</span>
+        </div>
+        ${p.deleted?'':`<div class="side-pick">
+          <button data-side="left" class="${p.side==='left'?'on':''}" title="左ページに寄せる">左</button>
+          <button data-side="right" class="${p.side==='right'?'on':''}" title="右ページに寄せる">右</button>
+        </div>`}
+        ${delBtn}`;
+      if(!p.deleted){
+        row.querySelector('[data-side="left"]').onclick=(e)=>{ e.stopPropagation(); p.side='left'; p.method='manual'; p.detail='手動選択（左）'; renderList(); if(selected===idx) drawPreview(idx); };
+        row.querySelector('[data-side="right"]').onclick=(e)=>{ e.stopPropagation(); p.side='right'; p.method='manual'; p.detail='手動選択（右）'; renderList(); if(selected===idx) drawPreview(idx); };
+      }
     }
-    const tagClass=p.method==='nombre'?'nombre':(p.method==='infer'?'infer':(p.method==='hashira'?'hashira':(p.method==='guess'?'guess':'manual')));
-    const tagLabel=p.method==='nombre'?'ノンブル判定':(p.method==='infer'?'ノンブル逆算':(p.method==='hashira'?'柱で判定':(p.method==='guess'?'推定(要確認)':'要手動選択')));
-    row.innerHTML=`
-      <div class="thumb">${p.thumb?`<img src="${p.thumb}">`:''}</div>
-      <div class="pinfo">
-        <div class="pnum">p.${p.num}</div>
-        <span class="ptag ${tagClass}">${tagLabel}</span>
-      </div>
-      <div class="side-pick">
-        <button data-side="left" class="${p.side==='left'?'on':''}" title="左ページに寄せる">左</button>
-        <button data-side="right" class="${p.side==='right'?'on':''}" title="右ページに寄せる">右</button>
-      </div>`;
-    row.querySelector('[data-side="left"]').onclick=(e)=>{ e.stopPropagation(); p.side='left'; p.method='manual'; p.detail='手動選択（左）'; renderList(); if(selected===idx) drawPreview(idx); };
-    row.querySelector('[data-side="right"]').onclick=(e)=>{ e.stopPropagation(); p.side='right'; p.method='manual'; p.detail='手動選択（右）'; renderList(); if(selected===idx) drawPreview(idx); };
+    row.querySelector('[data-del]').onclick=(e)=>{ e.stopPropagation(); toggleDeleted(idx); };
     row.onclick=()=>{ selected=idx; renderList(); drawPreview(idx); };
     el.appendChild(row);
   });
@@ -575,8 +648,17 @@ async function drawPreview(idx){
   const p=pages[idx];
   $("#pageInput").value=p.num;
   $("#pageTotal").textContent=pages.length;
+  updateDelNote();
   await renderComposite();
 }
+
+/* Delete / Backspace で表示中のページを削除・復帰（入力欄にフォーカスがある場合は除く） */
+window.addEventListener('keydown', e=>{
+  if(selected<0 || !pages.length) return;
+  const t=e.target;
+  if(t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
+  if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); toggleDeleted(selected); }
+});
 
 function goToPage(idx){
   if(!pages.length) return;
@@ -597,7 +679,7 @@ $("#pageInput").onchange=()=>{
 };
 
 function jumpSingle(dir){
-  const singles=pages.map((p,i)=>i).filter(i=>pages[i].isSingle);
+  const singles=pages.map((p,i)=>i).filter(i=>pages[i].isSingle && !pages[i].deleted);
   if(!singles.length) return;
   if(dir>0){
     const next=singles.find(i=>i>selected);
@@ -715,11 +797,18 @@ window.addEventListener('mouseup', ()=>{
 
 /* ---------------- 書き出し ---------------- */
 $("#btnExport").onclick=async ()=>{
-  const singles=pages.filter(p=>p.isSingle);
+  const singles=pages.filter(p=>p.isSingle && !p.deleted);
   const unresolved=singles.filter(p=>!p.side);
   if(unresolved.length){
     alert(`左右が未確定の単ページが${unresolved.length}件あります（一覧の「左」「右」ボタンで指定してください）。\n該当ページ: `+unresolved.map(p=>'p.'+p.num).join(', '));
     return;
+  }
+  const dels=pages.map((p,i)=>({p,i})).filter(o=>o.p.deleted);
+  if(dels.length===pages.length){ alert('すべてのページが削除指定されています。'); return; }
+  if(dels.length){
+    const nums=dels.map(o=>'p.'+o.p.num);
+    const shown=nums.slice(0,20).join(', ')+(nums.length>20?` ほか${nums.length-20}件`:'');
+    if(!confirm(`${dels.length}ページを削除して書き出します。\n削除するページ: ${shown}\n\n書き出し後のページ数: ${pages.length-dels.length}p\n\nよろしいですか？`)) return;
   }
   banner(true,"見開きPDFを生成中…",10);
   try{
@@ -732,6 +821,7 @@ $("#btnExport").onclick=async ()=>{
     const outPages=outDoc.getPages();
     for(let i=0;i<pages.length;i++){
       const p=pages[i];
+      if(p.deleted) continue;
       if(!p.isSingle) continue;
       banner(true,`ページを拡張中… (p.${p.num})`, 10+(i/pages.length)*85);
       const pg=outPages[i];
@@ -739,6 +829,12 @@ $("#btnExport").onclick=async ()=>{
       const newX = (p.side==='right') ? (mb.x+mb.width-spreadW) : mb.x;
       pg.setMediaBox(newX, mb.y, spreadW, mb.height);
       pg.setCropBox(newX, mb.y, spreadW, mb.height);
+    }
+    // 削除ページを除去。添字がずれないよう後ろから消す。
+    const delIdx=pages.map((p,i)=>p.deleted?i:-1).filter(i=>i>=0).sort((a,b)=>b-a);
+    if(delIdx.length){
+      banner(true,`削除ページを除去中…（${delIdx.length}p）`,95);
+      delIdx.forEach(i=>outDoc.removePage(i));
     }
     banner(true,"PDFを保存中…",97);
     const outBytes=await outDoc.save();
