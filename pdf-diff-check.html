@@ -630,6 +630,8 @@ const S = {
   planA:[], planB:[],                    // 論理ページ列 [{src,crop}]（見開き自動判定の結果）
   boxesA:[], boxesB:[],                   // 物理ページごとのボックス {media,crop,trim,bleed}（pt）実際に使う値（推定込み）
   rawBoxesA:[], rawBoxesB:[],             // PDFから読んだ生のボックス（推定前）。プラン変更時に再推定するため保持
+  profA:[], profB:[],                     // 物理ページごとの内容バイト数（絵柄マッチの候補絞り込み用）
+  pairing:false, pairAbort:false,         // ページ対応の照合中フラグ／中断要求
   originMode:"center",                   // 位置合わせ起点 center/trim/bleed/page
   compareScope:"marks",                  // 比較範囲 full/marks(トンボ無視)/trim(仕上がりのみ)
   aTrimPx:null, aBleedPx:null,           // A論理ページのtrim/bleed矩形（A-logical px）
@@ -661,18 +663,26 @@ async function loadPdf(file, side){
   }
   try{
     showBusy(true);
+    S.pairAbort=false;
     const buf = await file.arrayBuffer();
-    const boxes = await readBoxes(buf.slice(0));        // pdf-libにはコピーを渡す
+    const rb = await readBoxes(buf.slice(0));           // pdf-libにはコピーを渡す
+    const boxes = rb.boxes, prof = rb.prof;
+    // 同じ枠に別PDFを読み直したとき、前のPDFをdestroy()せずに参照を上書きしていたため、
+    // 前のドキュメント（実データで48MB／ワーカー1本）が解放されず、読み直すたびにメモリと
+    // ワーカーが積み上がって動作が重くなっていた。先に必ず破棄する。
+    const oldDoc = (side==="A")?S.docA:S.docB;
+    if(oldDoc){ try{ await oldDoc.destroy(); }catch(e){} }
+    clearSigCache();                                    // 別PDFに差し替わったので指紋も破棄
     const doc = await pdfjsLib.getDocument({
       data:buf,
       cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",   // 定義済みCMapフォント対応（無いと一部文字が消える）
       cMapPacked:true,
       standardFontDataUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/"
     }).promise;
-    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes; S.rawBoxesA=boxes;
+    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes; S.rawBoxesA=boxes; S.profA=prof;
       $("#lblA").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropA").classList.add("loaded"); }
-    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes;
+    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes; S.profB=prof;
       $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
@@ -684,17 +694,22 @@ async function loadPdf(file, side){
     // まず『ノンブル自動』を試し、全ページ対応が取れなければ『絵柄で自動対応』にフォールバック。
     if(S.docA && S.docB){
       const la=logicalLen(S.planA), lb=logicalLen(S.planB);
-      if(la!==lb && S.matchMode==="index"){
-        S.matchMode="folio"; if($("#matchMode")) $("#matchMode").value="folio";
-        await ensurePairing();
-        let matched=S.mapBtoA?S.mapBtoA.filter(x=>x).length:0;
-        if(matched<lb){
-          S.matchMode="visual"; if($("#matchMode")) $("#matchMode").value="visual";
-          await ensurePairing();
-          matched=S.mapBtoA?S.mapBtoA.filter(x=>x).length:0;
+      const setMode=async m=>{ S.matchMode=m; if($("#matchMode")) $("#matchMode").value=m; await ensurePairing(); };
+      const cnt=()=>S.mapBtoA?S.mapBtoA.filter(x=>x).length:0;
+      // 以前は「S.matchModeがindexのとき」だけ自動で対応を探していたため、2本目以降の
+      // 読み直し（前回の照合でfolio/visualに変わっている状態）ではフォールバックが働かず、
+      // ページが1枚も拾えないまま無言で終わることがあった。モードによらず判定する。
+      if(la!==lb){
+        if(S.matchMode==="index") await setMode("folio");
+        let matched=cnt();
+        if(S.matchMode!=="visual" && matched<lb){
+          await setMode("visual");
+          matched=cnt();
           toast(`ページ数が違うため『絵柄で自動対応』：${matched}/${lb}ページを絵柄で一致`, matched?"ok":undefined);
-        } else {
+        } else if(S.matchMode==="folio"){
           toast(`ページ数が違うため『ノンブル自動』で対応：${matched}/${lb}ページをマッチ`,"ok");
+        } else {
+          toast(`『絵柄で自動対応』：${matched}/${lb}ページを絵柄で一致`, matched?"ok":undefined);
         }
       }
     }
@@ -726,18 +741,38 @@ async function renderOne(doc, pageNum, scale){
 
 /* ============ ボックス読み取り（pdf-lib）と起点合わせ ============ */
 // 物理ページごとに {media,crop,trim,bleed}（PDF pt, 原点左下）を返す
+// あわせて「ページ内容の重さ」プロファイル（コンテンツストリームの展開後バイト数）も返す。
+// これは絵柄マッチングの候補絞り込みに使う安価な指紋で、ページを1枚も描画せずに取れる（実測0.35秒/200ページ）。
 async function readBoxes(buf){
-  if(!window.PDFLib) return [];
+  if(!window.PDFLib) return {boxes:[], prof:[]};
   try{
     const doc=await PDFLib.PDFDocument.load(buf,{updateMetadata:false, throwOnInvalidObject:false});
-    const pages=doc.getPages(); const out=[];
+    const pages=doc.getPages(); const out=[]; const prof=[];
     for(const p of pages){
       const safe=fn=>{try{const b=fn(); return {x:b.x,y:b.y,w:b.width,h:b.height};}catch(e){return null;}};
       out.push({media:safe(()=>p.getMediaBox()),crop:safe(()=>p.getCropBox()),
                 trim:safe(()=>p.getTrimBox()),bleed:safe(()=>p.getBleedBox())});
+      prof.push(contentBytesOf(doc, p));
     }
-    return out;
-  }catch(e){ console.warn("pdf-lib: ボックス取得に失敗",e); return []; }
+    return {boxes:out, prof};
+  }catch(e){ console.warn("pdf-lib: ボックス取得に失敗",e); return {boxes:[], prof:[]}; }
+}
+// 1物理ページのコンテンツストリームを展開したバイト数。取れなければ-1。
+function contentBytesOf(doc, page){
+  try{
+    const c=page.node.Contents(); if(!c) return -1;
+    let streams=[];
+    if(PDFLib.PDFArray && c instanceof PDFLib.PDFArray) streams=c.asArray().map(r=>doc.context.lookup(r));
+    else streams=[c];
+    let len=0, ok=false;
+    for(const s of streams){
+      if(!s) continue;
+      if(PDFLib.PDFRawStream && s instanceof PDFLib.PDFRawStream){
+        len+=PDFLib.decodePDFRawStream(s).decode().length; ok=true;
+      } else if(s.getContents){ len+=s.getContents().length; ok=true; }
+    }
+    return ok?len:-1;
+  }catch(e){ return -1; }
 }
 function pickBox(boxes, mode){
   if(!boxes) return null;
@@ -1205,7 +1240,14 @@ async function pageSig(doc, plan, logical, boxes, side){
     let r0=null;
     const pk=`${side||"?"}|${m.src}|${vs}`;
     if(sigPageCache && sigPageCache.has(pk)) r0=sigPageCache.get(pk);
-    else { r0=await renderOne(doc, m.src, vs); if(sigPageCache && r0) sigPageCache.set(pk, r0); }
+    else {
+      r0=await renderOne(doc, m.src, vs);
+      if(sigPageCache && r0) sigPageCache.set(pk, r0);
+      // 描画済みキャンバスだけ持てば十分なので、ページ側のキャッシュ（展開済み画像など）は解放する。
+      // 実データでは1ページに数MBの画像が載っており、200ページ分を抱えたままだとメモリが
+      // 膨らんで後半ほど描画が遅くなっていた。
+      try{ page.cleanup(); }catch(e){}
+    }
     if(!r0) return null;
     const view=page.view;                                    // [x0,y0,x1,y1] cropbox(pt)
     const bx=bx0;
@@ -1252,16 +1294,83 @@ function monotonicAssign(C, nb, na){
   for(let b=nb-1;b>=0;b--){ res[b]=a; a=(a>=0)?par[b][a]:-1; }
   return res;
 }
-async function computeVisualPairing(){
-  const lenA=logicalLen(S.planA), lenB=logicalLen(S.planB);
-  S.mapBtoA=new Array(lenB+1).fill(null);
-  if(!lenA||!lenB) return {matched:0, lenB};
+/* 絵柄マッチの候補絞り込み（描画せずに順位付け）
+   背景（実データで計測した不具合）：
+     先方PDF 200ページ（48MB）に対し下版が抜き出し2ページ、という日常的な組み合わせで
+     『絵柄で自動対応』がAの全200ページを描画していた。このPDFは1ページに大きな配置画像を
+     持つページが多く、pdf.jsは画像を展開するため小さく描いても1枚2〜4秒かかる
+     （描画解像度を190px→64pxに落としても時間は変わらない＝ラスタライズではなく画像展開が支配的）。
+     結果、対応付けだけで数分かかり、進捗も出ないため「絵柄でページを拾ってくれない（固まった）」
+     という症状になっていた。
+   考え方：
+     ページの「コンテンツストリームを展開したバイト数」は描画せずに取れて（実測0.35秒/200ページ）、
+     同じ版元データから書き出したページ同士ならほぼ一致する。実データでは
+     B1=345,146バイトに対しA198=345,939／A199=344,762で上位3件に正解が入った。
+     そこで上位K件だけ描画して相関を確認し、確信が持てなければ従来どおり全ページ走査に戻す。 */
+function prefilterCandidates(bLogical, K){
+  const pb=S.planB[bLogical-1]; if(!pb||pb.crop) return null;      // 見開き分割時は物理ページ単位の比較ができない
+  const vb=(S.profB||[])[pb.src-1]; if(!(vb>0)) return null;
+  const lenA=logicalLen(S.planA); const list=[];
+  for(let a=1;a<=lenA;a++){
+    const pa=S.planA[a-1]; if(!pa||pa.crop) return null;
+    const va=(S.profA||[])[pa.src-1]; if(!(va>0)) return null;
+    list.push([a, Math.abs(va-vb)/Math.max(va,vb)]);
+  }
+  list.sort((x,y)=>x[1]-y[1]);
+  return list.slice(0,K).map(x=>x[0]);
+}
+// 候補だけを描画して対応付ける高速路線。確信が持てないときはnullを返し全走査に委ねる。
+async function pairByCandidates(lenA, lenB){
+  const K=10, ACCEPT=0.88;
+  const cands=[], need=new Set();
+  for(let b=1;b<=lenB;b++){
+    const c=prefilterCandidates(b,K); if(!c||!c.length) return null;
+    cands.push(c); c.forEach(a=>need.add(a));
+  }
+  const order=[...need];
+  const total=lenB+order.length; let done=0;
+  setBusyProgress(0,total,"ページ対応を照合中");
+  const sigB=[];
+  for(let b=1;b<=lenB;b++){
+    if(S.pairAbort) return null;
+    sigB.push(await pageSig(S.docB,S.planB,b,S.boxesB,"B"));
+    setBusyProgress(++done,total,"ページ対応を照合中"); await new Promise(r=>setTimeout(r,0));
+  }
+  const sigA=new Map();
+  for(const a of order){
+    if(S.pairAbort) return null;
+    sigA.set(a, await pageSig(S.docA,S.planA,a,S.boxesA,"A"));
+    setBusyProgress(++done,total,"ページ対応を照合中"); await new Promise(r=>setTimeout(r,0));
+  }
+  let prev=0, corrSum=0; const pick=[];
+  for(let b=1;b<=lenB;b++){
+    let ba=-1, bv=-2;
+    for(const a of cands[b-1]){ const v=sigCorr(sigB[b-1], sigA.get(a)); if(v>bv){ bv=v; ba=a; } }
+    if(ba<0 || bv<ACCEPT || ba<=prev) return null;   // 1ページでも確信が持てなければ全走査へ
+    prev=ba; corrSum+=bv; pick.push(ba);
+  }
+  for(let b=1;b<=lenB;b++) S.mapBtoA[b]=pick[b-1];
+  S.pairCorrSum=corrSum;
+  return {matched:lenB, lenB, corrSum};
+}
+// 従来どおりAの全ページを描画して対応付ける。進捗を出し、キャンセルできるようにした。
+async function pairByFullScan(lenA, lenB){
   const sigA=[], sigB=[];
-  sigPageCache=new Map();          // 見開きの左右で同じ描画を使い回す（走査後に破棄）
-  try{
-    for(let a=1;a<=lenA;a++) sigA.push(await pageSig(S.docA,S.planA,a,S.boxesA,"A"));
-    for(let b=1;b<=lenB;b++) sigB.push(await pageSig(S.docB,S.planB,b,S.boxesB,"B"));
-  } finally { sigPageCache=null; }
+  const total=lenA+lenB; let done=0;
+  setBusyProgress(0,total,"ページ対応を照合中");
+  for(let a=1;a<=lenA;a++){
+    if(S.pairAbort) break;
+    sigA.push(await pageSig(S.docA,S.planA,a,S.boxesA,"A"));
+    setBusyProgress(++done,total,"ページ対応を照合中");
+    if(a%4===0) await new Promise(r=>setTimeout(r,0));
+  }
+  for(let b=1;b<=lenB;b++){
+    if(S.pairAbort) break;
+    sigB.push(await pageSig(S.docB,S.planB,b,S.boxesB,"B"));
+    setBusyProgress(++done,total,"ページ対応を照合中");
+  }
+  while(sigA.length<lenA) sigA.push(null);
+  while(sigB.length<lenB) sigB.push(null);
   const C=[]; for(let b=0;b<lenB;b++){ C[b]=new Array(lenA); for(let a=0;a<lenA;a++) C[b][a]=sigCorr(sigB[b],sigA[a]); }
   const asg=monotonicAssign(C, lenB, lenA);
   const MIN=0.5;   // これ未満は「対応なし」
@@ -1270,6 +1379,30 @@ async function computeVisualPairing(){
     S.mapBtoA[b+1]=ok?(a+1):null; if(ok) corrSum+=C[b][a]; }
   S.pairCorrSum=corrSum;                      // 綴じ方向の自動判別で使う一致度の合計
   return {matched:S.mapBtoA.filter(x=>x).length, lenB, corrSum};
+}
+async function computeVisualPairing(){
+  const lenA=logicalLen(S.planA), lenB=logicalLen(S.planB);
+  S.mapBtoA=new Array(lenB+1).fill(null);
+  if(!lenA||!lenB) return {matched:0, lenB};
+  sigPageCache=new Map();          // 見開きの左右で同じ描画を使い回す（走査後に破棄）
+  const wasPairing=S.pairing;
+  S.pairing=true; setLoadUI();
+  try{
+    // Bが抜き出し（Aよりずっと少ない）ときだけ候補絞り込みを試す。外れたら全走査に落ちる。
+    if(lenA>=24 && lenB*4<=lenA){
+      const fast=await pairByCandidates(lenA, lenB);
+      if(fast) return fast;
+      if(S.pairAbort){ S.pairCorrSum=0; return {matched:0, lenB, corrSum:0}; }
+    }
+    return await pairByFullScan(lenA, lenB);
+  } finally {
+    sigPageCache=null;
+    // pairAbortはここでは戻さない。綴じ方向の自動判別は照合を2回まわすので、
+    // ここで戻すと1回目でキャンセルしても2回目が走ってしまう。読み込み・モード変更の
+    // 入口で必ずfalseにしている。
+    if(!wasPairing){ S.pairing=false; setBusyProgress(-1); }
+    setLoadUI();
+  }
 }
 
 /* ---------- 綴じ方向（見開きのどちら半分が先のページか）を絵柄で自動判別 ---------- */
@@ -1292,7 +1425,9 @@ async function autoDetectBindDir(){
     const r=await computeVisualPairing();
     return {rtl, matched:r.matched, corrSum:r.corrSum||0, map:S.mapBtoA.slice()};
   };
-  const rtl=await trial(true), ltr=await trial(false);
+  const rtl=await trial(true);
+  if(S.pairAbort) return;                         // 1回目でキャンセルされたら2回目は走らせない
+  const ltr=await trial(false);
   // 一致ページ数を最優先、同数なら一致度の合計で決める
   const better = (ltr.matched>rtl.matched || (ltr.matched===rtl.matched && ltr.corrSum>rtl.corrSum)) ? ltr : rtl;
   S.bindRTL=better.rtl;
@@ -2683,6 +2818,14 @@ async function scanAllPages(){
       S.regions.forEach(rg=>{ const k=(rg.cls&&rg.cls.key)||"changed"; kinds[k]=(kinds[k]||0)+1; });
       summary[pg]={count:S.regions.length, kinds,
         aMissing: !getA(pg), bMissing: !getB(pg)};
+      // 走査済みページの展開済み画像を解放する。重い画像PDFではこれが無いと
+      // ページを進めるほどメモリが積み上がり、後半ほど1ページの処理が遅くなる。
+      try{
+        const a=getA(pg), b=getB(pg);
+        const ma=a?S.planA[a-1]:null, mb=b?S.planB[b-1]:null;
+        if(ma&&S.docA) (await S.docA.getPage(ma.src)).cleanup();
+        if(mb&&S.docB) (await S.docB.getPage(mb.src)).cleanup();
+      }catch(e){}
       done=pg; setBusyProgress(pg,mx);
     }
     S.pageSummary=summary;                      // 途中停止でも走査済み分は反映
@@ -2699,20 +2842,21 @@ async function scanAllPages(){
   }
 }
 // 読み込み中の進捗表示。done<0 で非表示。
-function setBusyProgress(done,total){
+function setBusyProgress(done,total,label){
   const box=$("#busyTxt"), msg=$("#busyMsg");
   if(!box||!msg) return;
   if(done<0){ box.classList.remove("show"); return; }
-  msg.textContent = total>0 ? `全ページ読み込み中　${done} / ${total} ページ` : "読み込み中…";
+  const head=label||"全ページ読み込み中";
+  msg.textContent = total>0 ? `${head}　${done} / ${total} ページ` : "読み込み中…";
   box.classList.add("show");
 }
 // 読み込み制御ボタンの活性状態を更新
 function setLoadUI(){
   const both=!!(S.docA&&S.docB), any=!!(S.docA||S.docB);
   const all=$("#loadAllBtn"), cur=$("#loadCurBtn"), stop=$("#stopLoadBtn");
-  if(all) all.disabled = S.scanning || !both;
-  if(cur) cur.disabled = S.scanning || !any;
-  if(stop) stop.disabled = !S.scanning;
+  if(all) all.disabled = S.scanning || S.pairing || !both;
+  if(cur) cur.disabled = S.scanning || S.pairing || !any;
+  if(stop) stop.disabled = !(S.scanning || S.pairing);
 }
 
 function renderAllPages(){
@@ -2857,6 +3001,7 @@ $("#pgInput").addEventListener("keydown",e=>{ if(e.key==="Enter"){ gotoPage(+e.t
 
 $("#matchMode").addEventListener("change",async e=>{
   S.matchMode=e.target.value; S.manualA={}; S.page=1; S.activeRegion=-1; invalidateScan();
+  S.pairAbort=false;
   showBusy(true); try{ await ensurePairing(); }finally{ showBusy(false); }
   if(S.matchMode==="folio" && S.mapBtoA){
     const matched=S.mapBtoA.filter(x=>x).length, lb=logicalLen(S.planB);
@@ -2986,6 +3131,9 @@ function showEmpty(){ $("#empty").style.display=(S.docA||S.docB)?"none":"flex"; 
 
 /* ============ リセット ============ */
 function resetAll(){
+  // クリア時もpdf.jsのドキュメントを明示的に破棄する（参照を外すだけではワーカーとPDFの実体が残る）
+  try{ if(S.docA) S.docA.destroy(); }catch(e){}
+  try{ if(S.docB) S.docB.destroy(); }catch(e){}
   S.docA=S.docB=null; S.nameA=S.nameB="";
   S.page=1; S.offX=S.offY=0;
   S.aCv=S.bCv=S.aData=S.bData=null;
@@ -2994,7 +3142,7 @@ function resetAll(){
   S.content=null; S.contentW=S.contentH=0; S.zoom=1; S.panX=S.panY=0;
   S.pageSummary=null; S.gAStr=null; S.gBStr=null; S.gAgram=null; S.gBgram=null; setPanelView("current");
   S.spreadA=false; S.spreadB=false; S.bindRTL=true; S.bindManual=false; S.planA=[]; S.planB=[];
-  S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.inferToastShown=false; S.originMode="center";
+  S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.profA=[]; S.profB=[]; S.inferToastShown=false; S.originMode="center";
   S.aTrimPx=null; S.aBleedPx=null; S.alignedByBox=false;
   S.matchMode="index"; S.foliosA=[]; S.foliosB=[]; S.mapBtoA=null; S.manualA={}; S.aLogical=1; S.bLogical=1;
   if($("#matchMode")) $("#matchMode").value="index";
@@ -3026,7 +3174,10 @@ function resetAll(){
 $("#resetBtn").onclick=resetAll;
 
 /* ============ 読み込み制御（全ページ／表示ページのみ／停止） ============ */
-function stopScan(){ if(S.scanning){ S.scanAbort=true; toast("キャンセルしています…","ok"); } }
+function stopScan(){
+  if(S.pairing){ S.pairAbort=true; toast("ページ対応の照合をキャンセルしています…","ok"); }
+  if(S.scanning){ S.scanAbort=true; toast("キャンセルしています…","ok"); }
+}
 $("#loadAllBtn").onclick=(e)=>{ e.stopPropagation(); scanAllPages(); };
 $("#loadCurBtn").onclick=async (e)=>{
   e.stopPropagation();
@@ -3338,7 +3489,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.7";
+  const APP_VERSION = "v1.9";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
