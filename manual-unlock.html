@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>権限ロック解除 — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f4f4f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#6b6357; --ink-faint:#a39a8c;
+  --acc:#0f7a56; --acc-bg:#ddf0e7;
+  --warn:#a87412; --warn-bg:#f7efd9; --err:#c8362a; --err-bg:#f9e8e6;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --acc:#3ecf9a; --acc-bg:#123027;
+  --warn:#d9a428; --warn-bg:#332a12; --err:#e5604f; --err-bg:#3a1d18;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:14px;line-height:1.85;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:680px;margin:0 auto;padding:22px 24px 56px}
+
+.hd{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:22px}
+.hd .mk{width:34px;height:34px;border-radius:9px;background:var(--acc);flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center}
+.hd h1{margin:0;font-size:17px;font-weight:700;letter-spacing:.02em}
+.hd .sub{font-size:11.5px;color:var(--ink-faint);font-family:var(--mono)}
+.hd .sp{flex:1}
+.openbtn{display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:12.5px;font-weight:700;
+  padding:7px 13px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#fff;
+  cursor:pointer;white-space:nowrap}
+[data-theme="dark"] .openbtn{color:#06170f}
+.openbtn:hover{filter:brightness(1.08)}
+.openbtn svg{width:14px;height:14px}
+
+h2{font-size:13px;font-weight:700;color:var(--acc);letter-spacing:.04em;margin:30px 0 8px;
+  padding-bottom:5px;border-bottom:1px solid var(--line)}
+h2:first-of-type{margin-top:0}
+h3{font-size:13.5px;font-weight:700;margin:18px 0 4px}
+p{margin:6px 0;color:var(--ink-dim)}
+ul,ol{margin:6px 0;padding-left:1.35em;color:var(--ink-dim)}
+li{margin:4px 0}
+b{color:var(--ink)}
+code,.mono{font-family:var(--mono);font-size:12.5px;background:var(--panel2);padding:1px 5px;border-radius:4px}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top;color:var(--ink-dim)}
+th{background:var(--panel2);color:var(--ink);font-weight:700;white-space:nowrap;width:11em}
+.box{border:1px solid var(--line);background:var(--panel2);border-radius:11px;padding:12px 15px;margin:12px 0}
+.box.warn{border-color:var(--warn);background:var(--warn-bg)}
+.box.acc{border-color:var(--acc);background:var(--acc-bg)}
+.box .bt{font-weight:700;color:var(--ink);display:block;margin-bottom:3px}
+.steps{list-style:none;padding:0;margin:10px 0;counter-reset:st}
+.steps li{counter-increment:st;position:relative;padding:8px 0 8px 38px;border-bottom:1px solid var(--line)}
+.steps li:last-child{border-bottom:none}
+.steps li::before{content:counter(st);position:absolute;left:0;top:9px;width:24px;height:24px;border-radius:50%;
+  background:var(--acc);color:#fff;font-family:var(--mono);font-size:12px;font-weight:600;
+  display:flex;align-items:center;justify-content:center}
+[data-theme="dark"] .steps li::before{color:#06170f}
+.foot{margin-top:36px;padding-top:12px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--ink-faint);display:flex;align-items:center}
+.foot .sp{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hd">
+    <div class="mk">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+        <rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>
+      </svg>
+    </div>
+    <div>
+      <h1>権限ロック解除</h1>
+      <div class="sub">pdf-unlock.html　·　local · no-upload</div>
+    </div>
+    <div class="sp"></div>
+    <button class="openbtn" id="btnOpenTool" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>
+      ツールを開く
+    </button>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p>入稿PDFにかかっている「印刷不可」「内容のコピー不可」「編集不可」などの<b>権限制限</b>を外します。制限が残っているとRIPや面付けソフトで弾かれたり、Acrobatでのページ操作・トンボ追加ができないため、その前処理として使います。</p>
+  <p>処理エンジンには印刷業界でも定番のオープンソースツール <code>qpdf</code> を使っています。これをWebAssembly化してHTMLに内蔵しているため、<b>PDFはブラウザの中だけで処理され、どこにも送信されません</b>。社内ネットワークにも社外にも出ません。</p>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li><b>PDFを入れる</b><br>画面にドラッグ＆ドロップ、または「PDFを選択」から選びます。複数まとめて放り込めます。</li>
+    <li><b>自動で処理される</b><br>1件ずつ順番に解除され、終わったものから結果が表示されます。ボタンを押す必要はありません。</li>
+    <li><b>保存する</b><br>各行の「ダウンロード」で1件ずつ保存します。成功が2件以上あるときだけ、右上に「すべてダウンロード」が出て一括保存できます（中身は同じもので、まとめて落とすだけです）。</li>
+    <li><b>次の案件へ</b><br>「リセット」で一覧を空にします。元のPDFは一切変更されず、<code>元のファイル名_unlocked.pdf</code> という別名で書き出されます。</li>
+  </ol>
+
+  <h2>2種類のパスワードの違い</h2>
+  <p>PDFのパスワードには2種類あり、<b>本ツールで外せるのは片方だけ</b>です。ここが分かれ目なので、失敗したときはまずここを確認してください。</p>
+  <table>
+    <tr>
+      <th>権限パスワード<br><span style="font-weight:400;font-size:11.5px">（オーナーパスワード）</span></th>
+      <td>ファイルは普通に開けるが、印刷・編集・コピーなどが禁止されている状態。<b style="color:var(--acc)">本ツールで解除できます。</b></td>
+    </tr>
+    <tr>
+      <th>閲覧パスワード<br><span style="font-weight:400;font-size:11.5px">（ユーザーパスワード）</span></th>
+      <td>開くときにパスワードの入力を求められる状態。<b style="color:var(--err)">解除できません。</b>お客様にパスワードを確認し、Acrobatで開いてから「別名で保存」してください。</td>
+    </tr>
+  </table>
+
+  <h2>結果表示の見方</h2>
+  <table>
+    <tr><th>解除しました</th><td>制限を外したPDFを書き出しました。そのまま面付け・下版に使えます。</td></tr>
+    <tr><th>制限はかかって<br>いません</th><td>もともと制限なしのPDFでした。念のため複製を書き出していますが、<b>元ファイルをそのまま使って問題ありません</b>。「解除したのに何も変わらない」と迷わないための表示です。</td></tr>
+    <tr><th>閲覧パスワード付き</th><td>非対応です。上の表を参照してください。</td></tr>
+    <tr><th>失敗</th><td>PDFの構造が壊れている可能性があります。エラー文言を添えて制版部へご相談ください。</td></tr>
+  </table>
+
+  <h2>画面の各部</h2>
+  <table>
+    <tr><th>処理エンジン</th><td>ページを開いた直後だけ出るバッジです。内蔵エンジンの準備が終わると数秒で消えます。準備中でもPDFを入れて構いません（準備でき次第、自動で処理されます）。赤いまま残る場合は再読み込みしてください。</td></tr>
+    <tr><th>ダーク／ライト</th><td>表示の明暗を切り替えます。ボタンには「切り替え先」が表示されます。設定はこのブラウザに保存されます。</td></tr>
+    <tr><th>リセット</th><td>処理結果の一覧を空にします。保存前に押すとダウンロードできなくなるので、先に保存してください。</td></tr>
+  </table>
+
+  <h2>うまくいかないとき</h2>
+  <ul>
+    <li><b>「処理エンジンの初期化に失敗」</b> … ページを再読み込み（⌘+Shift+R ／ Ctrl+F5）してください。</li>
+    <li><b>非常に大きいPDFで失敗する</b> … ブラウザのメモリ上で処理するため、数百MB級は落ちることがあります。分割してから処理してください。</li>
+    <li><b>解除したのにAcrobatで編集できない</b> … 権限ではなく、PDF/Xの構造や透明・フォント埋め込み側の問題かもしれません。制版部へご相談ください。</li>
+    <li><b>結果が全部「失敗」になる</b> … 一度に大量のファイルを流したときに起きることがあります。ページを再読み込みし、10件程度ずつに分けてお試しください。</li>
+  </ul>
+
+  <div class="box warn">
+    <span class="bt">取り扱いの注意</span>
+    入稿された制作データを、印刷・製造のために扱う範囲で使ってください。権利者の許諾なく制限を外して再配布・二次利用する目的では使用しないでください。判断に迷う場合は営業担当を通じてお客様にご確認ください。
+  </div>
+
+  <div class="box acc">
+    <span class="bt">安全性について</span>
+    処理はすべてブラウザ内で完結し、PDFの送信・保存・ログ収集は一切ありません。オフラインでも動作します（初回のみ表示フォントの読み込みで通信します）。
+  </div>
+
+  <div class="foot">
+    <span>検版ハブ — 編集ツール</span><span class="sp"></span><span>© FUJIWARA PRINTING.inc</span>
+  </div>
+</div>
+
+<script>
+/* ハブと同じテーマ設定を共有する（ハブのiframe内でも単独表示でも合わせる） */
+(function(){
+  var t = 'light';
+  try{ t = localStorage.getItem('kenpan-hub-theme') || 'light'; }catch(e){}
+  document.documentElement.setAttribute('data-theme', t);
+})();
+
+/* 「ツールを開く」：ハブのiframe内ならハブに開かせる（ウインドウ設定に従う）。
+   単独で開かれているときは自分で開く。 */
+document.getElementById('btnOpenTool').onclick = function(){
+  if(window.parent && window.parent !== window){
+    try{
+      window.parent.postMessage({ kenpan:'openTool', url:'pdf-unlock.html' }, location.origin);
+      return;
+    }catch(e){}
+  }
+  window.open('pdf-unlock.html', '_blank', 'noopener');
+};
+</script>
+</body>
+</html>
