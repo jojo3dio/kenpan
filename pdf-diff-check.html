@@ -125,7 +125,18 @@
   .body{display:flex;flex:1;min-height:0}
   .kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
   /* ステージ背景：無地（ページの白地が見やすいよう中間色）。市松模様は見づらいので廃止 */
-  .stage{flex:1;position:relative;min-width:0;background:var(--stage1);}
+  .viewercol{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .stage{flex:1;position:relative;min-width:0;min-height:0;background:var(--stage1);}
+  /* ビューア下の表示トグルバー（ノンブル検版と同じ位置・同じ体裁） */
+  .vbar{display:flex;align-items:center;gap:14px;color:var(--ink-dim);font-size:12px;flex-wrap:wrap;
+    justify-content:center;flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:10px 12px}
+  .vbar .hint{color:var(--ink-faint)}
+  .vbar kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--ink-dim)}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim);cursor:pointer}
+  .toggle:hover{color:var(--ink)}
+  .toggle input{accent-color:var(--amber);width:14px;height:14px;margin:0;cursor:pointer}
+  .toggle.dis{opacity:.42;cursor:not-allowed}
+  .toggle.dis input{cursor:not-allowed}
   #canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
   #canvas.grabbing{cursor:grabbing}
   .stagehud{
@@ -360,7 +371,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.1　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.10　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -550,6 +561,7 @@
   </div>
 
   <div class="body">
+   <div class="viewercol">
     <div class="stage" id="stage">
       <canvas id="canvas"></canvas>
       <div class="empty" id="empty">
@@ -563,6 +575,12 @@
       </div>
       <div class="busy" id="busy"><div class="spin"></div><div class="busytxt" id="busyTxt"><span id="busyMsg">読み込み中…</span><button class="bstop" id="busyStop">キャンセル</button></div></div>
     </div>
+    <div class="vbar">
+      <label class="toggle" title="差分箇所の枠線をプレビュー上に表示する（B キー）"><input type="checkbox" id="showBoxes" checked> 差分枠</label>
+      <label class="toggle" id="chkNums" title="差分枠に通し番号を表示する（M キー）"><input type="checkbox" id="showNums" checked> 番号</label>
+      <span class="hint">ホイール=ズーム / ドラッグ=移動 / <kbd>b</kbd>=差分枠 <kbd>m</kbd>=番号 の表示切替</span>
+    </div>
+   </div>
 
     <aside>
       <!-- セクション1：表示中のページの差分 -->
@@ -621,7 +639,8 @@ const S = {
   content:null, contentW:0, contentH:0,
   zoom:1, panX:0, panY:0,
   activeRegion:-1,
-  swipeX:0.5,                            // 0..1 (content幅比)
+  showBoxes:true, showNums:true,         // プレビュー上の差分枠／番号の表示切替
+  swipeX:0.5,                          // 0..1 (content幅比)
   pageSummary:null,                      // 全ページ走査結果 [page]->{count,kinds,aMissing,bMissing}
   panelView:"current",                   // "current" | "all"
   spreadA:false, spreadB:false,          // 見開き（左右2ページ）を左右分割するか
@@ -2576,18 +2595,21 @@ function draw(){
   const z=S.zoom;
   cctx.lineWidth=Math.max(1.2,2);
   cctx.font="600 11px var(--mono),monospace";
-  S.regions.forEach((rg,i)=>{
-    const active=(i===S.activeRegion);
-    const kc=(rg.cls&&rg.cls.hex)||"#ff5a4d";
-    cctx.strokeStyle=active?"#fff":kc;
-    cctx.lineWidth=active?2.4:1.6;
-    drawBox(rg,0);
-    const sx=S.panX+rg.x*z, sy=S.panY+rg.y*z;
-    cctx.fillStyle=active?"#fff":kc;
-    cctx.fillRect(sx, sy-15, 18+(String(i+1).length-1)*7, 15);
-    cctx.fillStyle="#181410"; cctx.textBaseline="middle";
-    cctx.fillText(String(i+1), sx+4, sy-7);
-  });
+  if(S.showBoxes){
+    S.regions.forEach((rg,i)=>{
+      const active=(i===S.activeRegion);
+      const kc=(rg.cls&&rg.cls.hex)||"#ff5a4d";
+      cctx.strokeStyle=active?"#fff":kc;
+      cctx.lineWidth=active?2.4:1.6;
+      drawBox(rg,0);
+      if(!S.showNums) return;
+      const sx=S.panX+rg.x*z, sy=S.panY+rg.y*z;
+      cctx.fillStyle=active?"#fff":kc;
+      cctx.fillRect(sx, sy-15, 18+(String(i+1).length-1)*7, 15);
+      cctx.fillStyle="#181410"; cctx.textBaseline="middle";
+      cctx.fillText(String(i+1), sx+4, sy-7);
+    });
+  }
   updateHud();
 }
 // 並べて：左右2ペインに同じズーム・パンでA/Bを表示（同じ箇所が両側に出る）
@@ -2602,12 +2624,13 @@ function drawSide(v){
     cctx.drawImage(content, S.panX, S.panY, S.contentW*z, S.contentH*z);
     // 差分枠
     cctx.font="600 11px var(--mono),monospace"; cctx.textBaseline="middle";
-    S.regions.forEach((rg,i)=>{
+    if(S.showBoxes) S.regions.forEach((rg,i)=>{
       const active=(i===S.activeRegion);
       const kc=(rg.cls&&rg.cls.hex)||"#ff5a4d";
       cctx.strokeStyle=active?"#fff":kc; cctx.lineWidth=active?2.4:1.6;
       const x=S.panX+rg.x*z, y=S.panY+rg.y*z;
       cctx.strokeRect(x,y,rg.w*z,rg.h*z);
+      if(!S.showNums) return;
       const lab=String(i+1);
       cctx.fillStyle=active?"#fff":kc; cctx.fillRect(x,y-15,18+(lab.length-1)*7,15);
       cctx.fillStyle="#181410"; cctx.fillText(lab,x+4,y-7);
@@ -3103,6 +3126,22 @@ window.addEventListener("mousemove",e=>{
 });
 window.addEventListener("mouseup",()=>{dragging=false;dragSwipe=false;canvas.classList.remove("grabbing");});
 
+/* ---- プレビュー上の差分枠／番号の表示切替 ---- */
+function setShowBoxes(on){
+  S.showBoxes=!!on;
+  const cb=$("#showBoxes"); if(cb) cb.checked=S.showBoxes;
+  const nb=$("#showNums"); if(nb) nb.disabled=!S.showBoxes;   // 枠オフ時は番号も無効
+  $("#chkNums").classList.toggle("dis",!S.showBoxes);
+  draw();
+}
+function setShowNums(on){
+  S.showNums=!!on;
+  const cb=$("#showNums"); if(cb) cb.checked=S.showNums;
+  draw();
+}
+$("#showBoxes").addEventListener("change",e=>setShowBoxes(e.target.checked));
+$("#showNums").addEventListener("change",e=>setShowNums(e.target.checked));
+
 window.addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
   const big=e.shiftKey?10:1;
@@ -3112,6 +3151,8 @@ window.addEventListener("keydown",e=>{
   else if(e.key==="ArrowDown"){nudge(0,big);e.preventDefault();}
   else if(e.key==="n"||e.key==="N"){if(S.regions.length)focusRegion((S.activeRegion+1)%S.regions.length);}
   else if(e.key==="p"||e.key==="P"){if(S.regions.length)focusRegion((S.activeRegion-1+S.regions.length)%S.regions.length);}
+  else if(e.key==="b"||e.key==="B"){setShowBoxes(!S.showBoxes);}
+  else if(e.key==="m"||e.key==="M"){if(S.showBoxes) setShowNums(!S.showNums);}
   else if(["1","2","3","4","5"].includes(e.key)){setMode(["diff","redcyan","onion","swipe","side"][+e.key-1]);}
 });
 
@@ -3489,7 +3530,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.9";
+  const APP_VERSION = "v1.10";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
