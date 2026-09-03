@@ -112,6 +112,15 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
   background:var(--panel);transition:.18s;cursor:pointer}
 .dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
+/* 読み込み中の表示。中央のドロップ面は利用者が必ず見ている場所なので、
+   上部バナーだけでなくここでも進行中であることを示す。 */
+.dzload{display:none;border:2px solid var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);text-align:center}
+.dzload.show{display:block}
+.dzload .spin{width:34px;height:34px;border-width:3px;margin:0 auto 16px}
+.dzload h2{margin:.4em 0 .2em;font-size:18px}
+.dzload p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dzload .bar{height:6px;max-width:260px;margin:18px auto 0}
 .dropzone h2{margin:.4em 0 .2em;font-size:18px}
 .dropzone p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
 .dropmk{width:64px;height:46px;margin:0 auto 14px;border-radius:8px;
@@ -172,6 +181,16 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .banner.show{display:flex}
 .bar{flex:1;height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
 .bar>i{display:block;height:100%;width:0;background:var(--amber);transition:width .15s}
+/* 所要時間が読めない工程(ファイル読込・エンジン初期化)用の不定進捗バー */
+.bar.indet>i{width:35%;transition:none;animation:indet 1.1s ease-in-out infinite}
+@keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+.spin{flex:0 0 auto;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--amber);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .spin{animation-duration:2.4s}
+  .bar.indet>i{animation-duration:2.4s}
+}
 
 /* ---------- summary tiles ---------- */
 .tiles{display:flex;gap:8px;padding:12px 13px;border-bottom:1px solid var(--line);
@@ -311,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-07-23</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-03</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -342,7 +361,8 @@ a.lnk{color:var(--amber)}
   </header>
 
   <div class="banner" id="banner">
-    <span id="bannerText">解析中…</span>
+    <span class="spin" id="bannerSpin" aria-hidden="true"></span>
+    <span id="bannerText" role="status" aria-live="polite">解析中…</span>
     <div class="bar"><i id="barFill"></i></div>
     <button id="btnCancel" class="icobtn">中止</button>
   </div>
@@ -366,6 +386,12 @@ a.lnk{color:var(--amber)}
           <h2>PDFをドラッグ＆ドロップ</h2>
           <p>またはクリックして選択（このPDFは外部に送信されません）</p>
           <p style="margin-top:14px;color:var(--ink-faint)">表紙・カバーPDFを読み込むと、2段バーコードを自動検出し、<br>近傍のISBN・Cコード・価格の印字と照合します。販売用JANコードが<br>別掲されている場合も、印字数字列との照合対象になります。</p>
+        </div>
+        <div class="dzload" id="dzload" role="status" aria-live="polite">
+          <div class="spin" aria-hidden="true"></div>
+          <h2 id="dzloadTitle">PDFを読み込み中…</h2>
+          <p id="dzloadSub">ファイルは外部に送信されません</p>
+          <div class="bar indet" id="dzloadBar"><i></i></div>
         </div>
       </div>
       <div class="viewer hidden" id="viewer">
@@ -586,11 +612,18 @@ def extract_price_text(text):
     return None
 def extract_jan_text(text):
     # バーコード直下等に印字される「人が読む数字列」(スペース区切りが多い)から
-    # 13桁のEAN-13として妥当な数字列を拾う。ハイフン区切りのISBN等は対象外(スペースのみ許容)。
+    # 13桁のEAN-13として妥当な数字列を拾う。ハイフン区切りのISBN等は対象外。
+    # バーコードのガードバーは主バーより下へ伸びて数字列に食い込むため、OCRでは
+    # " ' | ! . , 等の記号として読まれる(実例: 4"510993"566613)。これらは
+    # 数字の区切りとして許容する。13桁かつチェックデジットが妥当なものだけ採用するので
+    # 誤って別の数値を拾う心配は小さい。
     t=norm(text)
-    for m in re.finditer(r"(?:(?<=\D)|^)([0-9][0-9\s]{10,20}[0-9])(?:(?=\D)|$)",t):
-        d=re.sub(r"\s","",m.group(1))
+    for m in re.finditer(r"(?:(?<=[^0-9])|^)([0-9][0-9\s\"'|!.,:;]{10,24}[0-9])(?:(?=[^0-9])|$)",t):
+        d=re.sub(r"[^0-9]","",m.group(1))
         if len(d)==13 and ean13_valid(d): return d
+        for i in range(0,max(0,len(d)-12)):
+            w=d[i:i+13]
+            if ean13_valid(w): return w
     return None
 def cross_check(isbn_bc,dnc_bc,ocr_text):
     rep={"items":[],"status":"OK"}
@@ -849,9 +882,42 @@ function checkBarcodeQuality(canvas, box, label){
   const lum=(x,y)=>{ const i=(y*pw+x)*4; const af=data[i+3]/255;
     return af*(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2])+(1-af)*255; };
   // 1) バー本体の縦帯を特定(数字や余白を除く)。各行の暗画素数が多い行=バー
+  // 「暗い」の境目を輝度128の固定値にすると、バーが黒(K)以外のインキで
+  // 刷られている表紙で破綻する。例: シアン100%のバーは輝度が約136あり、
+  // 見た目は十分濃いのに「128より明るい＝紙の白」に分類されてしまい、
+  // バーが1本も見つからず「潰れ・かすれ」と誤検知する。実際の画素分布から
+  // 大津の方法でしきい値を決め、インキの色に依存しないようにする。
+  const hist=new Uint32Array(256); let nSamp=0, lmin=255, lmax=0;
+  for(let y=0;y<ph;y++) for(let x=0;x<pw;x+=2){
+    const v=lum(x,y)|0; hist[v]++; nSamp++;
+    if(v<lmin)lmin=v; if(v>lmax)lmax=v;
+  }
+  let hsum=0; for(let i=0;i<256;i++) hsum+=i*hist[i];
+  let wB=0,sumB=0,bestVar=-1,otsu=128;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(!wB) continue;
+    const wF=nSamp-wB; if(!wF) break;
+    sumB+=t*hist[t];
+    const d=sumB/wB-(hsum-sumB)/wF, v=wB*wF*d*d;
+    if(v>bestVar){ bestVar=v; otsu=t; }
+  }
+  // コントラストが乏しい領域では大津のしきい値はノイズを二分するだけなので、
+  // 従来通り128を使って「バー無し」に倒す。
+  const DARK = (lmax-lmin>=40) ? Math.max(40, Math.min(otsu, 230)) : 128;
+  dbg('lmin,lmax,otsu,DARK', lmin, lmax, otsu, DARK);
+  // バーのインキ色を控えておく(黒以外で刷られている場合の警告に使う)。
+  // しきい値ぎりぎりの画素はバーと紙の境界のアンチエイリアスなので、
+  // 濃い側だけを平均してインキ本来の色に近づける。
+  const INK = lmin + (DARK-lmin)*0.4;
+  let br=0,bg=0,bb=0,bn=0;
+  for(let y=0;y<ph;y++) for(let x=0;x<pw;x+=2){
+    if(lum(x,y)<INK){ const i=(y*pw+x)*4; const af=data[i+3]/255;
+      br+=af*data[i]+(1-af)*255; bg+=af*data[i+1]+(1-af)*255; bb+=af*data[i+2]+(1-af)*255; bn++; }
+  }
+  const barColor = bn ? {r:Math.round(br/bn), g:Math.round(bg/bn), b:Math.round(bb/bn)} : null;
   const rowDark=[];
   const sampleCnt=Math.ceil(pw/2);
-  for(let y=0;y<ph;y++){ let d=0; for(let x=0;x<pw;x+=2) if(lum(x,y)<128) d++; rowDark.push(d); }
+  for(let y=0;y<ph;y++){ let d=0; for(let x=0;x<pw;x+=2) if(lum(x,y)<DARK) d++; rowDark.push(d); }
   const maxRD=Math.max(...rowDark,1);
   // バー帯候補(連続する暗行のかたまり)を全部洗い出す。
   // 「全体最大値の50%」という相対判定は、box周囲の余白に表紙の黒背景など
@@ -867,14 +933,37 @@ function checkBarcodeQuality(canvas, box, label){
   }
   if(b0>=0) bands.push([b0,ph-1]);
   dbg('maxRD', maxRD, 'bands', JSON.stringify(bands));
-  if(!bands.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）"};
+  if(!bands.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", barColor};
   // バーコードの縞は、印字1行分の文字(かすれても数ピクセル程度)と比べて
   // 縦方向にずっと厚みのある帯になる。「box中心に最も近い帯」を採用すると、
   // バーコード直上・直下の印字行(価格表示など)をバー帯と誤認し、そちらを
   // 囲ってしまう/品質異常と誤検知することがあるため、最も背の高い帯を採用する。
   let ry0,ry1,bestH=-1;
   for(const [a,b2] of bands){ const h=b2-a; if(h>bestH){bestH=h; ry0=a; ry1=b2;} }
-  dbg('ry0,ry1', ry0, ry1);
+  // 採用した帯には、バー本体だけでなく直下の目視数字行まで含まれていることが多い。
+  // 数字行を混ぜたまま次の縦平均プロファイルを取ると、数字と数字の間の余白が
+  // 「大きな白ギャップ」と見なされ、バーコードが分割されてしまう。
+  // 走査線あたりの明暗の遷移数はバー本体で圧倒的に多いので、それを使って
+  // バー本体の行だけに絞り込む(枠表示用の帯 bandY0..bandY1 は元のまま残す)。
+  const bandY0=ry0, bandY1=ry1;
+  const trans=[];
+  for(let y=ry0;y<=ry1;y++){
+    let t=0, prev=lum(0,y)<DARK;
+    for(let x=2;x<pw;x+=2){ const d=lum(x,y)<DARK; if(d!==prev){ t++; prev=d; } }
+    trans.push(t);
+  }
+  const tMax=Math.max(...trans,0);
+  if(tMax>=20){
+    const tThr=tMax*0.6;
+    let bs=-1,bl=0,cs=-1;
+    for(let i=0;i<=trans.length;i++){
+      const on = i<trans.length && trans[i]>=tThr;
+      if(on){ if(cs<0) cs=i; }
+      else if(cs>=0){ if(i-cs>bl){ bl=i-cs; bs=cs; } cs=-1; }
+    }
+    if(bl>=Math.max(6,(ry1-ry0)*0.15)){ ry0=bandY0+bs; ry1=bandY0+bs+bl-1; }
+  }
+  dbg('bandY0,bandY1', bandY0, bandY1, '-> バー行 ry0,ry1', ry0, ry1, 'tMax', tMax);
   // 2) 縞の実x範囲を特定。バー帯の縦平均プロファイルでrun-lengthを取り、
   //    モジュール幅の数倍を超える白ギャップ(=本文との余白)で縞の連続を打ち切る
   const prof=new Float32Array(pw);
@@ -889,7 +978,12 @@ function checkBarcodeQuality(canvas, box, label){
   pruns.push([pc,pl,ps]);
   const ws=pruns.map(r=>r[1]).sort((a,b)=>a-b);
   const mod=Math.max(1, ws[Math.floor(ws.length*0.2)]||2);
-  const maxbar=mod*5;
+  // 分割しきい値。EAN-13の要素は最大4モジュール、クワイエットゾーン(バーコード外の
+  // 余白)はクロップ端まで続くため遥かに長い。modは低解像度だと1px単位で量子化され
+  // 20%程度ずれるので、mod*5では正規の4モジュール幅の白まで「大きな隙間」と誤認して
+  // バーコードを分割してしまう(実測: 1モジュール3.8pxのJANで mod=3/4 により結果が反転)。
+  // 4モジュールとクワイエットゾーンの間には十分な開きがあるのでmod*8まで広げる。
+  const maxbar=mod*8;
   dbg('numPruns', pruns.length, 'mod', mod, 'maxbar', maxbar);
   // 大きな白ギャップ(maxbar超)でプロファイルを区切り、複数の候補区間(セグメント)を作る。
   // その中で最もバー本数が多い区間を「本物の縞」として採用する。
@@ -913,11 +1007,14 @@ function checkBarcodeQuality(canvas, box, label){
     while(best.length && best[0][0]===0) best.shift();
     while(best.length && best[best.length-1][0]===0) best.pop();
   }
-  if(!best || !best.length) return {ok:false, note:"読み込みができません（バーコードを認識できません）"};
+  if(!best || !best.length) return {ok:false, note:"読み込みができません（バーコードを認識できません）", barColor};
   const cx0=best[0][2], last=best[best.length-1], cx1=last[2]+last[1]-1;
   dbg('cx0,cx1', cx0, cx1);
   // 縞の実x範囲(元canvas正規化座標)を返す→枠補正に使う
-  const tightBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
+  const tightBox={x:(px0+cx0)/W, y:(py0+bandY0)/H, w:(cx1-cx0+1)/W, h:(bandY1-bandY0+1)/H};
+  // barBox は目視数字行を含まない「バー本体だけ」の範囲。OCR時にバーを白で塗る
+  // 用途に使う(tightBoxで塗るとバー直下の印字数字まで消えてしまうため)。
+  const barBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
   // 3) バー帯内の複数走査線でrun-length
   const lines=[]; const nScan=7;
   for(let k=0;k<nScan;k++){
@@ -938,7 +1035,7 @@ function checkBarcodeQuality(canvas, box, label){
       lines.push({bars, trans:runs.length, maxRatio});
     }
   }
-  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox};
+  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox, barBox, barColor};
   const med=arr=>{const a=[...arr].sort((p,q)=>p-q);return a[Math.floor(a.length/2)];};
   const barsMed=med(lines.map(l=>l.bars));
   const transMed=med(lines.map(l=>l.trans));
@@ -953,7 +1050,7 @@ function checkBarcodeQuality(canvas, box, label){
   if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
   if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
   const uniq=[...new Set(issues)];
-  return {ok:issues.length===0, note:uniq.join(" / "), tightBox,
+  return {ok:issues.length===0, note:uniq.join(" / "), tightBox, barBox, barColor,
           metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transOutliers}};
 }
 
@@ -993,15 +1090,11 @@ async function checkBarcodeQualityHiRes(page, box, label){
     w:box.w*vp.width/cw,       h:box.h*vp.height/ch
   };
   const q=checkBarcodeQuality(cv, localBox);
-  if(q.tightBox){
-    // クロップ画像内の正規化座標→元のページ全体の正規化座標へ戻す
-    q.tightBox={
-      x:(q.tightBox.x*cw+cx0)/vp.width,
-      y:(q.tightBox.y*ch+cy0)/vp.height,
-      w:q.tightBox.w*cw/vp.width,
-      h:q.tightBox.h*ch/vp.height
-    };
-  }
+  // クロップ画像内の正規化座標→元のページ全体の正規化座標へ戻す
+  const toPage=r=>({ x:(r.x*cw+cx0)/vp.width, y:(r.y*ch+cy0)/vp.height,
+                     w:r.w*cw/vp.width,       h:r.h*ch/vp.height });
+  if(q.tightBox) q.tightBox=toPage(q.tightBox);
+  if(q.barBox)   q.barBox=toPage(q.barBox);
   return q;
 }
 
@@ -1042,15 +1135,157 @@ function scanBarcodes(canvas){
 }
 
 /* ---------- pdf.js 実テキスト抽出 ---------- */
+
+/* OCR-B等のシンボリックフォントは、バー下の数字を通常の'0'〜'9'ではなく
+   私用領域(U+F030〜F039)の符号で持っていることがある。ToUnicodeが効かず
+   「□□□□」になって印字照合が落ちるため、U+F000のオフセットを剥がす。 */
+function normalizePuaDigits(str){
+  if(!str || !/[\uF000-\uF0FF]/.test(str)) return str;
+  return str.replace(/[\uF000-\uF0FF]/g, c=>{
+    const n=c.charCodeAt(0)-0xF000;
+    return (n>=0x20 && n<=0x7E) ? String.fromCharCode(n) : c;
+  });
+}
+
+/* テンプレートのダミー印字(ゼロ埋め)を印字候補から外す。
+   実在のISBN・Cコード・価格が全桁ゼロになることはないので、
+   全桁ゼロのパターンだけを安全に落とせる。 */
+function stripDummyPrint(txt){
+  if(!txt) return txt;
+  return txt
+    .replace(/ISBN[\s0\-]*0[\s0\-]*(?![0-9])/gi, " ")
+    .replace(/\bC0000\b/g, " ")
+    .replace(/[¥\\]\s*0+\s*E?\b/g, " ")
+    .replace(/本体\s*0+\s*円/g, " ")
+    .replace(/\s{2,}/g, " ").trim();
+}
+
+/* --- 目視されない(＝印刷されない)テキストの検出 ---
+   PDFは「描いた順に上へ重ねる」構造なので、あるテキストより後に、
+   そのテキストを覆う不透明なベタ塗りが描かれていれば、その文字は
+   最終的に見えない＝印刷されない。テンプレートのダミー印字の上に
+   白いフタを置き、その上に正しい印字をアウトラインで乗せる作りの
+   データで、getTextContent()が下敷きのダミーを拾ってしまうのを防ぐ。
+   pdf.jsの操作リスト(描画順)からCTM・クリップ・不透明度を追跡して判定する。 */
+const _hiddenRunsCache=new WeakMap();
+function _pathToRect(ops,coords,mm){
+  const O=pdfjsLib.OPS;
+  if(!mm) return null;
+  if(ops.every(o=>o===O.rectangle)) return [mm[0],mm[2],mm[1],mm[3]];
+  if(!ops.every(o=>o===O.moveTo||o===O.lineTo||o===O.closePath)) return null;
+  const pts=[]; for(let i=0;i+1<coords.length;i+=2) pts.push([coords[i],coords[i+1]]);
+  if(pts.length<4||pts.length>5) return null;
+  for(const p of pts){
+    const onX=Math.abs(p[0]-mm[0])<0.01||Math.abs(p[0]-mm[1])<0.01;
+    const onY=Math.abs(p[1]-mm[2])<0.01||Math.abs(p[1]-mm[3])<0.01;
+    if(!(onX&&onY)) return null;
+  }
+  return [mm[0],mm[2],mm[1],mm[3]];
+}
+function _devRect(r,ctm){
+  const U=pdfjsLib.Util;
+  const a=U.applyTransform([r[0],r[1]],ctm), b=U.applyTransform([r[2],r[3]],ctm);
+  return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
+}
+function _isectRect(a,b){
+  if(!a) return b; if(!b) return a;
+  const r=[Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])];
+  return (r[0]<r[2]&&r[1]<r[3])?r:[0,0,0,0];
+}
+async function hiddenTextRuns(page){
+  if(_hiddenRunsCache.has(page)) return _hiddenRunsCache.get(page);
+  let out=[];
+  try{
+    const O=pdfjsLib.OPS, U=pdfjsLib.Util;
+    const vp=page.getViewport({scale:1});
+    const ol=await page.getOperatorList();
+    const F=ol.fnArray, A=ol.argsArray;
+    const inv={}; for(const k in O) inv[O[k]]=k;
+    let ctm=vp.transform.slice(), alpha=1, clip=null, clipExact=true;
+    const st=[];
+    let tm=null,tlm=null,leading=0,fsize=0,cs=0,ws=0,pend=null,clipPending;
+    const fills=[], texts=[];
+    for(let i=0;i<F.length;i++){
+      const n=inv[F[i]], a=A[i];
+      switch(n){
+        case 'save': st.push({ctm:ctm.slice(),alpha,clip:clip&&clip.slice(),clipExact}); break;
+        case 'restore': { const s=st.pop(); if(s){ctm=s.ctm;alpha=s.alpha;clip=s.clip;clipExact=s.clipExact;} break; }
+        case 'transform': ctm=U.transform(ctm,a); break;
+        case 'setGState': for(const kv of (a[0]||[])){ if(kv[0]==='ca') alpha=kv[1]; if(kv[0]==='SMask'&&kv[1]) clipExact=false; } break;
+        case 'constructPath': pend=_pathToRect(a[0],a[1],a[2]); break;
+        case 'clip': case 'eoClip': clipPending = pend ? _devRect(pend,ctm) : 'complex'; break;
+        case 'endPath':
+          if(clipPending!==undefined){
+            if(clipPending==='complex') clipExact=false; else clip=_isectRect(clip,clipPending);
+            clipPending=undefined;
+          }
+          pend=null; break;
+        case 'fill': case 'eoFill': case 'fillStroke': case 'eoFillStroke':
+          if(pend && alpha>=0.999 && clipExact){
+            let r=_isectRect(_devRect(pend,ctm), clip);
+            if(r[2]>r[0] && r[3]>r[1]) fills.push({i,rect:r});
+          }
+          pend=null; break;
+        case 'beginText': tm=[1,0,0,1,0,0]; tlm=tm.slice(); break;
+        case 'setTextMatrix': tm=a.slice(); tlm=a.slice(); break;
+        case 'setLeading': leading=a[0]; break;
+        case 'setLeadingMoveText': leading=-a[1]; tlm=U.transform(tlm,[1,0,0,1,a[0],a[1]]); tm=tlm.slice(); break;
+        case 'setFont': fsize=a[1]; break;
+        case 'setCharSpacing': cs=a[0]; break;
+        case 'setWordSpacing': ws=a[0]; break;
+        case 'moveText': tlm=U.transform(tlm,[1,0,0,1,a[0],a[1]]); tm=tlm.slice(); break;
+        case 'nextLine': tlm=U.transform(tlm,[1,0,0,1,0,-leading]); tm=tlm.slice(); break;
+        case 'showText': {
+          if(!tm) break;
+          let s="",adv=0;
+          for(const g of (a[0]||[])){
+            if(typeof g==='number'){ adv-=g/1000*fsize; continue; }
+            if(!g) continue;
+            s+=(g.unicode!=null?g.unicode:"");
+            adv+=g.width/1000*fsize+cs+(g.isSpace?ws:0);
+          }
+          if(s.trim()){
+            const M=U.transform(ctm,tm);
+            const p0=U.applyTransform([0,0],M), p1=U.applyTransform([adv,0],M);
+            texts.push({i,x0:p0[0],y0:p0[1],x1:p1[0],y1:p1[1]});
+          }
+          tm=U.transform(tm,[1,0,0,1,adv,0]);
+          break;
+        }
+      }
+    }
+    for(const t of texts){
+      const a=Math.min(t.x0,t.x1), b=Math.max(t.x0,t.x1), w=Math.max(b-a,0.01);
+      const f=fills.find(f=>{
+        if(f.i<=t.i) return false;
+        if(t.y0<f.rect[1]-0.5 || t.y0>f.rect[3]+0.5) return false;
+        return (Math.min(b,f.rect[2])-Math.max(a,f.rect[0]))/w >= 0.9;
+      });
+      if(f) out.push({x0:a, x1:b, y:t.y0});
+    }
+  }catch(e){ out=[]; }   // 解析できないPDFでは従来通り全テキストを使う
+  _hiddenRunsCache.set(page,out);
+  return out;
+}
+function _isHiddenAt(runs, x, y, scale){
+  const tol=2*scale;
+  for(const r of runs){
+    if(Math.abs(y-r.y*scale)<=tol && x>=r.x0*scale-tol && x<=r.x1*scale+tol) return true;
+  }
+  return false;
+}
+
 async function pageTextItems(page,scale){
   const vp=page.getViewport({scale});
   let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const hidden=await hiddenTextRuns(page);
   const out=[];
   for(const it of tc.items){
     if(!it.str || !it.str.trim()) continue;
     const m=pdfjsLib.Util.transform(vp.transform,it.transform);
     const x=m[4], y=m[5], w=(it.width||0)*scale;
-    out.push({str:it.str, x, y, w}); // x,y はデバイス座標(左上原点), yはベースライン
+    if(hidden.length && _isHiddenAt(hidden,x,y,scale)) continue; // 白フタの下＝印刷されない
+    out.push({str:normalizePuaDigits(it.str), x, y, w}); // x,y はデバイス座標(左上原点), yはベースライン
   }
   return out;
 }
@@ -1113,7 +1348,18 @@ function detectLabelCrop(canvas, x0,y0,x1,y1){
     cy0: Math.max(0, y0-padT-margin), cy1: Math.min(H, y1+padB+margin)
   };
 }
-async function ocrNearBarcodes(canvas,boxesPx){
+/* OCRでバーコードの縞を白く塗り潰す範囲。品質判定が実測したバー本体(barBox)があれば
+   それを使い、無ければZXingの検出枠にフォールバックする。検出枠は縦にページ高の4.5%も
+   余白を持つため、そのまま塗るとバー直下の目視数字や、その下の印字(ISBN・Cコード・
+   価格)まで消えてしまい、OCRが何も読めなくなる。 */
+function maskBoxesPx(canvas, qualities, fallbackPx){
+  const W=canvas.width, H=canvas.height;
+  return fallbackPx.map((b,i)=>{
+    const bb=qualities[i] && qualities[i].barBox;
+    return bb ? {x:bb.x*W, y:bb.y*H, w:bb.w*W, h:bb.h*H} : b;
+  });
+}
+async function ocrNearBarcodes(canvas,boxesPx,maskPx){
   if(!boxesPx.length) return "";
   const W=canvas.width,H=canvas.height;
   let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
@@ -1133,10 +1379,12 @@ async function ocrNearBarcodes(canvas,boxesPx){
   tmp.width=cw*up; tmp.height=ch*up;
   const tg=tmp.getContext('2d');
   tg.drawImage(canvas,cx0,cy0,cw,ch,0,0,cw*up,ch*up);
-  // バーコードの黒縞があるとOCRの行認識が乱れるので、各バーコード矩形を白で塗って印字だけ残す
+  // バーコードの黒縞があるとOCRの行認識が乱れるので、縞の部分だけを白で塗って印字は残す
   tg.fillStyle='#fff';
-  boxesPx.forEach(b=>{
-    const padX=8*up, padY=10*up;
+  const masks = (maskPx && maskPx.length===boxesPx.length) ? maskPx : boxesPx;
+  const tight = masks!==boxesPx;   // 実測のバー範囲なら余白は最小限でよい
+  masks.forEach(b=>{
+    const padX=(tight?3:8)*up, padY=(tight?2:10)*up;
     tg.fillRect((b.x-cx0)*up-padX, (b.y-cy0)*up-padY, b.w*up+padX*2, b.h*up+padY*2);
   });
   try{
@@ -1229,11 +1477,16 @@ async function analyzePage(pageNum){
     if(s.other){
       // 書籍コード(978/979/192/191)以外のEAN-13＝販売用JAN等。専用の照合コアで検証する。
       const boxesPx=[{x:s.other.box.x*cv.width,y:s.other.box.y*cv.height,w:s.other.box.w*cv.width,h:s.other.box.h*cv.height}];
-      let txt=textNearBarcodes(items,boxesPx,cv.width,cv.height);
+      // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく。OCRでバーを白く
+      // 塗る際にZXingの粗い検出枠を使うと、縦余白(ページ高の4.5%)が大きいため
+      // バー直下の目視数字まで消えてOCRが何も読めなくなる。
+      const qJan = s.other.box ? await checkBarcodeQualityHiRes(page,s.other.box,'jan') : null;
+      const maskPx = maskBoxesPx(cv,[qJan],boxesPx);
+      let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
       const hasJanText=/[0-9][0-9\s]{10,20}[0-9]/.test(txt);
       let ocrWords=[];
       if($("#optOcr").checked && !hasJanText){
-        const o=await ocrNearBarcodes(cv,boxesPx);
+        const o=await ocrNearBarcodes(cv,boxesPx,maskPx);
         if(o&&o.text) txt=(txt+" "+o.text).trim();
         if(o&&o.words) ocrWords=o.words;
       }
@@ -1244,19 +1497,23 @@ async function analyzePage(pageNum){
       rep.marks=pickMarks(ocrWords, rep);
       rep.ocrText=txt; rep.boxes={jan:s.other.box}; rep.isJan=true;
       rep.quality={};
-      if(s.other.box){ rep.quality.jan=await checkBarcodeQualityHiRes(page,s.other.box,'jan');
-        if(rep.quality.jan.tightBox) rep.boxes.jan=tightenWidth(s.other.box, rep.quality.jan.tightBox); }
+      if(qJan){ rep.quality.jan=qJan;
+        if(qJan.tightBox) rep.boxes.jan=tightenWidth(s.other.box, qJan.tightBox); }
       results.push(rep);
       continue;
     }
-    const boxesPx=[]; 
-    if(s.isbn) boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height});
-    if(s.dnc)  boxesPx.push({x:s.dnc.box.x*cv.width,y:s.dnc.box.y*cv.height,w:s.dnc.box.w*cv.width,h:s.dnc.box.h*cv.height});
-    let txt=textNearBarcodes(items,boxesPx,cv.width,cv.height);
+    // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく(OCRの塗り潰し用)
+    const qIsbn = (s.isbn&&s.isbn.box) ? await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn') : null;
+    const qDnc  = (s.dnc &&s.dnc.box ) ? await checkBarcodeQualityHiRes(page,s.dnc.box ,'dnc' ) : null;
+    const boxesPx=[], qs=[];
+    if(s.isbn){ boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height}); qs.push(qIsbn); }
+    if(s.dnc) { boxesPx.push({x:s.dnc.box.x*cv.width, y:s.dnc.box.y*cv.height, w:s.dnc.box.w*cv.width, h:s.dnc.box.h*cv.height });  qs.push(qDnc);  }
+    const maskPx = maskBoxesPx(cv,qs,boxesPx);
+    let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
     const hasISBN=/ISBN|97[89]/.test(txt), hasC=/C\s*[0-9]{4}/.test(txt), hasP=/[¥\\]|本体|定価/.test(txt);
     let ocrWords=[];
     if($("#optOcr").checked && (!hasISBN||!hasC||!hasP)){
-      const o=await ocrNearBarcodes(cv,boxesPx);
+      const o=await ocrNearBarcodes(cv,boxesPx,maskPx);
       if(o&&o.text) txt=(txt+" "+o.text).trim();
       if(o&&o.words) ocrWords=o.words;
     }
@@ -1270,10 +1527,10 @@ async function analyzePage(pageNum){
     rep.ocrText=txt; rep.boxes={isbn:s.isbn?s.isbn.box:null,dnc:s.dnc?s.dnc.box:null};
     // バーコード品質(欠け・かすれ・縞の異常)を画素で簡易判定
     rep.quality={};
-    if(s.isbn&&s.isbn.box){ rep.quality.isbn=await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn');
-      if(rep.quality.isbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, rep.quality.isbn.tightBox); }
-    if(s.dnc&&s.dnc.box){ rep.quality.dnc=await checkBarcodeQualityHiRes(page,s.dnc.box,'dnc');
-      if(rep.quality.dnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, rep.quality.dnc.tightBox); }
+    if(qIsbn){ rep.quality.isbn=qIsbn;
+      if(qIsbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, qIsbn.tightBox); }
+    if(qDnc){ rep.quality.dnc=qDnc;
+      if(qDnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, qDnc.tightBox); }
     results.push(rep);
   }
   runCheck.destroy?.(); runCheckJan.destroy?.();
@@ -1329,18 +1586,23 @@ function rollup(results){
 async function runAll(){
   cancelFlag=false;
   pages=[]; selected=-1;
-  showBanner(true,"Pyodide/検出エンジンを準備中…",0);
+  // Pyodideの初回ダウンロードは十数秒かかることがあるので、所要時間不明の表示にする
+  showBanner(true,"検出エンジンを準備中…（初回は少し時間がかかります）",-1);
+  showLoading(true,"検出エンジンを準備中…","初回のみ数十秒かかることがあります");
   await ensurePy();
   const n=pdfDoc.numPages;
   for(let p=1;p<=n;p++){
     if(cancelFlag) break;
     showBanner(true,`解析中… ${p}/${n}ページ`, (p-1)/n*100);
+    // ページが選択されると中央はプレビューに切り替わるので、それまでの間だけ表示する
+    if(selected<0) showLoading(true,`解析中… ${p}/${n}ページ`,"バーコードの検出と印字の照合を行っています");
     const r=await analyzePage(p);
     pages.push(r);
     renderList();
     if(selected<0 && r.hasBars){ selectPage(pages.length-1); }
   }
   showBanner(false);
+  showLoading(false);
   renderList();
   if(selected<0 && pages.length){ selectPage(0); }
   // 単ページPDFなら左の一覧は不要なので畳む(複数ページ時のみ表示)
@@ -1625,6 +1887,20 @@ function renderResult(rec){
         const ok=q.ok;
         html+=`<div class="chk ${ok?'OK':'NG'}"><span class="mark">${ok?'✓':'✕'}</span>
           <span class="body"><span class="t">${esc(nm)}</span><span class="d">${ok?'縞パターン正常':esc(q.note||'異常の疑い')}</span></span></div>`;
+        // バーが黒以外のインキで刷られている場合の注意喚起。
+        // EAN読取機の光源は赤(660nm前後)なので、シアン・青・緑系のバーは
+        // 反射してしまい読み取れないことがある。
+        const bc=q.barColor;
+        if(bc){
+          const mx=Math.max(bc.r,bc.g,bc.b), mn=Math.min(bc.r,bc.g,bc.b);
+          const lm=0.299*bc.r+0.587*bc.g+0.114*bc.b;
+          if(mx-mn>60 || lm>110){
+            const sw=`rgb(${bc.r},${bc.g},${bc.b})`;
+            html+=`<div class="chk WARN"><span class="mark">▲</span>
+              <span class="body"><span class="t">${esc(nm.replace('品質','のインキ色'))}</span>
+              <span class="d">バーが黒以外の色（<span style="display:inline-block;width:9px;height:9px;border:1px solid #999;background:${sw};vertical-align:middle"></span> R${bc.r} G${bc.g} B${bc.b}）で刷られています。赤色光源のスキャナで読み取れない可能性があるため、現物での読み取り確認を推奨します。</span></span></div>`;
+          }
+        }
       });
     }
     if(s.ocrText){ html+=`<div class="kv"><div class="k">読み取った近傍テキスト</div><div class="v" style="font-size:11px">${esc(s.ocrText).slice(0,200)||"（なし）"}</div></div>`; }
@@ -1715,9 +1991,16 @@ async function obGetPageText(n){
   if(obState.textCache[n]!=null) return obState.textCache[n];
   const page=await obState.doc.getPage(n);
   let tc; try{ tc=await page.getTextContent(); }catch(e){ tc={items:[]}; }
-  const text=tc.items.map(it=>it.str||"").join(" ").replace(/\s+/g," ").trim();
+  const text=tc.items.map(it=>normalizePuaDigits(it.str||"")).join(" ").replace(/\s+/g," ").trim();
   obState.textCache[n]=text;
   return text;
+}
+/* 奥付け確定ページ用: 白フタの下に隠れた(＝印刷されない)テキストを除いた本文。
+   全ページ走査で使うobGetPageTextとは別に、確定した1ページだけ解析する。 */
+async function obGetPageTextVisible(n){
+  const page=await obState.doc.getPage(n);
+  const items=await pageTextItems(page,1);
+  return items.map(it=>it.str).join(" ").replace(/\s+/g," ").trim();
 }
 async function obScanAllPages(){
   const n=obState.numPages;
@@ -1759,7 +2042,8 @@ window.selectObPage=selectObPage;
 async function obConfirmPage(){
   const n=obState.curPage;
   showBanner(true,"奥付けページのテキストを抽出中…",30);
-  let text=await obGetPageText(n);
+  let text=await obGetPageTextVisible(n);
+  if(!text) text=await obGetPageText(n);
   let ocrUsed=false;
   obState.ocrWords=null;
   if((text||"").replace(/\s/g,"").length<20){
@@ -1943,9 +2227,20 @@ async function loadColophonPdf(file){
   obState={step:'scanning', doc:null, fileName:file.name||"", numPages:0, curPage:1,
            candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
   renderOb();
-  const buf=await file.arrayBuffer();
-  const doc=await pdfjsLib.getDocument({data:buf,
-    cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+  // 奥付け側も、読込〜展開の間は待ち時間が見えないので進捗を出す
+  showBanner(true,"奥付けPDFを読み込み中…",-1);
+  let doc;
+  try{
+    const buf=await file.arrayBuffer();
+    showBanner(true,"奥付けPDFを展開中…",-1);
+    doc=await pdfjsLib.getDocument({data:buf,
+      cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+  }catch(e){
+    showBanner(false);
+    alert("PDFを読み込めませんでした：\n"+(e&&e.message?e.message:e));
+    return;
+  }
+  showBanner(false);
   obState.doc=doc; obState.numPages=doc.numPages;
   if(doc.numPages<=1){
     // 単ページPDFはページ検出をスキップしてそのまま使う
@@ -2244,23 +2539,61 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
 })();
 
 /* ---------- バナー ---------- */
+/* pct に -1 を渡すと「所要時間不明」の不定進捗バーになる(ファイル読込・エンジン初期化用) */
 function showBanner(show,text,pct){
   const b=$("#banner"); b.classList.toggle('show',show);
   if(text!=null) $("#bannerText").textContent=text;
-  if(pct!=null) $("#barFill").style.width=pct+"%";
+  const bar=b.querySelector('.bar');
+  if(pct===-1){ bar.classList.add('indet'); }
+  else if(pct!=null){ bar.classList.remove('indet'); $("#barFill").style.width=pct+"%"; }
+  $("#bannerSpin").style.display = show ? '' : 'none';
+}
+/* 中央のドロップ面を「読み込み中」表示に切り替える。
+   ドロップ直後〜解析開始までは待ち時間が長くなりがちで、
+   何も変化がないと固まったように見えるため、必ずここを先に切り替える。 */
+function showLoading(show,title,sub){
+  const dz=$("#dropzone"), ld=$("#dzload");
+  if(!dz||!ld) return;
+  ld.classList.toggle('show',show);
+  dz.style.display = show ? 'none' : '';
+  if(show){
+    // 2回目以降の読み込みでは前のプレビューが出たままで中央が隠れているので、
+    // 読み込み表示を必ず前面に出す(解析が進んで selectPage が呼ばれると切り替わる)
+    $("#drop").classList.remove('hidden');
+    $("#viewer").classList.add('hidden');
+    $("#zoomctl").classList.add('hidden');
+  }
+  if(title!=null) $("#dzloadTitle").textContent=title;
+  if(sub!=null)   $("#dzloadSub").textContent=sub;
 }
 
 /* ---------- 読込 ---------- */
 async function loadFile(file){
   if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
+  // 以降に await が入る前に、まず画面を「読み込み中」にする。
+  // 大きな表紙PDFでは arrayBuffer と getDocument だけで数秒かかることがあり、
+  // ここで何も出さないと操作が効いていないように見えてしまう。
+  showLoading(true,"PDFを読み込み中…", file.name||"");
+  showBanner(true,"PDFを読み込み中…",-1);
   $("#btnReset").disabled=false;
   $("#obOpen").disabled=false;
   $("#obOpen").classList.add('glow');
   fbFileName=file.name||"";
-  const buf=await file.arrayBuffer();
-  pdfDoc=await pdfjsLib.getDocument({data:buf,
-    cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
-  await runAll();
+  try{
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); // 表示を確実に描画させる
+    const buf=await file.arrayBuffer();
+    showLoading(true,"PDFを展開中…", file.name||"");
+    showBanner(true,"PDFを展開中…",-1);
+    pdfDoc=await pdfjsLib.getDocument({data:buf,
+      cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+    await runAll();
+  }catch(e){
+    showLoading(false);
+    showBanner(false);
+    alert("PDFを読み込めませんでした：\n"+(e&&e.message?e.message:e));
+    return;
+  }
+  showLoading(false);
 }
 function resetAll(){
   pdfDoc=null; pages=[]; selected=-1; cancelFlag=true; fbFileName=""; fbIssues=[]; pvDrawerOpen=false;
@@ -2271,7 +2604,7 @@ function resetAll(){
   $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
   $("#tiles").innerHTML='<div class="empty-msg" style="padding:6px 0">—</div>';
   $("#result").innerHTML='<div class="empty-msg">—</div>';
-  $("#file").value=""; $("#btnReset").disabled=true; $("#obOpen").disabled=true; $("#obOpen").classList.remove('glow'); showBanner(false);
+  $("#file").value=""; $("#btnReset").disabled=true; $("#obOpen").disabled=true; $("#obOpen").classList.remove('glow'); showBanner(false); showLoading(false);
 }
 
 /* ---------- イベント ---------- */
