@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-03</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-09</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -625,7 +625,7 @@ def extract_jan_text(text):
             w=d[i:i+13]
             if ean13_valid(w): return w
     return None
-def cross_check(isbn_bc,dnc_bc,ocr_text):
+def cross_check(isbn_bc,dnc_bc,ocr_text,layout=""):
     rep={"items":[],"status":"OK"}
     def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
         rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
@@ -668,8 +668,14 @@ def cross_check(isbn_bc,dnc_bc,ocr_text):
             add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN",
                 rid="ISBN-10", exp="印字価格の読取成功", act="読取失敗", box="dnc")
     else:
-        add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
-            rid="ISBN-11", exp="日本図書コード(2段目)の検出", act="未検出", box=None)
+        if layout=="slip":
+            # スリップ(売上カード)はISBNバーコード1本だけが正規の仕様。
+            # 2段目が無いのは異常ではないので警告にしない。
+            add("日本図書コード(2段目)",True,"スリップのため2段目なしで正常",
+                rid="ISBN-11S", exp="—", act="—", box=None)
+        else:
+            add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
+                rid="ISBN-11", exp="日本図書コード(2段目)の検出", act="未検出", box=None)
     ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
     wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
     rep["status"]="NG" if ng else ("WARN" if wn else "OK")
@@ -681,8 +687,8 @@ def diff_pos(a,b):
     ds=[str(i+1) for i in range(len(a)) if a[i]!=b[i]]
     return ("%s桁目が異なります"%("・".join(ds))) if ds else ""
 def lbl(name,ok): return name+(" 一致" if ok else " 不一致")
-def run_check(isbn_bc,dnc_bc,ocr_text):
-    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or ""),ensure_ascii=False)
+def run_check(isbn_bc,dnc_bc,ocr_text,layout=""):
+    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or "",layout or ""),ensure_ascii=False)
 def cross_check_jan(jan_bc,ocr_text):
     # ISBN/日本図書コードの帯とは別に印字される、販売用JAN(一般商品コード)の照合。
     rep={"items":[],"status":"OK"}
@@ -796,8 +802,20 @@ function decodeCanvas(canvas){
     zReader.reset();
     const pts=res.getResultPoints?res.getResultPoints():[];
     const xs=pts.map(p=>p.getX()), ys=pts.map(p=>p.getY());
-    return {text:res.getText(),
+    // ZXingはTRY_HARDER時、キャンバスを内部で90°回転して再読取を試みる
+    // (HTMLCanvasElementLuminanceSource.isRotateSupported()がtrueのため)。
+    // その場合、結果点は元座標系に戻されるがバーコードの伸びる向きはYになるので、
+    // x0/x1だけでboxを作ると幅ゼロの縦長スリバーになってしまう。
+    // ORIENTATION(90/270)を拾って「回転している」ことを呼び出し側に伝える。
+    let ori=0;
+    try{ const md=res.getResultMetadata(); if(md){ const o=md.get(Z.ResultMetadataType.ORIENTATION); if(o!=null) ori=o|0; } }catch(e){}
+    const xSpan=xs.length?Math.max(...xs)-Math.min(...xs):0;
+    const ySpan=ys.length?Math.max(...ys)-Math.min(...ys):0;
+    const rotated = (ori===90||ori===270) || (ySpan>xSpan*3 && ySpan>canvas.height*0.05);
+    return {text:res.getText(), rotated, ori,
             x0:xs.length?Math.min(...xs):0, x1:xs.length?Math.max(...xs):canvas.width,
+            y0:ys.length?Math.min(...ys):0, y1:ys.length?Math.max(...ys):canvas.height,
+            x:xs.length?(xs.reduce((a,b)=>a+b,0)/xs.length):canvas.width/2,
             y:ys.length?(ys.reduce((a,b)=>a+b,0)/ys.length):canvas.height/2};
   }catch(e){ zReader.reset(); return null; }
 }
@@ -1063,13 +1081,15 @@ function checkBarcodeQuality(canvas, box, label){
 const QUALITY_TARGET_PX = 480;   // 品質判定用に確保したいバー領域の目安ピクセル幅
 const QUALITY_MAX_SCALE = 14;    // 再レンダリング倍率の上限(メモリ・速度対策)
 const QUALITY_PAD = 0.15;        // クロップ時に周囲へ持たせる余白(縁の欠けを防ぐ)
-async function checkBarcodeQualityHiRes(page, box, label){
+async function checkBarcodeQualityHiRes(page, box, label, rot){
   if(!box || !box.w || !box.h) return {ok:true, note:"判定不可"};
   const base=page.getViewport({scale:1});
-  const rawScale=QUALITY_TARGET_PX/(box.w*base.width);
+  // 縦向きバーコードでは、95モジュールが並ぶ方向は box の高さ側になる
+  const codeSpan = rot ? box.h*base.height : box.w*base.width;
+  const rawScale=QUALITY_TARGET_PX/Math.max(codeSpan,1);
   const scale=Math.min(Math.max(rawScale, DETECT_SCALE), QUALITY_MAX_SCALE);
   const vp=page.getViewport({scale});
-  const padX=box.w*QUALITY_PAD, padY=box.h*0.03;
+  const padX=box.w*(rot?0.03:QUALITY_PAD), padY=box.h*(rot?QUALITY_PAD:0.03);
   const cx0=Math.max(0, Math.floor((box.x-padX)*vp.width));
   const cy0=Math.max(0, Math.floor((box.y-padY)*vp.height));
   const cx1=Math.min(vp.width,  Math.ceil((box.x+box.w+padX)*vp.width));
@@ -1085,14 +1105,27 @@ async function checkBarcodeQualityHiRes(page, box, label){
     ctx.translate(-cx0,-cy0);
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ return {ok:true, note:"判定不可(高解像度レンダ失敗)"}; }
-  const localBox={
+  let localBox={
     x:(box.x*vp.width-cx0)/cw, y:(box.y*vp.height-cy0)/ch,
     w:box.w*vp.width/cw,       h:box.h*vp.height/ch
   };
-  const q=checkBarcodeQuality(cv, localBox);
-  // クロップ画像内の正規化座標→元のページ全体の正規化座標へ戻す
-  const toPage=r=>({ x:(r.x*cw+cx0)/vp.width, y:(r.y*ch+cy0)/vp.height,
-                     w:r.w*cw/vp.width,       h:r.h*ch/vp.height });
+  // 縦向きの場合はクロップを90°回して縞を縦向きに直してから解析する。
+  // 検出側と同じ変換(元(x,y)→回転後(高さ-y, x))を使うので、戻す式も共通。
+  let src=cv, rw=cw, rh=ch;
+  if(rot){
+    const rc=document.createElement('canvas'); rc.width=ch; rc.height=cw;
+    const rx=rc.getContext('2d');
+    rx.fillStyle="#fff"; rx.fillRect(0,0,rc.width,rc.height);
+    rx.translate(rc.width,0); rx.rotate(Math.PI/2); rx.drawImage(cv,0,0);
+    src=rc; rw=ch; rh=cw;
+    localBox={ x:1-localBox.y-localBox.h, y:localBox.x, w:localBox.h, h:localBox.w };
+  }
+  const q=checkBarcodeQuality(src, localBox, label);
+  // 回転解析の座標 → クロップ座標 → ページ全体の正規化座標 の順に戻す
+  const unrot=r=> rot ? {x:r.y, y:1-r.x-r.w, w:r.h, h:r.w} : r;
+  const toPage=r=>{ r=unrot(r);
+    return { x:(r.x*cw+cx0)/vp.width, y:(r.y*ch+cy0)/vp.height,
+             w:r.w*cw/vp.width,       h:r.h*ch/vp.height }; };
   if(q.tightBox) q.tightBox=toPage(q.tightBox);
   if(q.barBox)   q.barBox=toPage(q.barBox);
   return q;
@@ -1100,16 +1133,55 @@ async function checkBarcodeQualityHiRes(page, box, label){
 
 
 
+/* 縦向きバーコードの「バーの長さ方向」(ページ上の x)を画素から測り直す。
+   回転再探索では、この軸の値が走査線の当たった位置の分布から来るため
+   実際より短く・中心もずれて出る。95モジュールが並ぶ y 方向は
+   ZXingの結果点から正確に取れているので、その帯の中で
+   「列ごとの明暗の遷移数」が多い区間＝バー本体、として範囲を決める。 */
+function refineRotBoxX(canvas, box){
+  const W=canvas.width, H=canvas.height;
+  const y0=Math.max(0, Math.round(box.y*H)), y1=Math.min(H-1, Math.round((box.y+box.h)*H));
+  if(y1-y0<8) return box;
+  let data;
+  try{ data=canvas.getContext('2d').getImageData(0,y0,W,y1-y0+1).data; }catch(e){ return box; }
+  const rows=y1-y0+1;
+  const lum=(x,y)=>{ const i=(y*W+x)*4, a=data[i+3]/255;
+    return 0.299*(a*data[i]+(1-a)*255)+0.587*(a*data[i+1]+(1-a)*255)+0.114*(a*data[i+2]+(1-a)*255); };
+  // 帯全体の輝度分布から暗さのしきい値を決める(インキ色に依存しないように)
+  let lmin=255,lmax=0;
+  for(let y=0;y<rows;y+=2) for(let x=0;x<W;x+=2){ const v=lum(x,y); if(v<lmin)lmin=v; if(v>lmax)lmax=v; }
+  if(lmax-lmin<40) return box;
+  const DARK=(lmin+lmax)/2;
+  const tr=new Int32Array(W);
+  for(let x=0;x<W;x++){
+    let t=0, prev=lum(x,0)<DARK;
+    for(let y=1;y<rows;y++){ const d=lum(x,y)<DARK; if(d!==prev){ t++; prev=d; } }
+    tr[x]=t;
+  }
+  let tmax=0; for(let x=0;x<W;x++) if(tr[x]>tmax) tmax=tr[x];
+  if(tmax<20) return box;                 // バーらしい縞が無い
+  const thr=Math.max(8, tmax*0.5);
+  let bs=-1,bl=0,cs=-1;
+  for(let x=0;x<=W;x++){
+    const on = x<W && tr[x]>=thr;
+    if(on){ if(cs<0) cs=x; }
+    else if(cs>=0){ if(x-cs>bl){ bl=x-cs; bs=cs; } cs=-1; }
+  }
+  if(bl<Math.max(8, W*0.02)) return box;
+  const padX=W*0.02;
+  return {x:Math.max(0,(bs-padX)/W), y:box.y, w:Math.min(1,(bl+padX*2)/W), h:box.h};
+}
 /* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
 function scanBarcodes(canvas){
   const W=canvas.width, H=canvas.height;
-  const found={}; // value -> {ys:[], x0,x1}
+  const hits={};        // value -> [{y,x0,x1}, ...]
+  let rotSeen=false;    // ZXingが内部回転で読んだ＝ページ内容が縦向きの可能性
   function record(r,offY,useX){
     if(!r) return;
+    if(r.rotated){ rotSeen=true; return; }  // 座標が使えないので採用しない
     const v=r.text;
-    if(!found[v]) found[v]={ys:[],x0s:[],x1s:[]};
-    found[v].ys.push(r.y+offY);
-    if(useX){ found[v].x0s.push(r.x0); found[v].x1s.push(r.x1); }
+    if(!hits[v]) hits[v]=[];
+    hits[v].push({y:r.y+offY, x0:useX?r.x0:null, x1:useX?r.x1:null});
   }
   // 全面スキャンは検出専用。座標は信頼度が低いので box 集計には使わない(useX=false)
   record(decodeCanvas(canvas),0,false);
@@ -1122,16 +1194,31 @@ function scanBarcodes(canvas){
     record(decodeCanvas(band),top,true);
   }
   const median=arr=>{ const a=[...arr].sort((p,q)=>p-q); const n=a.length; return n?(n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2):0; };
-  // 値→box(0..1正規化)。x0/x1は帯ごとの検出の中央値を使い、外れ値で枠が広がるのを防ぐ
-  return Object.keys(found).map(v=>{
-    const f=found[v]; const ymin=Math.min(...f.ys), ymax=Math.max(...f.ys);
-    // 黒縞を画素検出して精密な矩形に。失敗時はZXing座標の中央値にフォールバック
-    const pad=H*0.045, padX=W*0.012;
-    const x0=f.x0s.length?median(f.x0s):0;
-    const x1=f.x1s.length?median(f.x1s):W;
-    return {value:v,
-      box:{x:(x0-padX)/W, y:(ymin-pad)/H, w:(x1-x0+padX*2)/W, h:(ymax-ymin+pad*2)/H}};
-  });
+  // 同じ値のバーコードが1ページに複数ある(スリップは坊主と売上カードに同じISBNを刷る)
+  // 場合、値だけで束ねると2本の中間に枠が落ちてしまう。位置で塊に分ける。
+  const clusterGap=Math.max(bandH*1.6, H*0.08);
+  const out=[];
+  const pad=H*0.045, padX=W*0.012;
+  for(const v of Object.keys(hits)){
+    const ds=hits[v].slice().sort((a,b)=>a.y-b.y);
+    const groups=[]; let cur=[ds[0]];
+    for(let i=1;i<ds.length;i++){
+      if(ds[i].y-cur[cur.length-1].y>clusterGap){ groups.push(cur); cur=[ds[i]]; }
+      else cur.push(ds[i]);
+    }
+    groups.push(cur);
+    for(const g of groups){
+      const ys=g.map(d=>d.y);
+      const xs0=g.filter(d=>d.x0!=null).map(d=>d.x0);
+      const xs1=g.filter(d=>d.x1!=null).map(d=>d.x1);
+      const ymin=Math.min(...ys), ymax=Math.max(...ys);
+      const x0=xs0.length?median(xs0):0, x1=xs1.length?median(xs1):W;
+      out.push({value:v,
+        box:{x:(x0-padX)/W, y:(ymin-pad)/H, w:(x1-x0+padX*2)/W, h:(ymax-ymin+pad*2)/H}});
+    }
+  }
+  out.rotSeen=rotSeen;
+  return out;
 }
 
 /* ---------- pdf.js 実テキスト抽出 ---------- */
@@ -1359,7 +1446,7 @@ function maskBoxesPx(canvas, qualities, fallbackPx){
     return bb ? {x:bb.x*W, y:bb.y*H, w:bb.w*W, h:bb.h*H} : b;
   });
 }
-async function ocrNearBarcodes(canvas,boxesPx,maskPx){
+async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
   if(!boxesPx.length) return "";
   const W=canvas.width,H=canvas.height;
   let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
@@ -1387,20 +1474,44 @@ async function ocrNearBarcodes(canvas,boxesPx,maskPx){
     const padX=(tight?3:8)*up, padY=(tight?2:10)*up;
     tg.fillRect((b.x-cx0)*up-padX, (b.y-cy0)*up-padY, b.w*up+padX*2, b.h*up+padY*2);
   });
+  // 縦向きのデータ(スリップ等)は印字も90°回っているため、そのままではOCRが読めない。
+  // さらにスリップは坊主と売上カードを天地逆に並べて刷るので、同じ紙面でも
+  // 印字の向きが±90°の両方あり得る。両方向を試して読めた方を採用する。
+  // 単語座標は回転後のものになりマーカー表示に使えないので、その場合は座標を返さない。
+  const rotCanvas=(srcCv,cw2)=>{
+    const rc=document.createElement('canvas'); rc.width=srcCv.height; rc.height=srcCv.width;
+    const rx=rc.getContext('2d');
+    rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
+    if(cw2){ rx.translate(rc.width,0); rx.rotate(Math.PI/2); }
+    else   { rx.translate(0,rc.height); rx.rotate(-Math.PI/2); }
+    rx.drawImage(srcCv,0,0);
+    return rc;
+  };
+  const cands = rot ? [rotCanvas(tmp,true), rotCanvas(tmp,false)] : [tmp];
   try{
     const w=await ensureOcr();
-    const {data}=await w.recognize(tmp);
-    const text=data.text||"";
-    // 単語座標を元画像0..1で保持(マーカー用)。マッチ判定は呼び出し側で行う
-    const words=collectWords(data).map(wd=>{
+    let best=null;
+    for(const img of cands){
+      const {data}=await w.recognize(img);
+      const text=data.text||"";
+      // ISBN・Cコード・価格らしい並びが取れているものを優先する
+      let score=0;
+      if(/ISBN|97[89]\d{10}/.test(text)) score+=100;
+      if(/C\s*\d{4}/.test(text)) score+=30;
+      if(/[¥\\]\s*\d{3,5}/.test(text)) score+=30;
+      score+=(text.match(/\d/g)||[]).length;
+      if(!best||score>best.score) best={score,text,data,img};
+    }
+    const text=best.text;
+    const words=rot?[]:collectWords(best.data).map(wd=>{
       const b=wd.bbox||{}; 
       return {text:(wd.text||"").trim(),
               x:(cx0+((b.x0||0)/up))/W, y:(cy0+((b.y0||0)/up))/H,
               w:(((b.x1||0)-(b.x0||0))/up)/W, h:(((b.y1||0)-(b.y0||0))/up)/H};
     });
-    window.__lastOcr={img:tmp.toDataURL('image/png'), text};
+    window.__lastOcr={img:best.img.toDataURL('image/png'), text};
     return {text, words};
-  }catch(e){ window.__lastOcr={img:tmp.toDataURL('image/png'), text:'[OCR error] '+e}; return {text:"",words:[]}; }
+  }catch(e){ window.__lastOcr={img:cands[0].toDataURL('image/png'), text:'[OCR error] '+e}; return {text:"",words:[]}; }
 }
 /* Tesseractのデータ構造から単語配列を取り出す(v5は blocks→paragraphs→lines→words) */
 function pickMarks(words, rep){
@@ -1447,6 +1558,22 @@ function buildSets(bars){
   return sets;
 }
 
+/* スリップ(売上カード)判定。
+   スリップはISBNバーコードだけを刷るのが正規の仕様で、日本図書コード(2段目)は無い。
+   通常の表紙・カバーと同じ「2段目の欠落」警告を出すと毎回の誤検知になるため、
+   細長い紙面(短辺100mm以下・縦横比3倍以上)で2段目が無く、
+   バーコードが縦向き、あるいは「売上カード」等の文字がある場合はスリップとみなす。 */
+function isSlipLayout(page, items, bars){
+  if(bars.some(b=>/^(192|191)/.test(b.value))) return false;   // 2段目があるなら表紙・カバー
+  if(!bars.some(b=>/^(978|979)/.test(b.value))) return false;
+  const txt=(items||[]).map(t=>t.str).join("");
+  if(/売上カード|スリップ|短冊|補充注文/.test(txt)) return true;
+  const v=page.getViewport({scale:1});
+  const shortPt=Math.min(v.width,v.height), longPt=Math.max(v.width,v.height);
+  const slim = longPt/shortPt>=3 && shortPt<=283;              // 283pt ≒ 100mm
+  return slim && bars.some(b=>b.rot);
+}
+
 /* ---------- ページ解析 ---------- */
 async function analyzePage(pageNum){
   const page=await pdfDoc.getPage(pageNum);
@@ -1456,19 +1583,30 @@ async function analyzePage(pageNum){
   await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
 
   let bars=scanBarcodes(cv);
-  if($("#optRot").checked && bars.length<2){
+  // 縦向きバーコードへの対応。ZXingは内部で90°回転して読んでしまうことがあり、
+  // その検出は座標が使えないので scanBarcodes 側で捨てて rotSeen を立てている。
+  // スリップのように紙面全体が縦向きのデータでは通常向きで0件になるため、
+  // チェックボックスに頼らず自動で回転再探索する。
+  const needRot = bars.rotSeen || bars.length===0;
+  if(needRot || ($("#optRot").checked && bars.length<2)){
     // 90°回転して再探索（縦置きバーコード対応）
     const rc=document.createElement('canvas'); rc.width=cv.height; rc.height=cv.width;
     const rx=rc.getContext('2d'); rx.translate(rc.width,0); rx.rotate(Math.PI/2); rx.drawImage(cv,0,0);
     const rb=scanBarcodes(rc);
-    // 回転座標→元座標へ：x'=y, y'=W-x  (box近似のため中心のみ概算)
-    rb.forEach(b=>{ const nb={x:b.box.y, y:1-b.box.x-b.box.w, w:b.box.h, h:b.box.w};
-      if(!bars.some(z=>z.value===b.value)) bars.push({value:b.value,box:nb,rot:true}); });
+    // 回転座標→元座標へ：元(x,y)は回転後(H-y, x)に写るので、逆変換は x=y', y=1-x'
+    rb.forEach(b=>{ let nb={x:b.box.y, y:1-b.box.x-b.box.w, w:b.box.h, h:b.box.w};
+      nb=refineRotBoxX(cv, nb);   // バー長方向を画素から測り直す
+      bars.push({value:b.value,box:nb,rot:true}); });
+    // 回転側で見つかった値と同じものが通常向きにもある場合は、通常向きを優先して重複を除く
+    const seen=new Set();
+    bars=bars.filter(b=>{ const k=b.value+'@'+Math.round(b.box.y*40)+','+Math.round(b.box.x*40);
+      if(seen.has(k)) return false; seen.add(k); return true; });
   }
 
   const sets=buildSets(bars);
   // 近傍テキスト：実テキスト→無ければOCR
   const items=await pageTextItems(page,DETECT_SCALE);
+  const slipLayout=isSlipLayout(page, items, bars);
   const py=await ensurePy(); const runCheck=py.globals.get('run_check');
   const runCheckJan=py.globals.get('run_check_jan');
 
@@ -1480,13 +1618,13 @@ async function analyzePage(pageNum){
       // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく。OCRでバーを白く
       // 塗る際にZXingの粗い検出枠を使うと、縦余白(ページ高の4.5%)が大きいため
       // バー直下の目視数字まで消えてOCRが何も読めなくなる。
-      const qJan = s.other.box ? await checkBarcodeQualityHiRes(page,s.other.box,'jan') : null;
+      const qJan = s.other.box ? await checkBarcodeQualityHiRes(page,s.other.box,'jan',s.other.rot) : null;
       const maskPx = maskBoxesPx(cv,[qJan],boxesPx);
       let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
       const hasJanText=/[0-9][0-9\s]{10,20}[0-9]/.test(txt);
       let ocrWords=[];
       if($("#optOcr").checked && !hasJanText){
-        const o=await ocrNearBarcodes(cv,boxesPx,maskPx);
+        const o=await ocrNearBarcodes(cv,boxesPx,maskPx,s.other.rot);
         if(o&&o.text) txt=(txt+" "+o.text).trim();
         if(o&&o.words) ocrWords=o.words;
       }
@@ -1503,8 +1641,8 @@ async function analyzePage(pageNum){
       continue;
     }
     // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく(OCRの塗り潰し用)
-    const qIsbn = (s.isbn&&s.isbn.box) ? await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn') : null;
-    const qDnc  = (s.dnc &&s.dnc.box ) ? await checkBarcodeQualityHiRes(page,s.dnc.box ,'dnc' ) : null;
+    const qIsbn = (s.isbn&&s.isbn.box) ? await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn',s.isbn.rot) : null;
+    const qDnc  = (s.dnc &&s.dnc.box ) ? await checkBarcodeQualityHiRes(page,s.dnc.box ,'dnc' ,s.dnc.rot ) : null;
     const boxesPx=[], qs=[];
     if(s.isbn){ boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height}); qs.push(qIsbn); }
     if(s.dnc) { boxesPx.push({x:s.dnc.box.x*cv.width, y:s.dnc.box.y*cv.height, w:s.dnc.box.w*cv.width, h:s.dnc.box.h*cv.height });  qs.push(qDnc);  }
@@ -1513,13 +1651,13 @@ async function analyzePage(pageNum){
     const hasISBN=/ISBN|97[89]/.test(txt), hasC=/C\s*[0-9]{4}/.test(txt), hasP=/[¥\\]|本体|定価/.test(txt);
     let ocrWords=[];
     if($("#optOcr").checked && (!hasISBN||!hasC||!hasP)){
-      const o=await ocrNearBarcodes(cv,boxesPx,maskPx);
+      const o=await ocrNearBarcodes(cv,boxesPx,maskPx,(s.isbn&&s.isbn.rot)||(s.dnc&&s.dnc.rot));
       if(o&&o.text) txt=(txt+" "+o.text).trim();
       if(o&&o.words) ocrWords=o.words;
     }
     const bcIsbnVal=s.isbn?s.isbn.value:"";
     const repTxt=normalizeOcrIsbn(txt, bcIsbnVal);
-    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt);
+    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt, slipLayout?"slip":"");
     window.__lastChk={bcIsbn:bcIsbnVal, txtIn:txt, txtNorm:repTxt, repJson:repJson};
     const rep=JSON.parse(repJson);
     // マーカー：OCR単語のうち、照合した実値(ISBN/Cコード/価格)に一致するものだけを採用
