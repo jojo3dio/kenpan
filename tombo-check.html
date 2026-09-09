@@ -244,7 +244,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
       </span>
-      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-07-31</small></span>
+      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-09-09</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -804,6 +804,39 @@ function classify(raw, pgW, pgH){
     }
   }
 
+  // 角トンボの内(仕上がり)/外(塗り足し)は、上では各コーナー単独で
+  // 「中心に近い方を内」と決めている。そのコーナーで1本しか検出できなかった場合、
+  // それが塗り足し線であっても無条件に「内」とみなしてしまい、
+  // 反対側のコーナーと基準がずれて仕上がり寸法が狂う。
+  // (実例: 左を塗り足し線・右を仕上がり線で測り、148mmが151mmになった)
+  // 2本そろっているコーナーから内側位置と内外の間隔を求め、
+  // 1本だけのコーナーはどちらに一致するかで決め直す。
+  const _med=a=>{const b=[...a].sort((p,q)=>p-q);return b[(b.length-1)>>1];};
+  for(const sd of [{keys:['TL_V','BL_V'],axis:'x'},{keys:['TR_V','BR_V'],axis:'x'},
+                   {keys:['TL_H','TR_H'],axis:'y'},{keys:['BL_H','BR_H'],axis:'y'}]){
+    const mid = sd.axis==='x'?midX:midY;
+    const pos = l => sd.axis==='x'?l.cx:l.cy;
+    const grps = sd.keys.map(k=>merged.filter(l=>l._ckey===k));
+    const inners=[], offsets=[];
+    for(const g of grps){
+      if(g.length<2) continue;
+      const s2=[...g].sort((a,b)=>Math.abs(pos(a)-mid)-Math.abs(pos(b)-mid));
+      inners.push(pos(s2[0]));
+      offsets.push(Math.abs(pos(s2[1])-pos(s2[0])));
+    }
+    if(!inners.length) continue;
+    const innerRef=_med(inners), offRef=_med(offsets);
+    grps.forEach((g,gi)=>{
+      if(g.length!==1) return;
+      const l=g[0], p=pos(l);
+      const outerRef=innerRef+(p<mid?-1:1)*offRef;
+      const dIn=Math.abs(p-innerRef), dOut=Math.abs(p-outerRef);
+      if(dOut<dIn && dOut<=tolPt*3){
+        roleMap.set(l, 'outer-corner-'+sd.keys[gi].replace('_','-'));
+      }
+    });
+  }
+
   const cornerHinner=merged.filter(l=>l._ckey&&l._ckey.endsWith('_H')&&roleMap.get(l)&&roleMap.get(l).startsWith('corner-'));
   let bandPt=30*MM2PT;
   if(cornerHinner.length){
@@ -848,7 +881,13 @@ function classify(raw, pgW, pgH){
   });
 }
 
-function clusterLines(lines,tol){
+function clusterLines(lines,tol,maxGap){
+  // maxGap: 線が伸びる方向で見たときの許容すき間。
+  // これが無いと、同一直線上にありさえすれば紙面の端と端の線まで1本に繋いでしまう。
+  // 例: 上下のセンタートンボの足は同じx上にあるが210mm離れており、
+  // 繋ぐと紙面を縦に貫く1本の線になり、内トンボ(折り・綴じの境界)と
+  // 誤判定されて単ページが見開き扱いになる。
+  if(maxGap==null) maxGap=5*MM2PT;
   const used=new Set(), out=[];
   for(let i=0;i<lines.length;i++){
     if(used.has(i)) continue;
@@ -858,7 +897,14 @@ function clusterLines(lines,tol){
       const a=lines[i],b=lines[j];
       if(a.dir!==b.dir) continue;
       const perp=a.dir==='H'?Math.abs(a.cy-b.cy):Math.abs(a.cx-b.cx);
-      if(perp<=tol){grp.push(b);used.add(j);}
+      if(perp>tol) continue;
+      const aLo=a.dir==='H'?Math.min(a.x1,a.x2):Math.min(a.y1,a.y2);
+      const aHi=a.dir==='H'?Math.max(a.x1,a.x2):Math.max(a.y1,a.y2);
+      const bLo=b.dir==='H'?Math.min(b.x1,b.x2):Math.min(b.y1,b.y2);
+      const bHi=b.dir==='H'?Math.max(b.x1,b.x2):Math.max(b.y1,b.y2);
+      const gap=Math.max(aLo-bHi, bLo-aHi);   // 重なっていれば負
+      if(gap>maxGap) continue;
+      grp.push(b);used.add(j);
     }
     if(grp.length===1){out.push(grp[0]);continue;}
     const avgP=grp.reduce((s,l)=>s+(l.dir==='H'?l.cy:l.cx),0)/grp.length;
@@ -918,7 +964,18 @@ function computeDims(tl,pgW,pgH){
 
   const hasFolds=foldVL.length>0||foldVR.length>0;
   if(!hasFolds||innerV.length>0){
-    innerV.forEach((l,i)=>xpts.push({x:l.cx,lbl:'境界'+(i+1)}));
+    // センタートンボの足は、折り・綴じの境界と幾何的に区別できない。
+    // 上下のセンタートンボ(横棒)と同じx位置にあるものは「センター」と表示し、
+    // 見開きの折り位置と読み違えないようにする。
+    const centerXs=[...(byRole['center-T']||[]),...(byRole['center-B']||[])].map(l=>l.cx);
+    // 上下の足が別々に検出されるため、同じx位置のものは先にまとめる
+    // (まとめずに番号を振ると「境界1・境界3」のように飛んでしまう)
+    const innerVU=innerV.filter((l,i,arr)=>i===0||Math.abs(l.cx-arr[i-1].cx)>tolX);
+    let bIdx=0;
+    innerVU.forEach(l=>{
+      const isCenter=centerXs.some(x=>Math.abs(x-l.cx)<=tolX);
+      xpts.push({x:l.cx, lbl:isCenter?'センター':'境界'+(++bIdx)});
+    });
   }
 
   if(foldVR.length){
@@ -1544,7 +1601,7 @@ cen.addEventListener('drop',e=>{
 // ====== フィードバック（ISBN検版・ノンブル検版等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.1";
+  const FB_APP_VERSION = "v1.2";
   const modal = $("#fbModal");
   let fbVerdict = "";
 
