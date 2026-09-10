@@ -87,6 +87,53 @@
     letter-spacing:.01em; color:var(--ink);
   }
   h1 .accent{color:var(--shu);}
+  .app-ver{
+    font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.04em;
+    color:var(--faint); padding:2px 7px; border-radius:6px;
+    border:1px solid var(--line-soft); background:var(--panel2);
+    align-self:center; white-space:nowrap;
+  }
+
+  /* ── 階層編集のアラート（Windowsで□化する文字を自動修正したときに出す） ── */
+  .bm-alert{
+    display:none; width:100%; align-items:flex-start; gap:10px; text-align:left;
+    margin:0 0 14px; padding:11px 13px; border-radius:11px; cursor:pointer;
+    font-family:var(--sans); font-size:12.5px; line-height:1.55;
+    color:var(--ink); background:var(--warn-dim);
+    border:1.5px solid var(--warn);
+    animation:bmAlertPulse 1.6s ease-in-out 0s 4;
+  }
+  .bm-alert.show{display:flex;}
+  .bm-alert:hover{background:color-mix(in srgb, var(--warn) 18%, transparent);}
+  .bm-alert .ba-ico{
+    flex:none; width:20px; height:20px; margin-top:1px; border-radius:50%;
+    background:var(--warn); color:#fff; font-weight:700; font-size:13px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .bm-alert .ba-body{flex:1; min-width:0;}
+  .bm-alert .ba-ttl{font-weight:700; color:var(--warn); display:block; margin-bottom:2px;}
+  .bm-alert .ba-list{color:var(--sub); font-size:11.5px; word-break:break-all;}
+  .bm-alert .ba-cta{
+    flex:none; align-self:center; font-family:var(--sans); font-size:11.5px; font-weight:700;
+    color:#fff; background:var(--warn); border-radius:8px; padding:6px 11px; white-space:nowrap;
+  }
+  .bm-alert .ba-close{
+    flex:none; align-self:flex-start; width:20px; height:20px; border-radius:6px;
+    border:none; background:transparent; color:var(--sub); cursor:pointer;
+    font-size:13px; line-height:1; padding:0;
+  }
+  .bm-alert .ba-close:hover{background:var(--warn-dim); color:var(--ink);}
+  @keyframes bmAlertPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(168,116,18,0);}
+    50%{box-shadow:0 0 0 5px var(--warn-dim);}
+  }
+  @media (prefers-reduced-motion:reduce){ .bm-alert{animation:none;} }
+  /* 自動修正された行の目印 */
+  .bm-row.fixed{background:var(--warn-dim);}
+  .bm-row .bm-fixmark{
+    flex:none; width:14px; text-align:center; color:var(--warn);
+    font-size:11px; font-weight:700; line-height:1;
+  }
   .hdr-sp{flex:1;}
   .hdr-btn{
     display:inline-flex; align-items:center; gap:6px;
@@ -693,6 +740,7 @@
   <div>
     <h1>PDF <span class="accent">しおり</span>追加</h1>
   </div>
+  <span class="app-ver" id="appVer"></span>
   <div class="hdr-sp"></div>
   <button id="btnShowLog" class="hdr-btn logbtn" type="button">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9h8M8 13h8M8 17h5" stroke-linecap="round"/></svg>
@@ -844,6 +892,15 @@
   <section class="card" id="cardTree" style="display:none;">
     <h2>しおりの階層編集</h2>
     <p class="hint">左のチェックで項目を選び、ツールバーの「▲▼」で順番を入れ替えます（複数選択可）。行の「◀▶」で階層を上げ下げ、「＋」で直下に挿入、「✕」で削除。見出しとラベルは直接クリックして編集できます。</p>
+    <button class="bm-alert" id="bmAlert" type="button" title="ログを開いて内容を確認します">
+      <span class="ba-ico">!</span>
+      <span class="ba-body">
+        <span class="ba-ttl" id="bmAlertTtl"></span>
+        <span class="ba-list" id="bmAlertList"></span>
+      </span>
+      <span class="ba-cta">ログで確認</span>
+      <span class="ba-close" id="bmAlertClose" title="このお知らせを閉じる">✕</span>
+    </button>
     <div class="bm-toolbar">
       <span class="bm-count" id="bmCount"></span>
       <span class="bm-toolbar-btns">
@@ -986,6 +1043,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
+// アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
+const APP_VERSION = "v1.2";
+
 // ───────────────────────────────────────────
 //  状態
 // ───────────────────────────────────────────
@@ -1007,6 +1067,7 @@ let previewPageLabels = null; // PDFのページラベル（pdf.jsのgetPageLabe
 //  UI ヘルパー
 // ───────────────────────────────────────────
 const $ = id => document.getElementById(id);
+document.getElementById("appVer").textContent = APP_VERSION;
 const logBox = $("logBox");
 
 function log(msg, cls){
@@ -1053,23 +1114,44 @@ function titleIssueKinds(raw){
   return kinds;
 }
 
-// エントリ配列のタイトルを一括サニタイズし、直した内容をログに出す
+// 階層編集パネルのアラート表示（ログを見ないと気づけない問題を、作業面に出す）
+function showBmAlert(count, samples){
+  const box = $("bmAlert");
+  if(!box) return;
+  if(!count){ box.classList.remove("show"); return; }
+  $("bmAlertTtl").textContent =
+    `Windowsで「□」に化ける文字を ${count} 件見つけて自動修正しました。該当行をご確認ください`;
+  const head = samples.slice(0, 3).join("／");
+  $("bmAlertList").textContent =
+    `該当：${head}${samples.length > 3 ? ` ほか${samples.length - 3}件` : ""}（黄色く色が付いた行です）`;
+  box.classList.add("show");
+}
+function hideBmAlert(){
+  const box = $("bmAlert");
+  if(box) box.classList.remove("show");
+}
+
+// エントリ配列のタイトルを一括サニタイズし、直した内容をログとアラートに出す
 function sanitizeEntries(entries){
   let fixed = 0;
-  const notes = [];
+  const notes = [], samples = [];
   for(const e of entries || []){
     const raw = String(e.title == null ? "" : e.title);
     const clean = sanitizeTitle(raw);
     if(clean !== raw){
       const kinds = titleIssueKinds(raw);
       notes.push(`    ・${kinds.length ? kinds.join("・") : "書式"}：「${clean}」`);
+      samples.push(`「${clean}」`);
       e.title = clean;
+      e._fixed = true;      // 階層編集の該当行に目印を付けるためのフラグ
       fixed++;
     }
   }
   if(fixed > 0){
     log(`  ⚠ Windowsで「□」に化けるおそれのある文字を ${fixed} 件見つけたので自動修正しました`, "warn");
     notes.forEach(n => log(n, "warn"));
+    log("    （制御文字＝InDesignの右インデントタブ等／互換漢字＝見た目が同じで別コードの漢字）", "warn");
+    showBmAlert(fixed, samples);
   }
   return fixed;
 }
@@ -1082,6 +1164,8 @@ function openLogModal(){
 }
 function closeLogModal(){ $("logModalBg").classList.remove("show"); }
 $("btnShowLog").addEventListener("click", openLogModal);
+$("bmAlert").addEventListener("click", openLogModal);
+$("bmAlertClose").addEventListener("click", e => { e.stopPropagation(); hideBmAlert(); });
 $("btnCloseLog").addEventListener("click", closeLogModal);
 $("logModalBg").addEventListener("click", e => { if(e.target === $("logModalBg")) closeLogModal(); });
 document.addEventListener("keydown", e => { if(e.key === "Escape"){ closeLogModal(); closeTocPreview(); closeTocTextModal(); } });
@@ -1691,6 +1775,7 @@ function groupRtfEntries(text){
 }
 
 async function loadTxtFile(f){
+  hideBmAlert();   // 読み込みごとに前回のお知らせを消す
   const buf = await f.arrayBuffer();
   const bytes = new Uint8Array(buf);
 
@@ -2354,6 +2439,7 @@ async function autoDetectToc(){
       }
       bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
+    hideBmAlert();
     sanitizeEntries(bmEntries);   // 目次ページから取り出したテキストは制御文字・互換漢字が混入しやすい
     normalizeLevels(bmEntries);
 
@@ -2567,7 +2653,7 @@ function renderBmList(focusIndex){
 
   bmEntries.forEach((e, i) => {
     const row = document.createElement("div");
-    row.className = "bm-row" + (e.level > 0 ? " lv1" : "") + (selectedEntries.has(e) ? " sel" : "");
+    row.className = "bm-row" + (e.level > 0 ? " lv1" : "") + (selectedEntries.has(e) ? " sel" : "") + (e._fixed ? " fixed" : "");
     row.style.setProperty("--lv", e.level);
 
     // 複数選択チェックボックス
@@ -2706,7 +2792,13 @@ function renderBmList(focusIndex){
     btnDel.title = "この行を削除";
     btnDel.addEventListener("click", () => deleteEntry(i));
 
-    row.append(check, handle, guide, btnOut, btnIn, title, btnAdd, btnDel);
+    const fixmark = document.createElement("span");
+    fixmark.className = "bm-fixmark";
+    if(e._fixed){
+      fixmark.textContent = "⚠";
+      fixmark.title = "Windowsで「□」化する文字を自動修正した行です。見出しをご確認ください";
+    }
+    row.append(check, handle, guide, btnOut, btnIn, fixmark, title, btnAdd, btnDel);
 
     // 通し番号（このPDF内の物理ページ順・背景色チップ）→ ページラベル（長円の白窓）の順で右端に並べる
     const serial = document.createElement("button");
@@ -3393,6 +3485,7 @@ function resetAll(){
 
   pdfFile = null; pdfFileHandle = null; txtFile = null; resultBlob = null; resultName = "";
   resultSignature = null; labelResolver = null;
+  hideBmAlert();
   previewPdfjsDoc = null; currentPreviewPage = 1; currentTocPreviewPage = 1; currentTocIndex = 0;
   previewPageLabels = null;
   resetRunsCache();
@@ -3434,7 +3527,7 @@ $("btnReset").addEventListener("click", resetAll);
 // ====== フィードバック（ISBN検版・トンボ計測等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.2";
+  const FB_APP_VERSION = APP_VERSION;
   const modal = $("fbModal");
   let fbVerdict = "";
 
