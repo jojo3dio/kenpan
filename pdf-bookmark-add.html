@@ -1018,6 +1018,62 @@ function log(msg, cls){
   if(cls === "warn" || cls === "err") $("btnShowLog").classList.add("alert");
 }
 
+// ───────────────────────────────────────────
+//  しおり文字列のサニタイズ
+//  Mac版Acrobatは黙って無視するが、Windows版Acrobatでは「□」（.notdef）になる文字を、
+//  しおりに載せる前に除去・統合する。
+//   ・制御文字   … InDesignの右インデントタブ（U+0008）などが目次テキストに混入する
+//   ・互換漢字   … Adobe-Japan1系のToUnicodeにより「屠」がU+2F877（BMP外）で取り出される等。
+//                  NFC正規化で統合漢字（U+5C60）へ寄せる。
+//                  ※NFKCは「第１章」→「第1章」「第Ⅰ部」→「第I部」まで潰すので使わない
+//   ・前後のアキ … 末尾の半角/全角スペースはWindowsで余計な字送りに見えるので落とす
+// ───────────────────────────────────────────
+const RE_CTRL_G   = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2028\u2029\uFEFF]/g;
+const RE_CTRL     = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2028\u2029\uFEFF]/;
+const RE_COMPAT   = /[\u{F900}-\u{FAFF}\u{2F800}-\u{2FA1F}]/u;   // CJK互換漢字／互換漢字補助
+const RE_EDGE_SP  = /^[\s\u3000]|[\s\u3000]$/;
+
+function sanitizeTitle(s){
+  let t = String(s == null ? "" : s);
+  t = t.normalize("NFC");                                         // 互換漢字 → 統合漢字
+  t = t.replace(RE_CTRL_G, "");                                   // 制御文字・不可視文字
+  t = t.replace(/\t/g, "\u3000").replace(/\u00A0/g, " ");         // タブ→全角アキ、NBSP→半角
+  t = t.replace(/[ \u3000]{2,}/g, "\u3000");                      // 連続アキは全角1つに
+  t = t.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, "");  // 前後のアキを落とす
+  return t;
+}
+
+// 危険文字の内訳を返す（ログ表示用）
+function titleIssueKinds(raw){
+  const t = String(raw == null ? "" : raw);
+  const kinds = [];
+  if(RE_CTRL.test(t))    kinds.push("制御文字");
+  if(RE_COMPAT.test(t))  kinds.push("互換漢字");
+  if(RE_EDGE_SP.test(t)) kinds.push("前後のアキ");
+  return kinds;
+}
+
+// エントリ配列のタイトルを一括サニタイズし、直した内容をログに出す
+function sanitizeEntries(entries){
+  let fixed = 0;
+  const notes = [];
+  for(const e of entries || []){
+    const raw = String(e.title == null ? "" : e.title);
+    const clean = sanitizeTitle(raw);
+    if(clean !== raw){
+      const kinds = titleIssueKinds(raw);
+      notes.push(`    ・${kinds.length ? kinds.join("・") : "書式"}：「${clean}」`);
+      e.title = clean;
+      fixed++;
+    }
+  }
+  if(fixed > 0){
+    log(`  ⚠ Windowsで「□」に化けるおそれのある文字を ${fixed} 件見つけたので自動修正しました`, "warn");
+    notes.forEach(n => log(n, "warn"));
+  }
+  return fixed;
+}
+
 // ── ログモーダル（ボタンで開閉。新規ウインドウはSafariでポップアップブロックされるため使わない） ──
 function openLogModal(){
   $("logModalBg").classList.add("show");
@@ -1642,10 +1698,8 @@ async function loadTxtFile(f){
     log("RTF形式のファイルを検出しました。プレーンテキストに変換して読み込みます。");
     const text = rtfToPlainText(bytes);
     bmEntries = groupRtfEntries(text);
-    bmEntries.forEach(e => {
-      e.title = e.title.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-      e.label = e.label.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-    });
+    bmEntries.forEach(e => { e.label = e.label.replace(RE_CTRL_G, ""); });
+    sanitizeEntries(bmEntries);
     normalizeLevels(bmEntries);
     return bmEntries.length;
   }
@@ -1653,10 +1707,8 @@ async function loadTxtFile(f){
   const forceEnc = $("encSelect") ? $("encSelect").value : "auto";
   const {text, enc} = decodeTextFile(buf, forceEnc);
   bmEntries = parseEntries(text);
-  bmEntries.forEach(e => {
-    e.title = e.title.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-    e.label = e.label.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-  });
+  bmEntries.forEach(e => { e.label = e.label.replace(RE_CTRL_G, ""); });
+  sanitizeEntries(bmEntries);
   normalizeLevels(bmEntries);
   log(`文字コード判定：${enc}`);
   return bmEntries.length;
@@ -1949,7 +2001,8 @@ async function extractRuns(pdfjsDoc, physIdx){
 }
 
 // 照合用の正規化（空白・全角スペースを落とす。1文字も欠けない完全一致で判定するため）
-const normText = s => String(s == null ? "" : s).replace(/[\s\u3000]/g, "");
+// 互換漢字が混在しても取りこぼさないよう、比較前にNFCで寄せる
+const normText = s => String(s == null ? "" : s).normalize("NFC").replace(RE_CTRL_G, "").replace(/[\s\u3000]/g, "");
 // 数字だけ（ノンブル・漢数字ノンブル）の行は小見出しとして扱わない
 const NUM_ONLY_RE = /^[\s\u30000-9０-９ivxlcdmIVXLCDM〇零一二三四五六七八九十百千･・．.\u2010-\u2015ー]+$/;
 const SUB_SPLIT_RE = /[／/]/;
@@ -2108,7 +2161,7 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
     for(const q of byOwner.get(ownerIdx)){
       const label = labelForPhys(q.phys, parent.label, physList[ownerIdx], resolveLabel, pageLabels);
       if(!label){ noLabel++; continue; }
-      rows.push({title: q.sub, label, level: (parent.level || 0) + 1, physIdx: q.phys});
+      rows.push({title: sanitizeTitle(q.sub), label, level: (parent.level || 0) + 1, physIdx: q.phys});
     }
     if(rows.length > 0){ list.splice(ownerIdx + 1, 0, ...rows); added += rows.length; }
   }
@@ -2301,6 +2354,7 @@ async function autoDetectToc(){
       }
       bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
+    sanitizeEntries(bmEntries);   // 目次ページから取り出したテキストは制御文字・互換漢字が混入しやすい
     normalizeLevels(bmEntries);
 
     // 小見出し（目次で「／」区切りで列挙される項目）を各項目に持たせておき、
@@ -2610,6 +2664,17 @@ function renderBmList(focusIndex){
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
     });
     title.addEventListener("input", () => { e.title = title.value; updateExportDirty(); });
+    // 確定時（フォーカスアウト／変換確定後）にサニタイズ。input中に走らせるとIME入力を壊すのでchangeで行う
+    title.addEventListener("change", () => {
+      const clean = sanitizeTitle(title.value);
+      if(clean !== title.value){
+        const kinds = titleIssueKinds(title.value);
+        title.value = clean;
+        e.title = clean;
+        updateExportDirty();
+        log(`  ⚠ 見出し「${clean}」から${kinds.length ? kinds.join("・") : "余分な書式"}を除去しました（Windowsで「□」化するため）`, "warn");
+      }
+    });
 
     const label = document.createElement("input");
     label.className = "bm-label";
@@ -3114,7 +3179,7 @@ function writeOutlines(pdfDoc, tree){
     let count = children.length;
     children.forEach((node, i) => {
       const dict = ctx.obj({
-        Title: PDFHexString.fromText(node.title),
+        Title: PDFHexString.fromText(sanitizeTitle(node.title)),   // 最終防波堤（どの経路で入った文字も必ず通す）
         Parent: parentRef,
         Dest: [pages[node.physIdx].ref, "XYZ", null, null, null],
       });
@@ -3161,6 +3226,7 @@ async function runBookmark(opts){
 
   try{
     log("── ファイル読み込み中 ──");
+    if(sanitizeEntries(bmEntries) > 0) renderBmList();   // 手入力・貼り付け分もここで最終チェック
     let entries = bmEntries.filter(e => e.title.trim() && e.label.trim());
     const skipped = bmEntries.length - entries.length;
     log(`  しおりリスト：${entries.length} 件（階層エディタの内容を使用）`);
@@ -3368,7 +3434,7 @@ $("btnReset").addEventListener("click", resetAll);
 // ====== フィードバック（ISBN検版・トンボ計測等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.1";
+  const FB_APP_VERSION = "v1.2";
   const modal = $("fbModal");
   let fbVerdict = "";
 
