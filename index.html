@@ -414,7 +414,7 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
 <div class="modal-bg" id="navWrap">
   <div class="modal">
     <h2>ウインドウの使い方</h2>
-    <p class="hint">主に1つのツールを使う方は「同じウインドウ」、複数のツールを並べて使う方は「別タブ」が向いています。設定はこのブラウザ（またはアプリ）に保存されます。</p>
+    <p class="hint">主に1つのツールを使う方は「同じウインドウ」、複数のツールを行き来する方は「タブでまとめる」が向いています。設定はこのブラウザ（またはアプリ）に保存されます。</p>
     <div class="field">
       <label>ツールを開くとき</label>
       <div class="navopts">
@@ -422,6 +422,7 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
         <label class="navopt"><input type="radio" name="navmode" value="same"><span><b>常に同じウインドウ</b><small>ハブが消えてツールだけが表示されます。ツールの「ハブへ」で戻ります</small></span></label>
         <label class="navopt"><input type="radio" name="navmode" value="tab"><span><b>常に別タブ</b><small>ハブは残ります。複数のツールを同時に開けます</small></span></label>
         <label class="navopt"><input type="radio" name="navmode" value="win"><span><b>常に別ウインドウ</b><small>ハブは小さいまま、ツールは大きなウインドウで開きます。Windows の Chrome / Edge 向け（Safari ではポップアップ許可が必要な場合があります）</small></span></label>
+        <label class="navopt"><input type="radio" name="navmode" value="shell"><span><b>別ウインドウにタブでまとめる</b><small>ハブは小さいまま。1つ目のツールが大きなウインドウで開き、2つ目からは同じウインドウのタブとして並びます。タブは下へドラッグすると別ウインドウに切り出せます</small></span></label>
       </div>
       <p class="navnow" id="navNow"></p>
     </div>
@@ -611,11 +612,47 @@ function toolWinFeatures(){
   return 'width='+w+',height='+h+',left='+l+',top='+t;
 }
 
+/* ---------- タブでまとめる別ウインドウ（kenpan-shell.html） ---------- */
+const SHELL_FILE='kenpan-shell.html', SHELL_NAME='kenpanShell';
+let shellWin=null;
+/* 名前付きウインドウなので、ハブを読み込み直しても同じウインドウを捕まえ直せる。
+   URL に空文字を渡すと既存ウインドウは遷移しない（新規のときだけ about:blank ができる）。 */
+function shellRef(){
+  if(shellWin && !shellWin.closed) return shellWin;
+  try{
+    const w=window.open('', SHELL_NAME, toolWinFeatures());
+    if(w && !w.closed){ shellWin=w; return w; }
+  }catch(e){}
+  return null;
+}
+function shellUrl(u){
+  const base=new URL(SHELL_FILE, location.href).href;
+  return base + '?_v=' + Date.now() + '&tool=' + encodeURIComponent(u);
+}
+function openInShell(u){
+  const w=shellRef();
+  if(w){
+    try{
+      if(w.KENPAN_SHELL && typeof w.KENPAN_SHELL.addTab==='function'){
+        if(w.KENPAN_SHELL.addTab(u)){ w.focus(); return; }
+      }
+      /* まだ中身が無い（いま作られた空のウインドウ）ので、シェルを読み込ませる */
+      w.location.replace(shellUrl(u));
+      w.focus(); return;
+    }catch(e){}
+  }
+  shellWin=window.open(shellUrl(u), SHELL_NAME, toolWinFeatures());
+  if(shellWin){ try{ shellWin.focus(); }catch(e){} return; }
+  /* ポップアップが塞がれたときは従来どおり別タブで開く */
+  window.open(addParam(bust(u),'hub','tab'),'_blank','');
+}
+
 function openUrl(u){
   if(!u) return;
   const ext=isExternal(u);
   if(ext){ window.open(addParam(bust(u),'hub','ext'),'_blank','noopener'); return; }
   const m=navMode();
+  if(m==='shell'){ openInShell(u); return; }
   if(useSameWindow()){
     saveSize(WIN_HUB);                 /* 戻ってきたときにハブの大きさを取り戻すため */
     applySize(WIN_TOOL);
@@ -897,6 +934,7 @@ function navLabel(){
   if(m==='same') return '現在：常に同じウインドウで開きます。';
   if(m==='tab')  return '現在：常に別タブで開きます。';
   if(m==='win')  return '現在：常に別ウインドウで開きます。ハブの大きさはそのまま保たれます。';
+  if(m==='shell')return '現在：別ウインドウにタブでまとめて開きます。ハブの大きさはそのまま保たれます。';
   return '現在：自動 — '+(isStandalone()
     ? 'アプリのウインドウで表示中なので、同じウインドウで開きます。'
     : 'ブラウザのタブで表示中なので、別タブで開きます。');
@@ -904,7 +942,9 @@ function navLabel(){
 function applyOpenHint(){
   const el=$('#subInspect'); if(!el) return;
   el.innerHTML='アイコンをクリックすると、そのツールが'
-    + (useSameWindow()?'<b>同じウインドウ</b>で開きます（ツール側の「ハブへ」で戻れます）':'別タブで開きます')
+    + (useSameWindow()?'<b>同じウインドウ</b>で開きます（ツール側の「ハブへ」で戻れます）'
+       : navMode()==='shell' ? '<b>別ウインドウのタブ</b>として開きます（2つ目からは同じウインドウに並びます）'
+       : '別タブで開きます')
     + '。カーソルを合わせると左側に説明とマニュアルが表示されます。各ツールはブラウザ内で完結し、PDFが外部に送信されることはありません。';
 }
 function buildStartupSel(){

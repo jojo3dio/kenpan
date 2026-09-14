@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KENPAN</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f4f4f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#6b6357; --ink-faint:#a39a8c;
+  --amber:#b9791a; --amber-bg:#f6ead2;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#e8a33d; --amber-bg:#33270f;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+
+.app{height:100vh;height:100dvh;display:flex;flex-direction:column}
+
+/* ---------- タブバー ---------- */
+.bar{flex:0 0 auto;display:flex;align-items:stretch;gap:6px;height:38px;
+  padding:0 8px;background:var(--strip);border-bottom:1px solid var(--line);
+  user-select:none;-webkit-user-select:none}
+.bar button{font-family:var(--ui);color:var(--ink);background:none;border:0;cursor:pointer}
+
+.hubbtn{display:flex;align-items:center;gap:6px;flex:0 0 auto;align-self:center;
+  font-size:12px;font-weight:700;padding:6px 11px;border-radius:9px;
+  border:1px solid var(--line)!important;background:var(--panel)!important;transition:.14s}
+.hubbtn:hover{border-color:var(--amber)!important;background:var(--amber-bg)!important}
+.hubbtn svg{width:13px;height:13px}
+
+.tabs{flex:1 1 auto;display:flex;align-items:stretch;gap:4px;min-width:0;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+
+.tab{--c:#64748b;position:relative;display:flex;align-items:center;gap:7px;flex:0 1 190px;
+  min-width:96px;max-width:230px;align-self:center;height:28px;padding:0 6px 0 10px;
+  border-radius:9px;border:1px solid transparent;background:transparent;
+  cursor:pointer;transition:background .13s,border-color .13s;touch-action:none}
+.tab:hover{background:var(--panel2)}
+.tab.on{background:var(--panel);border-color:var(--line);
+  box-shadow:0 1px 2px rgba(40,32,20,.07), inset 0 0 0 1px color-mix(in srgb, var(--c) 24%, transparent)}
+[data-theme="dark"] .tab.on{box-shadow:0 1px 3px rgba(0,0,0,.35), inset 0 0 0 1px color-mix(in srgb, var(--c) 34%, transparent)}
+.tab .dot{width:7px;height:7px;border-radius:50%;background:var(--c);flex:0 0 auto;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--c) 22%, transparent)}
+.tab .nm{flex:1 1 auto;font-size:12px;line-height:1;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:var(--ink-dim)}
+.tab.on .nm{color:var(--ink);font-weight:700}
+.tab .x{flex:0 0 auto;width:18px;height:18px;border-radius:5px;font-size:14px;line-height:1;
+  color:var(--ink-faint);opacity:0;transition:.12s}
+.tab:hover .x,.tab.on .x{opacity:1}
+.tab .x:hover{background:var(--line);color:var(--ink)}
+.tab.dragging{opacity:.5}
+.tab.tearing{border-color:var(--amber);background:var(--amber-bg);opacity:1}
+
+.addbtn{flex:0 0 auto;align-self:center;width:26px;height:26px;border-radius:8px;
+  font-size:17px;line-height:1;color:var(--ink-dim);transition:.13s}
+.addbtn:hover{background:var(--panel2);color:var(--ink)}
+
+.mergebtn{display:none;flex:0 0 auto;align-self:center;font-size:11.5px;font-weight:700;
+  padding:5px 10px;border-radius:8px;border:1px solid var(--line)!important;
+  background:var(--panel)!important;color:var(--ink-dim)!important;transition:.14s}
+.mergebtn.show{display:block}
+.mergebtn:hover{border-color:var(--amber)!important;background:var(--amber-bg)!important;color:var(--ink)!important}
+
+.themebtn{flex:0 0 auto;align-self:center;width:26px;height:26px;border-radius:8px;
+  font-size:14px;line-height:1;color:var(--ink-dim);transition:.13s}
+.themebtn:hover{background:var(--panel2);color:var(--ink)}
+
+/* ---------- 切り出しのしるし ---------- */
+.tearhint{position:fixed;left:50%;top:46px;transform:translateX(-50%);z-index:80;
+  display:none;align-items:center;gap:7px;padding:7px 14px;border-radius:10px;
+  font-size:12px;font-weight:700;background:var(--amber);color:#1a1205;
+  box-shadow:0 6px 18px rgba(40,32,20,.22);pointer-events:none}
+.tearhint.show{display:flex}
+
+/* ---------- ツールの表示領域 ---------- */
+.host{position:relative;flex:1 1 auto;min-height:0;background:var(--bg)}
+.frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg)}
+.frame:not(.on){visibility:hidden;pointer-events:none;z-index:0}
+.frame.on{visibility:visible;z-index:1}
+
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;color:var(--ink-faint);font-size:13px;z-index:2}
+.empty b{font-size:15px;color:var(--ink-dim)}
+
+/* ---------- ツール選択のポップオーバー ---------- */
+.pick{position:fixed;z-index:90;display:none;min-width:212px;max-height:62vh;overflow:auto;
+  padding:6px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 10px 34px rgba(40,32,20,.18)}
+.pick.show{display:block}
+.pick .ph{padding:6px 10px 4px;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-faint)}
+.pick button{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;
+  border:0;border-radius:8px;background:none;color:var(--ink);font-family:var(--ui);
+  font-size:12.5px;text-align:left;cursor:pointer}
+.pick button:hover{background:var(--panel2)}
+.pick button .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.pick .none{padding:10px;color:var(--ink-faint);font-size:12px}
+
+/* ---------- 下端の帯 ---------- */
+.kp-strip{flex:0 0 auto;display:flex;align-items:center;gap:12px;height:21px;
+  padding:0 12px;background:var(--strip);border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--ink-faint)}
+.kp-strip .sp{flex:1}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="bar">
+    <button class="hubbtn" id="hubBtn" title="ハブのウインドウを前面に出す">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="7.4" height="7.4" rx="1.6"/><rect x="13.6" y="3" width="7.4" height="7.4" rx="1.6"/>
+        <rect x="3" y="13.6" width="7.4" height="7.4" rx="1.6"/><rect x="13.6" y="13.6" width="7.4" height="7.4" rx="1.6"/>
+      </svg><span>ハブ</span>
+    </button>
+    <div class="tabs" id="tabs"></div>
+    <button class="addbtn" id="addBtn" title="ツールを追加（⌘/Ctrl+T）">＋</button>
+    <button class="mergebtn" id="mergeBtn" title="このウインドウのタブを主ウインドウへ移す">⤶ まとめる</button>
+    <button class="themebtn" id="themeBtn" title="明暗を切り替える">◐</button>
+  </div>
+
+  <div class="host" id="host">
+    <div class="empty" id="empty">
+      <b>タブがありません</b>
+      <span>＋ からツールを追加するか、ハブのアイコンをクリックしてください</span>
+    </div>
+  </div>
+
+  <div class="kp-strip">
+    <span id="statusTxt"></span>
+    <span class="sp"></span>
+    <span>© FUJIWARA PRINTING.inc</span>
+  </div>
+</div>
+
+<div class="tearhint" id="tearHint">▼ そのまま離すと別ウインドウに切り出します</div>
+<div class="pick" id="pick"></div>
+
+<script>
+'use strict';
+/* ============================================================
+   kenpan-shell.html — 複数のツールをタブで束ねるウインドウ
+   FUJIWARA PRINTING.inc
+
+   ハブ（index.html）の「別ウインドウにタブでまとめる」設定から開かれる。
+   ハブは window.open(url, 'kenpanShell') でこのウインドウを名前で呼び出し、
+   すでに開いていれば KENPAN_SHELL.addTab() にツールを追加させる。
+   ============================================================ */
+
+const STORE='kenpan-hub-tools-v1', THEME='kenpan-hub-theme';
+const WINMEM='kenpan-hub-winmem', WIN_TOOL='kenpan-win-tool';
+const SHELL_FILE='kenpan-shell.html', SHELL_NAME='kenpanShell';
+const MAX_TABS=8, WARN_TABS=5;
+
+const ICON_COLORS={ barcode:'#2563eb',position:'#0d9488',diff:'#7c3aed',toc:'#d94f95',
+  check:'#16a34a',doc:'#e11d48',ruler:'#0891b2',ribbon:'#dc2626',spread:'#6d5cd6',
+  gutter:'#00b4d8',unlock:'#0f7a56' };
+
+const $=s=>document.querySelector(s);
+const tabsEl=$('#tabs'), hostEl=$('#host'), emptyEl=$('#empty'),
+      pickEl=$('#pick'), tearEl=$('#tearHint'), statusEl=$('#statusTxt');
+
+/* ---------- 小物 ---------- */
+function ls(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* クエリ・ハッシュを落とした比較用のパス */
+function baseUrl(u){
+  if(!u) return '';
+  let b=String(u);
+  const q=b.indexOf('?'); if(q>=0) b=b.slice(0,q);
+  const h=b.indexOf('#'); if(h>=0) b=b.slice(0,h);
+  return b;
+}
+/* 相対パスの自作ツールだけを受け付ける（別オリジンは開かない） */
+function safeUrl(u){
+  if(!u || typeof u!=='string') return '';
+  if(/^[a-z][a-z0-9+.-]*:/i.test(u)) return '';
+  if(u.charAt(0)==='/' || u.indexOf('..')>=0) return '';
+  return u;
+}
+function frameSrc(u){
+  const h=u.indexOf('#'), hash=h>=0?u.slice(h):'';
+  let base=h>=0?u.slice(0,h):u;
+  base += (base.includes('?')?'&':'?') + '_v=' + Date.now() + '&hub=shell';
+  return base + hash;
+}
+
+/* ---------- ツール一覧 ----------
+   ハブが保存した並び（STORE）を使う。ハブをまだ触っていない環境では
+   保存が無いことがあるので、既定の顔ぶれを控えとして持っておく。 */
+const FALLBACK=[
+  {name:'ISBN検版',        url:'isbn-barcode-check.html', icon:'barcode',  group:'inspect'},
+  {name:'ノンブル検版',     url:'nombre-check.html',       icon:'position', group:'inspect'},
+  {name:'下版差分チェッカー', url:'pdf-diff-check.html',     icon:'diff',     group:'inspect'},
+  {name:'目次整合検版',     url:'toc_kenpan.html',         icon:'toc',      group:'inspect'},
+  {name:'トンボ計測',       url:'tombo-check.html',        icon:'ruler',    group:'inspect'},
+  {name:'PDF しおり追加',   url:'pdf-bookmark-add.html',   icon:'ribbon',   group:'edit'},
+  {name:'単ページ見開き化',  url:'single-to-spread.html',   icon:'spread',   group:'edit'},
+  {name:'ノド側の白',       url:'nodo-shiro.html',         icon:'gutter',   group:'edit'},
+  {name:'権限ロック解除',    url:'pdf-unlock.html',         icon:'unlock',   group:'edit'}
+];
+let catalog=FALLBACK.slice();
+function loadCatalog(){
+  try{
+    const j=ls(STORE);
+    if(j){ const a=JSON.parse(j); if(Array.isArray(a) && a.length) catalog=a; }
+  }catch(e){}
+}
+function metaOf(url){
+  const b=baseUrl(url);
+  const t=catalog.find(x=>baseUrl(x.url)===b) || FALLBACK.find(x=>baseUrl(x.url)===b);
+  if(t) return { name:t.name||b, color:ICON_COLORS[t.icon]||'#64748b' };
+  return { name:b.replace(/\.html$/,''), color:'#64748b' };
+}
+
+/* ---------- テーマ ---------- */
+function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); lsSet(THEME,t); }
+applyTheme(ls(THEME)||'light');
+$('#themeBtn').onclick=()=>{
+  applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark');
+};
+
+/* ---------- ウインドウの大きさを覚える ---------- */
+function winMemOn(){ return ls(WINMEM)!=='0'; }
+function readSize(k){
+  try{ const v=ls(k); if(!v) return null;
+    const p=v.split(','), w=parseInt(p[0],10), h=parseInt(p[1],10);
+    return (w>200&&h>200)?{w:w,h:h}:null; }catch(e){ return null; }
+}
+function saveSize(){
+  if(!winMemOn()) return;
+  const w=window.outerWidth, h=window.outerHeight;
+  if(w>200&&h>200) lsSet(WIN_TOOL, w+','+h);
+}
+
+/* ============================================================
+   タブの管理
+   ============================================================ */
+let tabs=[], active=null, seq=0;
+
+function activate(t){
+  if(!t) return;
+  active=t;
+  tabs.forEach(x=>{
+    x.el.classList.toggle('on', x===t);
+    x.frame.classList.toggle('on', x===t);
+  });
+  try{ t.el.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){}
+  /* 隠れている間に窓の大きさが変わっていることがあるので作り直しを促す */
+  try{ t.frame.contentWindow.dispatchEvent(new Event('resize')); }catch(e){}
+  try{ t.frame.contentWindow.focus(); }catch(e){}
+  document.title = t.meta.name + ' — KENPAN';
+  syncUI();
+}
+
+function hasWork(t){
+  try{
+    const w=t.frame.contentWindow;
+    return typeof w.KENPAN_HAS_WORK==='function' && !!w.KENPAN_HAS_WORK();
+  }catch(e){ return false; }
+}
+function anyWork(){ return tabs.some(hasWork); }
+
+function syncUI(){
+  emptyEl.style.display = tabs.length ? 'none' : 'flex';
+  $('#mergeBtn').classList.toggle('show', window.name!==SHELL_NAME && tabs.length>0);
+  statusEl.textContent = tabs.length
+    ? (tabs.length+'タブ' + (active?'／'+active.meta.name:''))
+    : 'KENPAN';
+  if(!tabs.length) document.title='KENPAN';
+}
+
+function makeTabEl(t){
+  const el=document.createElement('div');
+  el.className='tab';
+  el.style.setProperty('--c', t.meta.color);
+  el.title=t.meta.name;
+  el.innerHTML='<span class="dot"></span><span class="nm">'+esc(t.meta.name)+'</span>'
+    + '<button class="x" type="button" title="閉じる">×</button>';
+  el.querySelector('.x').addEventListener('pointerdown',e=>e.stopPropagation());
+  el.querySelector('.x').addEventListener('click',e=>{ e.stopPropagation(); closeTab(t); });
+  el.addEventListener('click',()=>activate(t));
+  el.addEventListener('pointerdown',e=>startDrag(e,t));
+  return el;
+}
+
+function addTab(url, focus){
+  url=safeUrl(url); if(!url) return null;
+  if(focus===undefined) focus=true;
+
+  const b=baseUrl(url);
+  const ex=tabs.find(t=>t.base===b);
+  if(ex){ if(focus) activate(ex); return ex; }
+
+  if(tabs.length>=MAX_TABS){
+    alert('タブは同時に'+MAX_TABS+'つまでです。使い終わったタブを閉じてください。');
+    return null;
+  }
+  if(tabs.length+1===WARN_TABS){
+    /* 警告だけ出して続行する（PDFを扱うツールは記憶容量を多く使う） */
+    console.warn('[kenpan-shell] タブが増えています：'+(tabs.length+1));
+  }
+
+  const t={ id:'t'+(++seq), url:url, base:b, meta:metaOf(url), el:null, frame:null };
+
+  const f=document.createElement('iframe');
+  f.className='frame';
+  f.setAttribute('allow','clipboard-read; clipboard-write; fullscreen');
+  f.src=frameSrc(url);
+  f.addEventListener('load',()=>{
+    /* ツール側の本当の見出しがあればタブ名に反映する（既定名が無いとき用） */
+    try{
+      const d=(f.contentDocument&&f.contentDocument.title||'').trim();
+      const known = catalog.some(x=>baseUrl(x.url)===b) || FALLBACK.some(x=>baseUrl(x.url)===b);
+      if(d && !known){
+        t.meta.name=d.split(/[—|｜–-]/)[0].trim()||d;
+        t.el.querySelector('.nm').textContent=t.meta.name;
+        t.el.title=t.meta.name;
+        syncUI();
+      }
+    }catch(e){}
+  });
+  hostEl.appendChild(f);
+  t.frame=f;
+
+  t.el=makeTabEl(t);
+  tabsEl.appendChild(t.el);
+  tabs.push(t);
+
+  if(focus || !active) activate(t);
+  else syncUI();
+  return t;
+}
+
+function dropTab(t){
+  const i=tabs.indexOf(t); if(i<0) return;
+  tabs.splice(i,1);
+  try{ t.frame.src='about:blank'; }catch(e){}
+  t.frame.remove(); t.el.remove();
+  if(active===t) active=null;
+  if(tabs.length){ if(!active) activate(tabs[Math.min(i,tabs.length-1)]); else syncUI(); }
+  else { syncUI(); closeWindowSoon(); }
+}
+
+function closeTab(t){
+  if(hasWork(t) && !confirm('「'+t.meta.name+'」で読み込んだデータは破棄されます。タブを閉じますか？')) return;
+  dropTab(t);
+}
+
+/* 最後のタブを閉じたらウインドウごと畳む（閉じられない環境ではハブへ戻る） */
+function closeWindowSoon(){
+  setTimeout(()=>{
+    if(tabs.length) return;
+    focusHub();
+    try{ window.close(); }catch(e){}
+    setTimeout(()=>{ if(!window.closed && !tabs.length) location.replace('index.html?hub=1&_v='+Date.now()); },300);
+  },120);
+}
+
+/* ---------- ハブへ ---------- */
+function focusHub(){
+  try{ if(window.opener && !window.opener.closed){ window.opener.focus(); return true; } }catch(e){}
+  try{ const w=window.open('index.html?hub=1&_v='+Date.now(),'kenpanHub'); if(w){ w.focus(); return true; } }catch(e){}
+  return false;
+}
+$('#hubBtn').onclick=()=>{ if(!focusHub()) alert('ハブのウインドウが見つかりませんでした。'); };
+
+/* ============================================================
+   タブのドラッグ：バーの中なら並べ替え、外へ出せば別ウインドウへ切り出す
+   ============================================================ */
+let drag=null;
+
+function startDrag(e,t){
+  if(e.button!==undefined && e.button!==0) return;
+  drag={ t:t, x0:e.clientX, y0:e.clientY, moved:false, tear:false, pid:e.pointerId };
+  /* ツールの枠（iframe）の上へカーソルが出ても取りこぼさないよう、
+     ドラッグ中だけ枠をポインタに反応させない */
+  hostEl.style.pointerEvents='none';
+  try{ t.el.setPointerCapture(e.pointerId); }catch(err){}
+}
+
+function onMove(e){
+  if(!drag) return;
+  const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
+  if(!drag.moved && Math.abs(dx)<4 && Math.abs(dy)<4) return;
+  drag.moved=true;
+
+  const r=tabsEl.getBoundingClientRect();
+  const out = e.clientY > r.bottom+52 || e.clientY < r.top-40;
+
+  if(out!==drag.tear){
+    drag.tear=out;
+    drag.t.el.classList.toggle('tearing',out);
+    tearEl.classList.toggle('show',out);
+  }
+  if(out) return;
+
+  drag.t.el.classList.add('dragging');
+  /* バーの中：カーソル位置に応じて差し込む */
+  const others=[...tabsEl.children].filter(el=>el!==drag.t.el);
+  let before=null;
+  for(const el of others){
+    const b=el.getBoundingClientRect();
+    if(e.clientX < b.left + b.width/2){ before=el; break; }
+  }
+  /* 位置が変わらないときに動かすと、要素の出し入れでポインタの捕捉が外れてしまう */
+  if(before !== drag.t.el.nextSibling){
+    if(before) tabsEl.insertBefore(drag.t.el, before);
+    else tabsEl.appendChild(drag.t.el);
+  }
+}
+
+function onUp(e){
+  if(!drag) return;
+  const d=drag; drag=null;
+  hostEl.style.pointerEvents='';
+  try{ d.t.el.releasePointerCapture(d.pid); }catch(err){}
+  d.t.el.classList.remove('dragging','tearing');
+  tearEl.classList.remove('show');
+
+  if(!d.moved) return;                        /* ただのクリック */
+  if(d.tear){ tearOff(d.t, e.screenX, e.screenY); return; }
+
+  /* 並べ替えの結果を配列へ反映する */
+  const order=[...tabsEl.children];
+  tabs.sort((a,b)=>order.indexOf(a.el)-order.indexOf(b.el));
+}
+
+document.addEventListener('pointermove',onMove);
+document.addEventListener('pointerup',onUp);
+document.addEventListener('pointercancel',onUp);
+
+function tearOff(t, sx, sy){
+  if(hasWork(t) && !confirm('別のウインドウに切り出すと、「'+t.meta.name+'」で読み込んだデータは失われます。続けますか？')) return;
+  const s=readSize(WIN_TOOL);
+  const aw=screen.availWidth||1280, ah=screen.availHeight||860;
+  const w=Math.min(s?s.w:Math.round(aw*0.82), aw);
+  const h=Math.min(s?s.h:Math.round(ah*0.86), ah);
+  const l=Math.max(0,Math.min(aw-w, Math.round((sx||aw/2)-w/2)));
+  const tp=Math.max(0,Math.min(ah-h, Math.round((sy||60)-30)));
+  const url=SHELL_FILE+'?_v='+Date.now()+'&tool='+encodeURIComponent(t.url);
+  let win=null;
+  try{ win=window.open(url,'_blank','width='+w+',height='+h+',left='+l+',top='+tp); }catch(e){}
+  if(!win){ alert('ポップアップがブロックされたため切り出せませんでした。'); return; }
+  dropTab(t);
+}
+
+/* ---------- 別ウインドウのタブを主ウインドウへ戻す ---------- */
+$('#mergeBtn').onclick=()=>{
+  let p=null;
+  try{ p=window.open('', SHELL_NAME); }catch(e){}
+  if(p && p!==window && p.KENPAN_SHELL && typeof p.KENPAN_SHELL.addTab==='function'){
+    if(anyWork() && !confirm('まとめると、読み込み中のデータは失われます。続けますか？')) { return; }
+    const urls=tabs.map(t=>t.url);
+    urls.forEach((u,i)=>p.KENPAN_SHELL.addTab(u, i===urls.length-1));
+    try{ p.focus(); }catch(e){}
+    tabs.slice().forEach(t=>dropTab(t));
+    return;
+  }
+  /* 主ウインドウが無い。空のウインドウができていたら片づけ、自分が主になる */
+  if(p && p!==window){ try{ p.close(); }catch(e){} }
+  window.name=SHELL_NAME;
+  syncUI();
+  alert('このウインドウが主ウインドウになりました。ハブから開いたツールはここのタブに追加されます。');
+};
+
+/* ============================================================
+   ツール追加のポップオーバー
+   ============================================================ */
+function openPick(){
+  const open=new Set(tabs.map(t=>t.base));
+  const rest=catalog.filter(t=>!open.has(baseUrl(t.url)));
+  let html='';
+  ['inspect','edit'].forEach(g=>{
+    const list=rest.filter(t=>(t.group||'inspect')===g);
+    if(!list.length) return;
+    html+='<div class="ph">'+(g==='inspect'?'点検ツール':'編集ツール')+'</div>';
+    list.forEach(t=>{
+      html+='<button type="button" data-url="'+esc(t.url)+'">'
+        + '<span class="dot" style="background:'+(ICON_COLORS[t.icon]||'#64748b')+'"></span>'
+        + esc(t.name)+'</button>';
+    });
+  });
+  pickEl.innerHTML = html || '<div class="none">追加できるツールはありません</div>';
+  pickEl.querySelectorAll('button[data-url]').forEach(b=>{
+    b.onclick=()=>{ closePick(); addTab(b.dataset.url, true); };
+  });
+  const r=$('#addBtn').getBoundingClientRect();
+  pickEl.classList.add('show');
+  const pw=pickEl.offsetWidth||212;
+  pickEl.style.top=(r.bottom+6)+'px';
+  pickEl.style.left=Math.max(8, Math.min(window.innerWidth-pw-8, r.left-pw/2+r.width/2))+'px';
+}
+function closePick(){ pickEl.classList.remove('show'); }
+$('#addBtn').onclick=e=>{ e.stopPropagation(); pickEl.classList.contains('show')?closePick():openPick(); };
+document.addEventListener('click',e=>{ if(!pickEl.contains(e.target)) closePick(); });
+
+/* ============================================================
+   キーボード
+   ============================================================ */
+document.addEventListener('keydown',e=>{
+  const mod = e.metaKey || e.ctrlKey;
+  if(e.key==='Escape'){ closePick(); return; }
+  if(!mod) return;
+  if(e.key>='1' && e.key<='9'){
+    const i=parseInt(e.key,10)-1;
+    if(tabs[i]){ e.preventDefault(); activate(tabs[i]); }
+    return;
+  }
+  if(e.key==='t' || e.key==='T'){ e.preventDefault(); openPick(); return; }
+  if(e.key==='Tab'){
+    if(tabs.length<2) return;
+    e.preventDefault();
+    const i=tabs.indexOf(active);
+    activate(tabs[(i + (e.shiftKey?-1:1) + tabs.length) % tabs.length]);
+  }
+});
+
+/* ============================================================
+   外からの依頼（ハブ・マニュアル枠）
+   ============================================================ */
+window.KENPAN_SHELL={
+  isShell:true,
+  addTab:function(url,focus){ const t=addTab(url,focus!==false); if(t&&focus!==false){ try{window.focus();}catch(e){} } return !!t; },
+  hasTab:function(url){ const b=baseUrl(safeUrl(url)); return tabs.some(t=>t.base===b); },
+  list:function(){ return tabs.map(t=>t.url); },
+  count:function(){ return tabs.length; }
+};
+
+/* ツールやマニュアルの枠から「このツールを開いて」と頼まれたとき */
+window.addEventListener('message',e=>{
+  if(e.origin!==location.origin) return;
+  const d=e.data;
+  if(!d || d.kenpan!=='openTool' || !d.url) return;
+  addTab(d.url, true);
+});
+
+/* ============================================================
+   起動
+   ============================================================ */
+loadCatalog();
+(function boot(){
+  let list=[];
+  try{ list=new URLSearchParams(location.search).getAll('tool'); }catch(e){}
+  list.forEach((u,i)=>addTab(decodeURIComponent(u), i===list.length-1));
+  syncUI();
+  if(!tabs.length) setTimeout(openPick,120);
+})();
+
+window.addEventListener('pagehide',saveSize);
+window.addEventListener('beforeunload',e=>{
+  if(!anyWork()) return;
+  e.preventDefault();
+  e.returnValue='';
+  return '';
+});
+</script>
+</body>
+</html>

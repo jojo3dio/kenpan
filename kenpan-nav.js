@@ -51,6 +51,15 @@
     try { return window.self !== window.top; } catch(e){ return true; }
   })();
 
+  /* タブでまとめるウインドウ（kenpan-shell.html）の枠の中かどうか。
+     枠の外側にタブバーとハブのボタンがあるので、自前のボタンは出さない。 */
+  var inShell = (function(){
+    if (!inFrame) return false;
+    try { if (window.parent && window.parent.KENPAN_SHELL) return true; } catch(e){}
+    try { return new URLSearchParams(location.search).get('hub') === 'shell'; }
+    catch(e){ return false; }
+  })();
+
   /* ---------- 状態の取得 ---------- */
 
   function ls(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
@@ -76,7 +85,7 @@
   function preferSameWindow(){
     var m = ls(K_NAVMODE) || 'auto';
     if (m === 'same') return true;
-    if (m === 'tab' || m === 'win') return false;
+    if (m === 'tab' || m === 'win' || m === 'shell') return false;
     return isStandalone();
   }
 
@@ -313,6 +322,9 @@
 
     if (back){
       where = setupManual(back);
+    } else if (inShell){
+      /* シェルのタブバーに「ハブ」ボタンがあるので、ここでは何も足さない */
+      where = 'shell(iframe)';
     } else {
       restoreToolSize();
       injectStyle();
