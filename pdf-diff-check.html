@@ -371,7 +371,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.10　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.11　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -1741,6 +1741,14 @@ function computeDiff(){
   // explainedBoxes（テキスト行領域）は、後段の色検出からテキストを除外するのにも使う。
   let textFindings=[], explainedBoxes=[], bLineBoxes=[];
   try{
+    if(!(S.aText && S.aText.length && S.bText && S.bText.length && S.place)){
+      // 文字比較そのものが走らないケース。アウトライン化されたPDF（名刺・ショップカード等）で
+      // 起きる。これを記録しておかないと、見逃し報告の行を見ても原因が分からない。
+      S.diag={ ran:false,
+        inputs:{ aItems:(S.aText||[]).length, bItems:(S.bText||[]).length, place:!!S.place },
+        note:(S.place? "テキストレイヤーなし（アウトライン化の可能性）":"位置合わせ未確定")
+             +"。文字比較は未実行、画素判定のみ" };
+    }
     if(S.aText && S.aText.length && S.bText && S.bText.length && S.place){
       const r=textDiff(S.place); textFindings=r.findings||[]; explainedBoxes=r.explained||[]; bLineBoxes=r.bBoxes||[];
       if(textFindings.length || explainedBoxes.length){
@@ -2329,9 +2337,27 @@ function diffFracCommon(p,X0,Y0,X1,Y1){
 
 function textDiff(p){
   const aItems=S.aText, bItems=S.bText;
-  if((aItems?aItems.length:0)<2 || (bItems?bItems.length:0)<2) return {findings:[],explained:[]};
+  if((aItems?aItems.length:0)<2 || (bItems?bItems.length:0)<2){
+    // 文字比較が成立しない＝見逃し報告のときに最初に知りたい情報なので残す
+    S.diag={ ran:false, inputs:{aItems:(aItems?aItems.length:0), bItems:(bItems?bItems.length:0)},
+             note:"テキスト片が2件未満。文字比較は未実行（画素判定のみ）" };
+    return {findings:[],explained:[]};
+  }
   const trunc=s=>{ s=annotateCodepoints(s||""); return s.length>60?s.slice(0,60)+"…":s; };
   const findings=[], explained=[], bBoxes=[];
+  // ▼ 診断記録（v1.11）。スプレッドシートの diag 列に入り、実PDFを取り寄せずに
+  //   「なぜ検出しなかったか」を追えるようにする。処理の結果を写すだけで判定には影響しない。
+  const DIAG = S.diag = {
+    ran:true,
+    inputs:{ aItems:aItems.length, bItems:bItems.length, aChars:0, bChars:0, nm:0, fallback:false },
+    counts:{ blocks:0, emitted:0 },
+    cut:{ multiset:0, pair:0, reflow:0, pixel:0 },
+    cutSample:[],
+    note:""
+  };
+  const DIAG_SAMPLE_MAX=8;
+  const _cutLog=(rule,a,b)=>{ if(DIAG.cutSample.length<DIAG_SAMPLE_MAX)
+    DIAG.cutSample.push(rule+':「'+String(a||"").slice(0,40)+'」→「'+String(b||"").slice(0,40)+'」'); };
   // 行ボックス（画素差分の抑制用・共通座標）
   const aL=buildLines(aItems), bL=buildLines(bItems);
   aL.forEach(l=>explained.push({x:l.x0+p.ax,y:l.y0+p.ay,w:l.w,h:l.hh}));
@@ -2340,6 +2366,10 @@ function textDiff(p){
   // (1) 内容差分：読み順の文字列をLCSで突き合わせ（行の切れ方の違いに強い）
   const aC=orderedChars(aItems).map(c=>({...c,x:c.x+p.ax,y:c.y+p.ay}));
   const bC=orderedChars(bItems).map(c=>({...c,x:c.x+p.bx,y:c.y+p.by}));
+  // 文字数とLCSの粗いフォールバック発動を記録（v1.11）
+  DIAG.inputs.aChars=aC.length; DIAG.inputs.bChars=bC.length;
+  DIAG.inputs.nm=aC.length*bC.length;
+  DIAG.inputs.fallback=DIAG.inputs.nm>25000000;
   // まずブロックを収集
   const _blks=[];
   for(const blk of diffChars(aC,bC)){
@@ -2347,6 +2377,7 @@ function textDiff(p){
     if(!aStr && !bStr) continue;
     _blks.push({blk,aStr,bStr});
   }
+  DIAG.counts.blocks=_blks.length;
   // 並び替え相殺：純削除と純追加で文字列が同一なら「並び替え（内容不変）」とみなし除外。
   // 脚注記号・括弧・引用符など1文字の移動や、参考文献/索引の並び替えによる大量誤検出を防ぐ。
   const _norm=s=>s.replace(/[\s　]/g,"");
@@ -2360,15 +2391,21 @@ function textDiff(p){
   const _msA=_ms(aC), _msB=_ms(bC);
   let _msEqual = _msA.size===_msB.size;
   if(_msEqual){ for(const [k,v] of _msA){ if(_msB.get(k)!==v){ _msEqual=false; break; } } }
-  if(_msEqual){ for(const x of _blks) _cancelled.add(x); }
+  if(_msEqual){
+    for(const x of _blks) _cancelled.add(x);
+    DIAG.cut.multiset=_blks.length;
+    if(_blks.length) _cutLog("multiset", _blks[0].aStr, _blks[0].bStr);
+  }
+  let _cutSeen=_cancelled.size;
   // (1b) ブロック単位の相殺：純削除と純追加で文字列が同一なら並び替えとみなし除外
   const _dels=_blks.filter(x=>x.aStr&&!x.bStr), _inss=_blks.filter(x=>x.bStr&&!x.aStr);
   const _insByStr=new Map();
   _inss.forEach(x=>{const k=_norm(x.bStr); if(!_insByStr.has(k))_insByStr.set(k,[]); _insByStr.get(k).push(x);});
   for(const d of _dels){
     const arr=_insByStr.get(_norm(d.aStr));
-    if(arr){ const hit=arr.find(x=>!_cancelled.has(x)); if(hit){ _cancelled.add(hit); _cancelled.add(d); } }
+    if(arr){ const hit=arr.find(x=>!_cancelled.has(x)); if(hit){ _cancelled.add(hit); _cancelled.add(d); _cutLog("pair", d.aStr, hit.bStr); } }
   }
+  DIAG.cut.pair=_cancelled.size-_cutSeen; _cutSeen=_cancelled.size;
   // (1c) ページ境界をまたぐ流れ込み(reflow)の相殺：見開き分割A↔単ページB等で改ページ位置がズレ、
   //  参考文献・索引の項目が隣ページに流れると、ページ単独比較では削除/追加として残る。
   //  多段組みでは読み順がA/Bで食い違うため、語順に依存しないトライグラム重なり率で
@@ -2394,17 +2431,18 @@ function textDiff(p){
     // 超長ブロックが来た場合に備え、この長さを超えるブロックは相殺対象から除外し、素直に
     // 画素検証（diffFracCommon）まで進めて実差分の有無を判定させる。
     const _MAXLEN=600;
-    for(const d of _dels){ if(!_cancelled.has(d) && _norm(d.aStr).length>=_MINLEN && _norm(d.aStr).length<_MAXLEN && _cov(d.aStr,S.gBgram)>=_RTH) _cancelled.add(d); }
-    for(const x of _inss){ if(!_cancelled.has(x) && _norm(x.bStr).length>=_MINLEN && _norm(x.bStr).length<_MAXLEN && _cov(x.bStr,S.gAgram)>=_RTH) _cancelled.add(x); }
-    for(const r of _reps){ if(!_cancelled.has(r) && _norm(r.aStr).length>=_MINLEN && _norm(r.bStr).length>=_MINLEN && _norm(r.aStr).length<_MAXLEN && _norm(r.bStr).length<_MAXLEN && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH) _cancelled.add(r); }
+    for(const d of _dels){ if(!_cancelled.has(d) && _norm(d.aStr).length>=_MINLEN && _norm(d.aStr).length<_MAXLEN && _cov(d.aStr,S.gBgram)>=_RTH){ _cancelled.add(d); _cutLog("reflow/del", d.aStr, ""); } }
+    for(const x of _inss){ if(!_cancelled.has(x) && _norm(x.bStr).length>=_MINLEN && _norm(x.bStr).length<_MAXLEN && _cov(x.bStr,S.gAgram)>=_RTH){ _cancelled.add(x); _cutLog("reflow/add", "", x.bStr); } }
+    for(const r of _reps){ if(!_cancelled.has(r) && _norm(r.aStr).length>=_MINLEN && _norm(r.bStr).length>=_MINLEN && _norm(r.aStr).length<_MAXLEN && _norm(r.bStr).length<_MAXLEN && _cov(r.aStr,S.gBgram)>=_RTH && _cov(r.bStr,S.gAgram)>=_RTH){ _cancelled.add(r); _cutLog("reflow/rep", r.aStr, r.bStr); } }
     // ページがreflow文脈（不一致テキストが十分多く＝40字以上、その大半が相手PDFに存在）なら、
     // 残った短い継ぎ目断片(<16字)も抑制。実変更ページは相手に存在せずカバレッジが低いので対象外。
     const _aMiss=_dels.concat(_reps).map(x=>_norm(x.aStr)).join("");
     const _bMiss=_inss.concat(_reps).map(x=>_norm(x.bStr)).join("");
     if(_aMiss.length>=40 && _bMiss.length>=40 && _cov(_aMiss,S.gBgram)>=0.6 && _cov(_bMiss,S.gAgram)>=0.6){
-      for(const x of _blks){ if(_cancelled.has(x))continue; const L=Math.max(_norm(x.aStr).length,_norm(x.bStr).length); if(L<16)_cancelled.add(x); }
+      for(const x of _blks){ if(_cancelled.has(x))continue; const L=Math.max(_norm(x.aStr).length,_norm(x.bStr).length); if(L<16){ _cancelled.add(x); _cutLog("reflow/bulk", x.aStr, x.bStr); } }
     }
   }
+  DIAG.cut.reflow=_cancelled.size-_cutSeen;
   const INK=0.012;    // これ以上の暗画素があれば「相手側にインクあり」
   const DF_MIN=0.06;  // 画素差がこれ未満＝実質同じ描画（位置合わせの縁ノイズや、テキスト→アウトラインで見た目同一）→差分としない
   // 純削除：Aの文字が対応先に無い。判定は画素の実差分を地の真実にする。
@@ -2413,7 +2451,7 @@ function textDiff(p){
   //  ・下版(B)が白紙 → 本当に削除
   const emitDel=(chs,aStr)=>{
     let box=charsBBox(chs);
-    if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN) return;
+    if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN){ DIAG.cut.pixel++; _cutLog("pixel/del", aStr, ""); return; }
     const padx=Math.max(box.w,box.h)*0.25+2;
     if(darkFracCommon(S.bData.data,S.bW,S.bH,p.bx,p.by,box.x-padx,box.y-padx,box.x+box.w+padx,box.y+box.h+padx)>INK){
       const bb=inkBBoxCommon(S.bData.data,S.bW,S.bH,p.bx,p.by,box.x-box.w*0.6-padx,box.y-box.h*0.6-padx,box.x+box.w*1.6+padx,box.y+box.h*1.6+padx);
@@ -2425,7 +2463,7 @@ function textDiff(p){
   };
   const emitAdd=(chs,bStr)=>{
     let box=charsBBox(chs);
-    if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN) return;
+    if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN){ DIAG.cut.pixel++; _cutLog("pixel/add", "", bStr); return; }
     const padx=Math.max(box.w,box.h)*0.25+2;
     if(darkFracCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay,box.x-padx,box.y-padx,box.x+box.w+padx,box.y+box.h+padx)>INK){
       const ab=inkBBoxCommon(S.aData.data,S.aW,S.aH,p.ax,p.ay,box.x-box.w*0.6-padx,box.y-box.h*0.6-padx,box.x+box.w*1.6+padx,box.y+box.h*1.6+padx);
@@ -2448,7 +2486,8 @@ function textDiff(p){
         // 画素が実際に食い違う時だけ「文字変更」。読み順のズレによる見かけ上の置換
         //（内容は同じで抽出順が違うだけ＝アウトライン化等の影響）は画素一致なので抑制。
         if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) >= DF_MIN)
-          findings.push(Object.assign(box,{cls:mkCls("text","文字が変わっています",`「${trunc(aStr)}」→「${trunc(bStr)}」`,"TXT-10",aStr,bStr)})); }
+          findings.push(Object.assign(box,{cls:mkCls("text","文字が変わっています",`「${trunc(aStr)}」→「${trunc(bStr)}」`,"TXT-10",aStr,bStr)}));
+        else { DIAG.cut.pixel++; _cutLog("pixel/rep", aStr, bStr); } }
     }
     else if(aStr){ emitDel(blk.aChars,aStr); }
     else { emitAdd(blk.bChars,bStr); }
@@ -2475,6 +2514,7 @@ function textDiff(p){
     const sample=annotateCodepoints((g.items[0].a.raw||"").slice(0,14));
     findings.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cls:mkCls("moved",`位置が変わっています${g.items.length>1?`（${g.items.length}行）`:""}`,`${dir} 移動（例:「${sample}…」）`,"MOV-1","移動なし(0.0mm)",dir)});
   });
+  DIAG.counts.emitted=findings.length;
   return {findings, explained, bBoxes};
 }
 
@@ -3143,7 +3183,10 @@ $("#showBoxes").addEventListener("change",e=>setShowBoxes(e.target.checked));
 $("#showNums").addEventListener("change",e=>setShowNums(e.target.checked));
 
 window.addEventListener("keydown",e=>{
-  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
+  // TEXTAREA を除外しないと、フィードバックの自由コメント欄で矢印キーを押したときに
+  // カーソルが動かず背後のPDFが移動してしまう（実使用で報告あり・v1.11で修正）
+  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT"
+     ||e.target.tagName==="TEXTAREA"||e.target.isContentEditable)return;
   const big=e.shiftKey?10:1;
   if(e.key==="ArrowLeft"){nudge(-big,0);e.preventDefault();}
   else if(e.key==="ArrowRight"){nudge(big,0);e.preventDefault();}
@@ -3530,7 +3573,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.10";
+  const APP_VERSION = "v1.11";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
@@ -3589,6 +3632,43 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   // 画像は「見た目」しか伝えないが、このテキストがあれば「A/Bのテキスト自体が一致しているか」
   // 「どの文字が抜けているか」をスプレッドシート上だけで確認できる。長すぎる場合のみ末尾を省略
   // する（Googleスプレッドシートの1セル文字数上限は5万字なので、実運用では省略は起きない想定）。
+  // 見逃し報告の調査には A/B の2枚が要る（1枚では「どちらが正しいか」が分からない）。
+  // 等倍のまま送ると300dpiのA3見開きで5000px超・数MBになるため長辺2000pxに縮小する。
+  const FB_IMG_MAX_EDGE = 2000;
+  async function captureSide(data, w, h){
+    try{
+      if(!data || !w || !h) return "";
+      const full=document.createElement("canvas"); full.width=w; full.height=h;
+      full.getContext("2d").putImageData(data,0,0);
+      const k=Math.min(1, FB_IMG_MAX_EDGE/Math.max(w,h));
+      if(k>=1) return full.toDataURL("image/png");
+      const c=document.createElement("canvas");
+      c.width=Math.max(1,Math.round(w*k)); c.height=Math.max(1,Math.round(h*k));
+      const ctx=c.getContext("2d");
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high";
+      ctx.drawImage(full, 0,0, c.width,c.height);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  // 「なぜ検出しなかったか」をスプレッドシートだけで追えるようにする診断情報。
+  // 検出ロジック側が S.diag に残した内容に、そのとき効いていた設定値を足して送る。
+  function captureDiag(){
+    try{
+      const st=(typeof S!=="undefined")?S:{};
+      const base=st.diag || { ran:null, note:"診断情報なし（検査未実行か旧ロジック）" };
+      return JSON.stringify(Object.assign({}, base, {
+        params:{
+          dpi:st.dpi, thresh:st.thresh, noise:st.noise, edgeTol:st.edgeTol,
+          compareScope:st.compareScope, originMode:st.originMode,
+          alignedByBox:!!st.alignedByBox, spreadA:!!st.spreadA, spreadB:!!st.spreadB,
+          matchMode:st.matchMode, offX:st.offX, offY:st.offY
+        },
+        result:{ regions:(st.regions||[]).length }
+      }));
+    }catch(e){ return JSON.stringify({ran:null, note:"診断の収集に失敗: "+e}); }
+  }
+
   const FB_TEXT_MAX = 20000;
   function capturePageText(){
     try{
@@ -3625,12 +3705,17 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   function basePayload(extra){
     const f=curFiles();
     return Object.assign({
+      // tool を明示して送る（v1.11）。これが無いと受け口側の DEFAULT_TOOL 頼りになり、
+      // 他ツールが送り忘れた瞬間にこのシートへ混入する。
+      tool:"pdf_diff",
       verdict:"", kind:"", fileA:f.a, fileB:f.b, page:f.pg, comment:"",
       reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要・手動オープン時は空のまま）
-      ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:"",
+      ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:"", thumbA:"",
       // 表示中ページのA/B抽出テキスト（自動添付・手入力不要）
-      aText:"", bText:""
+      aText:"", bText:"",
+      // 検出ロジックの内部状態（自動添付・手入力不要）
+      diag:""
     }, extra||{});
   }
   function renderInline(state){
@@ -3642,7 +3727,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   }
   async function fbInlineGood(){
     if(!FEEDBACK_ENDPOINT){ renderInline("thanks"); return; }
-    try{ await postFeedback(basePayload({verdict:"correct"})); }catch(e){}
+    try{ await postFeedback(basePayload({verdict:"correct", diag:captureDiag()})); }catch(e){}
     renderInline("thanks"); markUsed();
   }
   function fbInlineBad(){ openModal({verdict:"false_positive"}); }
@@ -3717,11 +3802,16 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     }else{
       // 特定の指摘に紐づかない送信（見逃し報告・全体の感想など）は表示中ページ全体を添付する。
       // ruleId/expected/actual/bboxは空のまま（社員側の操作は増やさない）。
-      extra.thumb = await captureFullPageThumb();
+      extra.thumb = await captureSide(st.bData, st.bW, st.bH);
     }
+    // A側（顧客入稿）も常に添付する（v1.11）。テキストが取れないPDFでは、この2枚が
+    // 見逃し原因を追える唯一の材料になる。
+    extra.thumbA = await captureSide(st.aData, st.aW, st.aH);
     // 実PDFを都度もらわなくても原因調査ができるよう、表示中ページのA/B抽出テキストは
     // 指摘一覧経由・見逃し報告のどちらでも常に自動添付する（社員側の操作は増やさない）。
     Object.assign(extra, capturePageText());
+    // 検出ロジックの内部状態（v1.11）
+    extra.diag = captureDiag();
     btn.textContent="送信中…";
     const payload = basePayload(extra);
     try{
