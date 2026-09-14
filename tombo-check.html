@@ -176,6 +176,12 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
 .al{padding:9px 10px;border-radius:8px;font-size:11.5px;border:1px solid;line-height:1.6}
 .ali{background:var(--amber-bg);color:var(--amber);border-color:color-mix(in srgb, var(--amber) 35%, transparent)}
 .alw{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb, var(--warn) 35%, transparent)}
+.alo{background:var(--ok-bg);color:var(--ok);border-color:color-mix(in srgb, var(--ok) 35%, transparent)}
+.szbox{margin-bottom:8px}
+.szbox b{font-family:var(--mono);font-size:12.5px;letter-spacing:.02em}
+.szbox .szstd{font-weight:700}
+.alw ul{margin:4px 0 0;padding-left:16px}
+.alw li{margin:2px 0}
 
 /* ---------- 右カラム: 検出情報 ---------- */
 
@@ -918,6 +924,85 @@ function clusterLines(lines,tol,maxGap){
   return out;
 }
 
+/* ---------- 仕上がり枠の確定 / 定型サイズ照合 ----------
+   角トンボの内(仕上がり)線から断裁枠を求める。4隅そろっていなくても、
+   片側1本ずつ拾えていれば枠は確定できる。上下(左右)の同じ辺で位置が
+   食い違う場合は、内外どちらかを取り違えている可能性があるため警告に回す。 */
+const STD_SIZES=[
+  {n:'A3',w:297,h:420},{n:'A4',w:210,h:297},{n:'A5',w:148,h:210},{n:'A6',w:105,h:148},
+  {n:'B4(JIS)',w:257,h:364},{n:'B5(JIS)',w:182,h:257},{n:'B6(JIS)',w:128,h:182},
+  {n:'AB判',w:210,h:257},{n:'菊判',w:152,h:218},{n:'四六判',w:127,h:188},
+  {n:'新書判',w:103,h:182},{n:'はがき',w:100,h:148},{n:'名刺',w:91,h:55}
+];
+function stdSizeName(wMm,hMm,tol){
+  for(const s of STD_SIZES){
+    if(Math.abs(wMm-s.w)<=tol&&Math.abs(hMm-s.h)<=tol) return s.n;
+    if(Math.abs(wMm-s.h)<=tol&&Math.abs(hMm-s.w)<=tol) return s.n+'(横)';
+  }
+  return '';
+}
+function _median(a){ if(!a.length) return null; const b=[...a].sort((p,q)=>p-q); return b[(b.length-1)>>1]; }
+
+function trimBox(tl){
+  const grab=(roles,axis)=>{
+    const v=[];
+    for(const l of tl) if(roles.indexOf(l.role)>=0) v.push(axis==='x'?l.cx:l.cy);
+    return v;
+  };
+  const sides={
+    L:grab(['corner-TL-V','corner-BL-V'],'x'),
+    R:grab(['corner-TR-V','corner-BR-V'],'x'),
+    T:grab(['corner-TL-H','corner-TR-H'],'y'),
+    B:grab(['corner-BL-H','corner-BR-H'],'y')
+  };
+  const spread=k=>sides[k].length>1?Math.max(...sides[k])-Math.min(...sides[k]):0;
+  return {
+    x0:_median(sides.L), x1:_median(sides.R),
+    y0:_median(sides.T), y1:_median(sides.B),
+    count:{L:sides.L.length,R:sides.R.length,T:sides.T.length,B:sides.B.length},
+    spread:{L:spread('L'),R:spread('R'),T:spread('T'),B:spread('B')}
+  };
+}
+
+/* 仕上がりサイズ（mm）と定型名。確定できなければ null。
+   照合の許容差は検出クラスタ許容差とは独立の固定値。ここを緩めると
+   296mm(A5見開き)がA4横(297mm)に化けるなど、別サイズを取り違える。 */
+const STD_TOL_MM=0.5;
+function trimSize(tb){
+  if(tb.x0===null||tb.x1===null||tb.y0===null||tb.y1===null) return null;
+  const w=(tb.x1-tb.x0)*PT2MM, h=(tb.y1-tb.y0)*PT2MM;
+  if(!(w>1&&h>1)) return null;
+  return {w,h,std:stdSizeName(w,h,STD_TOL_MM)};
+}
+
+/* 計測結果の妥当性チェック。測り直しはせず、注意喚起のみ行う。 */
+function buildWarnings(tl,dims,tb,tolPt){
+  const W=[];
+  const tolMm=Math.max(tolPt*PT2MM,0.5);
+  const jp={L:'左',R:'右',T:'天',B:'地'};
+  const cjp={TL:'左上',TR:'右上',BL:'左下',BR:'右下'};
+  for(const c of ['TL','TR','BL','BR']){
+    if(!tl.some(l=>l.role==='corner-'+c+'-H'||l.role==='corner-'+c+'-V'))
+      W.push(cjp[c]+'の角トンボ（仕上がり線）が検出できていません。');
+  }
+  for(const k of ['L','R','T','B']){
+    if(tb.count[k]===0) W.push(jp[k]+'側の仕上がりトンボ（内）が検出できませんでした。');
+    else if(tb.spread[k]*PT2MM>tolMm)
+      W.push(jp[k]+'側の仕上がりトンボが上下（左右）で'+(tb.spread[k]*PT2MM).toFixed(2)
+             +'mmずれています。内トンボ／外トンボの取り違えが疑われます。');
+  }
+  // 境界（折り・綴じ）が左右非対称 = 断裁枠の基準がずれているサイン
+  const hs=dims.filter(d=>d.type==='H'&&!d.isTotal&&!d.manual);
+  if(hs.length===2){
+    const a=hs[0].distPt, b=hs[1].distPt;
+    const mid=hs[0].label.split(' → ')[1]||'';
+    if(Math.abs(a-b)*PT2MM>tolMm && /^(境界|センター)/.test(mid))
+      W.push(mid+'が左右非対称です（'+(a*PT2MM).toFixed(2)+'mm / '+(b*PT2MM).toFixed(2)
+             +'mm）。見開きではなく、角トンボの内外誤判定の可能性があります。');
+  }
+  return W;
+}
+
 /* ---------- DIMENSIONS ---------- */
 const HC=['#1a4fa0','#c03010','#8a5200','#6a20a0','#007070','#c07000'];
 const VC_L=['#0a7040','#c03010','#8a5200'];
@@ -1005,9 +1090,14 @@ function computeDims(tl,pgW,pgH){
   if(xptsU.length>2){
     const first=xptsU[0], last=xptsU[xptsU.length-1];
     const yPosBottom=belowBase+rowOffset;
+    // 「展開幅」と呼べるのは折り／綴じの境界が実在する場合だけ。
+    // センタートンボで分割されただけの単ページを展開と書くと、
+    // 仕上がり寸法を読み違える原因になる。
+    const isSpread=xptsU.some(p=>p.lbl.indexOf('折り')>=0)
+                 ||xptsU.slice(1,-1).some(p=>/^境界/.test(p.lbl));
     dims.push({type:'H',x1:first.x,x2:last.x,
       y:yPosBottom, _yRef:belowBase,
-      label:'全体（展開幅）: '+first.lbl+' → '+last.lbl, distPt:last.x-first.x,
+      label:'全体（'+(isSpread?'展開幅':'仕上がり幅')+'）: '+first.lbl+' → '+last.lbl, distPt:last.x-first.x,
       color:'#333333', visible:true, row:0, isTotal:true});
   }
 
@@ -1062,8 +1152,21 @@ async function computePageAnalysis(n){
   const raw=await extractLines(page);
   const tl=classify(raw,pgW,pgH);
   const dims=computeDims(tl,pgW,pgH);
+  const tolPt=(parseFloat($("#clTol").value)||2.0)*MM2PT;
+  const tb=trimBox(tl);
+  const size=trimSize(tb);
+  // 見開き（展開）のときは、全体寸法だけでなく単ページ寸法も出す。
+  if(size){
+    const hs=dims.filter(d=>d.type==='H'&&!d.isTotal&&!d.manual);
+    const spread=dims.some(d=>d.isTotal&&d.label.indexOf('展開幅')>=0);
+    if(spread&&hs.length===2&&Math.abs(hs[0].distPt-hs[1].distPt)*PT2MM<=STD_TOL_MM){
+      const pw=hs[0].distPt*PT2MM;
+      size.page={w:pw,h:size.h,std:stdSizeName(pw,size.h,STD_TOL_MM)};
+    }
+  }
+  const warns=buildWarnings(tl,dims,tb,tolPt);
   const opsSeen=extractLines._lastOpsSeen||new Map();
-  return {tl,dims,pgW,pgH,rawN:raw.length,opsSeen};
+  return {tl,dims,pgW,pgH,rawN:raw.length,opsSeen,trim:tb,size,warns};
 }
 async function analyze(){
   if(!pdfDoc) return;
@@ -1419,6 +1522,28 @@ function buildRes(r){
     l.innerHTML='<div class="al alw">対向するトンボ線が検出できませんでした。<br>「最大線幅」を上げる(→1.5)か「最小線長」を下げる(→1)を試してください。<br>右下の「手動計測」でドラッグして寸法を追加することもできます。</div>';
     return;
   }
+  if(r.size){
+    const sz=document.createElement('div');
+    sz.className='al alo szbox';
+    const wv=unit==='mm'?r.size.w.toFixed(2):(r.size.w*MM2PT).toFixed(2);
+    const hv=unit==='mm'?r.size.h.toFixed(2):(r.size.h*MM2PT).toFixed(2);
+    let html='仕上がりサイズ <b>'+wv+' × '+hv+' '+unit+'</b>'
+      +(r.size.std?' <span class="szstd">＝ '+r.size.std+'</span>':' <span class="szstd">（定型外）</span>');
+    if(r.size.page){
+      const pw=unit==='mm'?r.size.page.w.toFixed(2):(r.size.page.w*MM2PT).toFixed(2);
+      const ph=unit==='mm'?r.size.page.h.toFixed(2):(r.size.page.h*MM2PT).toFixed(2);
+      html+='<br>単ページ <b>'+pw+' × '+ph+' '+unit+'</b>'
+        +(r.size.page.std?' <span class="szstd">＝ '+r.size.page.std+'</span>':'');
+    }
+    sz.innerHTML=html;
+    l.appendChild(sz);
+  }
+  if(r.warns&&r.warns.length){
+    const wb=document.createElement('div');
+    wb.className='al alw szbox';
+    wb.innerHTML='要確認<ul>'+r.warns.map(t=>'<li>'+t.replace(/</g,'&lt;')+'</li>').join('')+'</ul>';
+    l.appendChild(wb);
+  }
   const addS=(title,ds,border)=>{
     if(!ds.length) return;
     const lb=document.createElement('div');
@@ -1520,7 +1645,11 @@ updateTomboToggleUI();
 
 /* ---------- DBG ---------- */
 function updateStatus(r){
-  $("#sbdet").textContent='検出: '+r.tl.length+'本';
+  let t='検出: '+r.tl.length+'本';
+  if(r.size) t+=' / 仕上がり '+r.size.w.toFixed(2)+'×'+r.size.h.toFixed(2)+'mm'
+                 +(r.size.std?'（'+r.size.std+'）':'');
+  if(r.warns&&r.warns.length) t+=' / 要確認 '+r.warns.length+'件';
+  $("#sbdet").textContent=t;
 }
 
 /* ---------- CSV ---------- */
@@ -1601,11 +1730,14 @@ cen.addEventListener('drop',e=>{
 // ====== フィードバック（ISBN検版・ノンブル検版等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.2";
+  const FB_APP_VERSION = "v1.3";
   const modal = $("#fbModal");
   let fbVerdict = "";
 
   // 表示中のページ（PDF＋検出トンボ線＋寸法線）を、描画済みcanvasから合成してbase64 PNG化する
+  // 表示倍率を上げたまま送ると数千pxのPNGになり、送信・Drive保存とも重くなる。
+  // 長辺1800pxを上限に縮小する（トンボの視認には十分）。MIMEはPNGのまま。
+  const THUMB_MAX_EDGE = 1800;
   function capturePageThumb(){
     try{
       const pc=$("#pdfC"), oc=$("#ovC");
@@ -1617,7 +1749,16 @@ cen.addEventListener('drop',e=>{
       ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,c.width,c.height);
       ctx.drawImage(pc,0,EXTRA);
       ctx.drawImage(oc,0,0);
-      return c.toDataURL("image/png");
+      const k=Math.min(1, THUMB_MAX_EDGE/Math.max(c.width,c.height));
+      if(k>=1) return c.toDataURL("image/png");
+      const s=document.createElement("canvas");
+      s.width=Math.max(1,Math.round(c.width*k));
+      s.height=Math.max(1,Math.round(c.height*k));
+      const sx=s.getContext("2d");
+      sx.imageSmoothingEnabled=true; sx.imageSmoothingQuality="high";
+      sx.fillStyle="#ffffff"; sx.fillRect(0,0,s.width,s.height);
+      sx.drawImage(c,0,0,s.width,s.height);
+      return s.toDataURL("image/png");
     }catch(e){ return ""; }
   }
 
@@ -1636,6 +1777,16 @@ cen.addEventListener('drop',e=>{
       const r = pgRes[curPg]; if(!r) return "";
       const lines=[];
       lines.push("ページ: "+fbCurPage()+" / 検出トンボ本数: "+(r.tl?r.tl.length:0));
+      if(r.size){
+        lines.push("仕上がりサイズ: "+r.size.w.toFixed(2)+" × "+r.size.h.toFixed(2)
+                   +"mm"+(r.size.std?"（"+r.size.std+"）":"（定型外）"));
+        if(r.size.page) lines.push("単ページ: "+r.size.page.w.toFixed(2)+" × "+r.size.page.h.toFixed(2)
+                   +"mm"+(r.size.page.std?"（"+r.size.page.std+"）":""));
+      }
+      if(r.warns&&r.warns.length){
+        lines.push("[要確認]");
+        r.warns.forEach(w=>lines.push("  "+w));
+      }
       lines.push("[寸法]");
       (r.dims||[]).forEach(d=>{
         lines.push("  "+(d.label||"?")+": "+(d.distPt*PT2MM).toFixed(2)+"mm"+(d.manual?"（手動）":""));
