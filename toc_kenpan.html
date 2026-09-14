@@ -331,7 +331,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 <header>
   <div class="brand" style="height:26px;color:var(--amber);display:flex;align-items:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/><circle cx="20" cy="18" r="1.4" fill="currentColor"/></svg></div>
   <h1>目次整合<span>検版</span></h1>
-  <span class="ver">v1.9 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
+  <span class="ver">v2.3 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
   <span class="sp"></span>
   <button class="hbtn" id="resetBtn" disabled>リセット</button>
   <button class="hbtn" id="themeBtn"><span id="themeIco">◐</span> <span id="themeTxt">ダーク</span></button>
@@ -3465,9 +3465,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 // 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
 // デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
 const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-const FB_APP_VERSION = "v2.2";
+const FB_APP_VERSION = "v2.3";
 
 let pyodide = null, pyReady = null;
+// 診断（v2.3）：解析時のオプションを控えておき、フィードバックに添付する
+let lastAnalyzeOpts = null;
 let pdfDoc = null, rawData = null, result = null, fileName = "";
 let viewPage = 0, viewRects = [];
 
@@ -3644,6 +3646,36 @@ document.getElementById("buildId").textContent = "091115";
       body: JSON.stringify(payload)
     });
   }
+  // 「なぜ検出しなかったか」をスプレッドシートだけで追えるようにする診断情報（v2.3）。
+  // 目次が見つかっていなければ整合チェックは成立していない。ran がその判定にあたる。
+  function captureDiag(){
+    try{
+      const r = (typeof result !== "undefined") ? result : null;
+      if(!r) return JSON.stringify({ ran:false, note:"解析結果なし（PDF未読込または解析未実行）" });
+      const ents = r.toc_entries || [];
+      const matched = ents.filter(e => e.matched_page_index != null).length;
+      const byRule = {};
+      (r.issues || []).forEach(i => { const k = i.id || "?"; byRule[k] = (byRule[k] || 0) + 1; });
+      return JSON.stringify({
+        ran: !!r.toc_found,
+        inputs: {
+          pages: (r.pages || []).length, tocFound: !!r.toc_found,
+          tocPages: r.toc_pages || [], tocEntries: ents.length,
+          matched: matched, unmatched: ents.length - matched,
+          offset: r.offset, bodySize: r.body_size, autoBleedMm: r.auto_bleed_mm
+        },
+        params: lastAnalyzeOpts || {},
+        counts: {
+          issues: (r.issues || []).length,
+          errors: (r.summary && r.summary.errors) || 0,
+          warnings: (r.summary && r.summary.warnings) || 0,
+          byRule: byRule
+        },
+        note: r.toc_found ? "" : "目次ページを特定できていない。整合チェックは成立していない"
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
   function basePayload(extra){
     return Object.assign({
       tool: "toc_kenpan", verdict: "", category: "",
@@ -3652,7 +3684,7 @@ document.getElementById("buildId").textContent = "091115";
       userAgent: navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要）
       ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "",
-      tocText: "", pageText: ""
+      tocText: "", pageText: "", diag: ""
     }, extra || {});
   }
 
@@ -3676,6 +3708,7 @@ document.getElementById("buildId").textContent = "091115";
       ? result.issues[fbIssueIndex] : null;
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";
     extra.tocText = buildTocText();
+    extra.diag = captureDiag();
     if(iss){
       extra.ruleId = iss.id || "";
       extra.expected = iss.expected || "";
@@ -4096,6 +4129,7 @@ async function runAnalyze() {
   pyodide.globals.set("opts_json", JSON.stringify(opts));
   const out = pyodide.runPython("analyze_json(raw_json, opts_json)");
   result = JSON.parse(out);
+  lastAnalyzeOpts = Object.assign({}, opts, { tomboMm: mm });
   $("rerun").disabled = false;
   // 初回読込（loadPDF）・「再解析」ボタン（rerun、runAnalyzeを直接呼ぶ）の
   // どちらの経路でも、解析完了時に必ず進捗表示（ドロップ枠の大きな
@@ -4492,7 +4526,10 @@ function fitView() { zoom = 1; renderPage(); }
 
 window.addEventListener("keydown", (e) => {
   if (!result || !navItems.length) return;
-  if (e.target && e.target.tagName === "INPUT") return;  // 入力中は無効
+  // TEXTAREA を除外しないと、フィードバックのコメント欄で矢印キーを押したときに
+  // カーソルが動かずページ送りが走ってしまう（v2.3で修正）
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT"
+      || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)) return;  // 入力中は無効
   if (e.key === "ArrowDown" || e.key === "j") {
     selectNav((selNav + 1) % navItems.length); e.preventDefault();
   } else if (e.key === "ArrowUp" || e.key === "k") {

@@ -2496,7 +2496,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
 // 判定ロジック（cross_check等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.1";
+  const FB_APP_VERSION = "v1.2";
   const modal = $("#fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -2603,13 +2603,41 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
       body: JSON.stringify(payload)
     });
   }
+  // 診断情報（v1.2）。バーコードを1つも検出できていないのか、検出はしたが
+  // 照合で落ちたのかを区別できるようにする。
+  function captureDiag(){
+    try{
+      if(typeof pdfDoc === "undefined" || !pdfDoc)
+        return JSON.stringify({ ran:false, note:"PDF未読込" });
+      const ps = (typeof pages !== "undefined" && pages) ? pages : [];
+      if(!ps.length) return JSON.stringify({ ran:false,
+        inputs:{ pages: pdfDoc.numPages }, note:"解析未実行" });
+      const withBars = ps.filter(p => p.hasBars).length;
+      const st = {}; ps.forEach(p => { const k = p.status || "?"; st[k] = (st[k] || 0) + 1; });
+      let sets = 0; ps.forEach(p => { sets += (p.sets || []).length; });
+      return JSON.stringify({
+        ran: true,
+        inputs: {
+          pages: pdfDoc.numPages, analyzedPages: ps.length,
+          pagesWithBarcode: withBars, barcodeSets: sets,
+          page: (typeof selected !== "undefined" && selected >= 0 && ps[selected])
+                ? ps[selected].page : null
+        },
+        params: { detectScale: (typeof DETECT_SCALE !== "undefined") ? DETECT_SCALE : null },
+        counts: { status: st },
+        note: withBars === 0
+          ? "バーコードを1つも検出できていない（向き・解像度・つぶれを疑う）" : ""
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
   function basePayload(extra){
     return Object.assign({
       tool: "isbn_kenpan", verdict: "", category: "",
       file: fbFileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: ""
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "", diag: ""
     }, extra || {});
   }
 
@@ -2642,6 +2670,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
       btn.textContent = "送信中…";
     }
     extra.detailText = buildDetailText(iss);
+    extra.diag = captureDiag();
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);

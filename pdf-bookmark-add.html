@@ -1141,7 +1141,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.3";
+const APP_VERSION = "v1.4";
 
 // ───────────────────────────────────────────
 //  状態
@@ -3905,13 +3905,36 @@ $("btnReset").addEventListener("click", resetAll);
       body: JSON.stringify(payload)
     });
   }
+  // 診断情報（v1.4）。未解決のページラベルが残っていないかが最大の手がかり。
+  function captureDiag(){
+    try{
+      const n = (typeof pdfDoc !== "undefined" && pdfDoc) ? pdfDoc.numPages : null;
+      const ents = (typeof bmEntries !== "undefined" && bmEntries) ? bmEntries : [];
+      const un = (typeof unresolvedLabels !== "undefined" && unresolvedLabels)
+                 ? Array.from(unresolvedLabels) : [];
+      if(!ents.length) return JSON.stringify({ ran:false,
+        inputs:{ pages:n, bookmarks:0 }, note:"しおりが1件も組み立てられていない" });
+      const byLevel = {};
+      ents.forEach(e => { const k = "L" + (e.level != null ? e.level : "?");
+                          byLevel[k] = (byLevel[k] || 0) + 1; });
+      return JSON.stringify({
+        ran: true,
+        inputs: { pages:n, bookmarks: ents.length,
+                  unresolvedLabels: un.length, unresolvedSample: un.slice(0, 8) },
+        params: {},
+        counts: { byLevel: byLevel },
+        note: un.length ? "解決できないページラベルが残っている（しおりの飛び先が不正になる）" : ""
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
   function basePayload(extra){
     return Object.assign({
       tool: "bookmark_kenpan", verdict: "", category: "",
       file: (pdfFile && pdfFile.name) || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "",
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "", diag: "",
       bookmarkCount: (typeof bmEntries !== "undefined" && bmEntries) ? bmEntries.length : 0
     }, extra || {});
   }
@@ -3931,6 +3954,7 @@ $("btnReset").addEventListener("click", resetAll);
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "画像を準備中…";
     extra.thumb = capturePageThumb();
     extra.detailText = bookmarkDetailText();
+    extra.diag = captureDiag();
     btn.textContent = "送信中…";
     const payload = basePayload(extra);
     try{

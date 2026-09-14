@@ -1474,7 +1474,9 @@ $("exclBtn").onclick=()=>{ const on=$("exclBtn").getAttribute("aria-pressed")===
 $("expReport").onclick=exportReport; $("expCsv").onclick=exportCsv; $("expJson").onclick=exportJson;
 $("expPng").onclick=exportPng; $("expPrint").onclick=()=>window.print();
 document.addEventListener("keydown",e=>{ if(!pdf) return;
-  const tag=(e.target&&e.target.tagName)||""; if(tag==="INPUT"||tag==="SELECT") return;
+  // TEXTAREA を除外しないとコメント欄で矢印キーがページ送りに抜ける（v1.2で修正）
+  const tag=(e.target&&e.target.tagName)||"";
+  if(tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA"||(e.target&&e.target.isContentEditable)) return;
   if(e.key==="ArrowLeft") $("prev").click(); if(e.key==="ArrowRight") $("next").click(); });
 
 // ---- drag & drop ----
@@ -1488,7 +1490,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
 // 判定ロジック（analyze()等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.1";
+  const FB_APP_VERSION = "v1.2";
   const modal = $("fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -1594,13 +1596,45 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
       body: JSON.stringify(payload)
     });
   }
+  // 診断情報（v1.2）。未検出ページ数とクラスタの割れ方が見逃しの直接の手がかりになる。
+  function captureDiag(){
+    try{
+      if(!pdf) return JSON.stringify({ ran:false, note:"PDF未読込" });
+      if(!analysis || !records || !records.length)
+        return JSON.stringify({ ran:false, inputs:{ pages: pdf.numPages },
+          note:"解析未実行。ノンブルの照合は成立していない" });
+      const det = records.filter(r => r.detected).length;
+      const exc = records.filter(r => r.excluded).length;
+      const ocr = records.filter(r => r.font === "OCR").length;
+      const st = {}; records.forEach(r => { const k = r.status || "?"; st[k] = (st[k] || 0) + 1; });
+      const byRule = {};
+      records.forEach(r => (r.issueMeta || []).forEach(m => {
+        const k = m.ruleId || "?"; byRule[k] = (byRule[k] || 0) + 1; }));
+      return JSON.stringify({
+        ran: true,
+        inputs: {
+          pages: records.length, detected: det, undetected: records.length - det - exc,
+          excluded: exc, ocrUsed: ocr,
+          clusters: (analysis.clusters || []).length,
+          majorClusters: (analysis.clusters || []).filter(c => c.major).length,
+          majorMin: analysis.majorMin, mainZone: analysis.mainZone,
+          position: analysis.mlabel
+        },
+        params: { tolMm: (typeof tolMm === "function") ? tolMm() : null },
+        counts: { status: st, byRule: byRule,
+                  pairNG: (analysis.pairNGpages || []).length },
+        note: det === 0 ? "1ページもノンブルを検出できていない（アウトライン化やOCR失敗の可能性）" : ""
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
   function basePayload(extra){
     return Object.assign({
       tool: "nombre_kenpan", verdict: "", category: "",
       file: fileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "", detailText: ""
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "", detailText: "", diag: ""
     }, extra || {});
   }
 
@@ -1633,6 +1667,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
       btn.textContent = "送信中…";
     }
     extra.detailText = buildFolioDetailText(iss ? iss.page : (cur+1));
+    extra.diag = captureDiag();
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);

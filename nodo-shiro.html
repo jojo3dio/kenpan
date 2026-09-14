@@ -3025,7 +3025,7 @@ rebuild();
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   const FB_TOOL = "nodo_shiro";
-  const FB_APP_VERSION = "v4";
+  const FB_APP_VERSION = "v5";
   const FB_TEXT_MAX = 20000;
 
   const modal = $('fbModal');
@@ -3149,6 +3149,35 @@ rebuild();
     await fetch(FEEDBACK_ENDPOINT,{method:'POST',mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
   }
+  /* 診断情報（v5）。このツールは検出の正誤ではなく案件条件を集めるものなので、
+     「どこまで確定できているか」を数えて残す。未確定の継ぎ目が残っていれば、
+     出力が不完全なまま送られている可能性が高い。 */
+  function captureDiag(){
+    try{
+      const parts = (typeof PARTS !== 'undefined' && PARTS) ? PARTS : [];
+      const picks = PICKS || {};
+      const ids = Object.keys(picks);
+      const done = ids.filter(id => picks[id] && picks[id].done).length;
+      const withLayer = FILES.filter(f => f.info && f.info.hasLayer).length;
+      const spread = PLIST.filter(p => p.form === 'spread').length;
+      return JSON.stringify({
+        ran: FILES.length > 0 && PLIST.length > 0,
+        inputs: {
+          files: FILES.length, filesWithExistingLayer: withLayer,
+          parts: PLIST.length, spreadInputs: spread,
+          totalPages: CFG.pages, fold: CFG.fold,
+          bind: CFG.bind, dir: CFG.dir, defaultJoint: CFG.joint
+        },
+        params: { wizard: (W && W.bind) ? {
+          bind: W.bind, mika: W.mika, part: W.part, print: W.print, loc: W.loc } : null },
+        counts: { jointsPicked: ids.length, jointsConfirmed: done,
+                  jointsPending: ids.length - done },
+        note: (ids.length && done < ids.length)
+          ? '未確定の継ぎ目が残った状態で送信されている' : ''
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:'診断の収集に失敗: ' + e }); }
+  }
+
   function basePayload(extra){
     return Object.assign({
       tool:FB_TOOL, verdict:'', category:'',
@@ -3156,7 +3185,7 @@ rebuild();
       reporter:reporterStore(true), appVersion:FB_APP_VERSION, userAgent:navigator.userAgent,
       ruleId:'', expected:'', actual:'', bbox:'', engine:'pdfjs', thumb:'',
       /* このツール固有の自動添付（スプレッドシート側に列を足すと読める） */
-      cond:condText(), configText:'', rowsText:''
+      cond:condText(), configText:'', rowsText:'', diag:''
     }, extra||{});
   }
 
@@ -3173,7 +3202,8 @@ rebuild();
       reporter,
       configText:configText(),
       rowsText:rowsText(),
-      thumb:captureThumb()
+      thumb:captureThumb(),
+      diag:captureDiag()
     };
     btn.textContent='送信中…';
     try{
@@ -3201,7 +3231,7 @@ rebuild();
     $('fbInX').onclick=()=>inl.classList.remove('show');
   }
   async function fbInlineGood(){
-    try{ await postFeedback(basePayload({verdict:'correct',configText:configText(),rowsText:rowsText()})); }catch(e){}
+    try{ await postFeedback(basePayload({verdict:'correct',configText:configText(),rowsText:rowsText(),diag:captureDiag()})); }catch(e){}
     renderInline('thanks'); markUsed();
   }
   function fbAfterApply(){

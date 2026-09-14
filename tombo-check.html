@@ -1730,7 +1730,7 @@ cen.addEventListener('drop',e=>{
 // ====== フィードバック（ISBN検版・ノンブル検版等と同方式） ======
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.3";
+  const FB_APP_VERSION = "v1.4";
   const modal = $("#fbModal");
   let fbVerdict = "";
 
@@ -1829,6 +1829,41 @@ cen.addEventListener('drop',e=>{
       body: JSON.stringify(payload)
     });
   }
+  // 診断情報（v1.4）。抽出した線分が何本で、絞り込み後に何本残ったかが分かると
+  // 「minLen/maxLW が厳しすぎてトンボを捨てていた」のか「そもそも線が無い」のかを切り分けられる。
+  function captureDiag(){
+    try{
+      if(typeof pdfDoc === "undefined" || !pdfDoc)
+        return JSON.stringify({ ran:false, note:"PDF未読込" });
+      const r = pgRes[curPg];
+      if(!r) return JSON.stringify({ ran:false,
+        inputs:{ pages: pdfDoc.numPages, page: curPg },
+        note:"このページの解析結果がない。トンボ判定は未実行" });
+      const analyzed = pgRes.filter(Boolean).length;
+      return JSON.stringify({
+        ran: true,
+        inputs: {
+          pages: pdfDoc.numPages, analyzedPages: analyzed, page: curPg,
+          rawLines: r.rawN, keptLines: (r.tl || []).length,
+          droppedLines: r.rawN - (r.tl || []).length,
+          dims: (r.dims || []).length, hasTrimBox: !!r.trim,
+          pageSizePt: [r.pgW, r.pgH], opsSeen: r.opsSeen,
+          warns: r.warns || []
+        },
+        params: {
+          unit: $("#unitSel").value, minLen: $("#minLen").value,
+          maxLW: $("#maxLW").value, clTol: $("#clTol").value,
+          ignoreCenter: $("#cbIgnoreCenter").checked
+        },
+        counts: { dims: (r.dims || []).length },
+        note: (r.tl || []).length === 0
+          ? (r.rawN ? "線分は抽出できたが絞り込みで全て除外された（minLen/maxLWを疑う）"
+                    : "線分が1本も抽出できていない（画像化されたトンボの可能性）")
+          : ""
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
   function basePayload(extra){
     const r = pgRes[curPg];
     return Object.assign({
@@ -1836,7 +1871,7 @@ cen.addEventListener('drop',e=>{
       file: fbFileName || "", page: fbCurPage(), comment: "",
       reporter: reporterStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
-      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "",
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "", diag: "",
       detectedLines: r ? r.tl.length : 0,
       settings: JSON.stringify({
         unit: $("#unitSel").value, minLen: $("#minLen").value,
@@ -1862,6 +1897,7 @@ cen.addEventListener('drop',e=>{
     extra.thumb = capturePageThumb();
     extra.detailText = captureDetailText();
     btn.textContent = "送信中…";
+    extra.diag = captureDiag();
     const payload = basePayload(extra);
     try{
       await postFeedback(payload);
