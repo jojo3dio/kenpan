@@ -250,7 +250,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
       </span>
-      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-09-09</small></span>
+      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-09-16</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -354,7 +354,7 @@ select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);backgrou
         </div>
         <div class="rfr">
           <div class="rfld"><label>最大線幅 (pt)</label>
-            <input type="number" id="maxLW" class="rin" value="1.0" min="0.05" max="3" step="0.05">
+            <input type="number" id="maxLW" class="rin" value="2.0" min="0.05" max="5" step="0.05">
           </div>
           <div class="rfld"><label>クラスタ許容 (mm)</label>
             <input type="number" id="clTol" class="rin" value="1.0" min="0.2" max="5" step="0.1">
@@ -618,7 +618,7 @@ async function extractLines(page){
   const fns  = ops.fnArray, args = ops.argsArray;
   const view = page.view;
   const pgOX = view[0], pgOY = view[1], pgH = view[3]-view[1];
-  const maxLW= parseFloat($("#maxLW").value)||1.0;
+  const maxLW= parseFloat($("#maxLW").value)||2.0;
   const minL = (parseFloat($("#minLen").value)||2)*MM2PT;
 
   const CP = 91; // constructPath
@@ -852,37 +852,61 @@ function classify(raw, pgW, pgH){
       bandPt=Math.max(avgMargin*4, 30*MM2PT);
     }
   }
+  // 帯やスリップのように枠高が小さいページでは上下バンドが重なり、
+  // 「どの線もバンド内」になって content と内トンボを区別できなくなる。
+  bandPt=Math.min(bandPt, fr.h*0.4);
   const bandT=fr.y0+bandPt, bandB=fr.y1-bandPt;
+
+  /* ---------- 仕上がり枠を基準にした content 判定 ----------
+     トンボ（角・センター・折り・綴じ）は必ず仕上がり枠の外側へ突き出す。
+     本文・デザインの罫線は枠の内側で完結する。長さや位置の割合ではなく
+     「枠をまたいでいるか」で切り分ける。
+     (実例: 帯の縦罫2本が綴じ境界と誤判定され、288mmが199.18/18.60/70.22に割れた) */
+  const _cmed=a=>{if(!a.length)return null;const b=[...a].sort((p,q)=>p-q);return b[(b.length-1)>>1];};
+  const _cpos=(roles,axis)=>_cmed(merged
+      .filter(l=>roles.indexOf(roleMap.get(l))>=0)
+      .map(l=>axis==='x'?l.cx:l.cy));
+  const trimT=_cpos(['corner-TL-H','corner-TR-H'],'y');
+  const trimB=_cpos(['corner-BL-H','corner-BR-H'],'y');
+  const trimL=_cpos(['corner-TL-V','corner-BL-V'],'x');
+  const trimR=_cpos(['corner-TR-V','corner-BR-V'],'x');
+  const epsPt=Math.max(tolPt, 1*MM2PT);
+  // 仕上がり枠が取れないPDFでは従来のバンド判定へフォールバックする
+  const outT=l=>trimT!==null?Math.min(l.y1,l.y2)<=trimT+epsPt:Math.min(l.y1,l.y2)<=bandT;
+  const outB=l=>trimB!==null?Math.max(l.y1,l.y2)>=trimB-epsPt:Math.max(l.y1,l.y2)>=bandB;
+  const outL=l=>trimL!==null?Math.min(l.x1,l.x2)<=trimL+epsPt:l.cx<fr.x0+mX;
+  const outR=l=>trimR!==null?Math.max(l.x1,l.x2)>=trimR-epsPt:l.cx>fr.x1-mX;
 
   return merged.map(l=>{
     if(roleMap.has(l)) return{...l,role:roleMap.get(l)};
-    if(l._foldSide==='L') return{...l,role:'fold-L-H'};
-    if(l._foldSide==='R') return{...l,role:'fold-R-H'};
+    if(l._foldSide==='L') return{...l,role:outL(l)?'fold-L-H':'content-H'};
+    if(l._foldSide==='R') return{...l,role:outR(l)?'fold-R-H':'content-H'};
     const{cx,cy,dir}=l;
     const nL=cx<fr.x0+mX, nR=cx>fr.x1-mX;
+    const oT=outT(l), oB=outB(l);
     let role='unknown';
     if(dir==='H'){
       const nT=cy<fr.y0+mY, nB=cy>fr.y1-mY;
-      if(nT) role='center-T';
-      else if(nB) role='center-B';
-      else if(nL&&Math.abs(cy-midY)<fr.h*0.15) role='center-L-H';
-      else if(nR&&Math.abs(cy-midY)<fr.h*0.15) role='center-R-H';
-      else if(nL) role='fold-L-H';
-      else if(nR) role='fold-R-H';
+      if(nT) role=oT?'center-T':'content-H';
+      else if(nB) role=oB?'center-B':'content-H';
+      else if(nL&&Math.abs(cy-midY)<fr.h*0.15) role=outL(l)?'center-L-H':'content-H';
+      else if(nR&&Math.abs(cy-midY)<fr.h*0.15) role=outR(l)?'center-R-H':'content-H';
+      else if(nL) role=outL(l)?'fold-L-H':'content-H';
+      else if(nR) role=outR(l)?'fold-R-H':'content-H';
       else role='inner-H';
     }else{
       if(nL) role='center-L';
       else if(nR) role='center-R';
       else{
         const span=Math.abs(l.y2-l.y1);
-        if(span>=fr.h*0.5) role='inner-V';
-        else if(Math.min(l.y1,l.y2)<=bandT||Math.max(l.y1,l.y2)>=bandB)
-          role='inner-V-single';
+        // 紙面を貫く内トンボは上下とも枠外へ出る。片側だけ出ている足は
+        // センター／折りトンボの片割れ。どちらでもなければデザイン罫線。
+        if(span>=fr.h*0.5&&oT&&oB) role='inner-V';
+        else if(oT||oB) role='inner-V-single';
         else role='content-V';
       }
     }
-    const span=Math.abs(l.y2-l.y1);
-    const edgeZone=span>=fr.h*0.5?'M':Math.min(l.y1,l.y2)<=bandT?'T':'B';
+    const edgeZone=(oT&&oB)?'M':oT?'T':'B';
     return{...l,role,_edgeZone:edgeZone,_bandPt:bandPt};
   });
 }
@@ -1204,7 +1228,7 @@ function drawOv(r){
   ctx.save(); ctx.translate(0,EXTRA);
   if(showTombo){
     ctx.strokeStyle='#e05020'; ctx.lineWidth=1.5; ctx.globalAlpha=0.85;
-    for(const l of r.tl){ctx.beginPath();ctx.moveTo(l.x1*sc,l.y1*sc);ctx.lineTo(l.x2*sc,l.y2*sc);ctx.stroke();}
+    for(const l of r.tl){if(/^content-/.test(l.role))continue;ctx.beginPath();ctx.moveTo(l.x1*sc,l.y1*sc);ctx.lineTo(l.x2*sc,l.y2*sc);ctx.stroke();}
   }
   for(let i=0;i<r.dims.length;i++){
     if(!r.dims[i].visible) continue;
@@ -1645,7 +1669,7 @@ updateTomboToggleUI();
 
 /* ---------- DBG ---------- */
 function updateStatus(r){
-  let t='検出: '+r.tl.length+'本';
+  let t='検出: '+r.tl.filter(l=>!/^content-/.test(l.role)).length+'本';
   if(r.size) t+=' / 仕上がり '+r.size.w.toFixed(2)+'×'+r.size.h.toFixed(2)+'mm'
                  +(r.size.std?'（'+r.size.std+'）':'');
   if(r.warns&&r.warns.length) t+=' / 要確認 '+r.warns.length+'件';
