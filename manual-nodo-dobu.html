@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノド断ち代ツール — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#7c3aed;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#b9791a; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#e8a33d;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:700px;margin:0 auto;padding:24px 18px 60px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
+  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+table.spec{width:100%;border-collapse:collapse;font-size:13.5px;margin:6px 0}
+table.spec th,table.spec td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.spec th{background:var(--panel2);font-weight:700;white-space:nowrap}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">ノド断ち代ツール</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2.5" y="4" width="19" height="16" rx="1.5"/><path d="M12 4v16" stroke-width="2.4"/><path d="M8.6 4v16M15.4 4v16" stroke-dasharray="2 2.4" opacity=".75"/></svg></div>
+    <div>
+      <h1>ノド断ち代ツール</h1>
+      <p>見開きでレイアウトしたPDFのノド側に、断ち代を作ります。リング綴じなど、折らずに4方断裁してペラで丁合する製本のためのツールです。</p>
+      <a class="open" href="nodo-dobu.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p class="lead">見開きでレイアウトしたInDesignから単ページで書き出したPDFは、<b>ノド側の断ち代に隣ページの絵柄が入ります</b>。通常の面付では折られて隠れるため問題になりませんが、リング綴じのように<b>折らずに4方断裁してペラで丁合する</b>製本では、ノド側にも正しい断ち代が必要になります。</p>
+  <p class="lead">このツールは、仕上がり線の内外を<b>行ごとに</b>調べて、ページごと・範囲ごとに次の3つを選び分け、PDFに追記します。トンボ付きPDFと断ち代までのPDFのどちらにも対応し、PDF/X-4を崩さず、画質も変わりません。</p>
+  <div class="cards">
+    <div class="c"><div class="t"><span class="sw" style="background:#3f9a37"></span>そのまま</div><div class="d">見開きで絵柄がつながっている範囲。隣ページの絵柄がそのまま断ち代になるので、何もしません。</div></div>
+    <div class="c"><div class="t"><span class="sw" style="background:#1f93a6"></span>ミラー</div><div class="d">ノドまで絵柄があり、隣は別の絵柄／紙地の範囲。隣を白で伏せ、そのページ自身の絵柄を仕上がり線で反転して足します。</div></div>
+    <div class="c"><div class="t"><span class="sw" style="background:#6c7b8c"></span>白にする</div><div class="d">ノド側が紙地の範囲。隣ページの絵柄の写り込みを白で伏せます。</div></div>
+  </div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li><b>PDFを読み込む。</b>画面にPDFをドラッグ＆ドロップするか、クリックして選びます。複数ファイルをまとめて処理できます。読み込むと「綴じと処理」画面に進みます。</li>
+    <li><b>綴じ方向を選ぶ。</b>右綴じ／左綴じ。ノドが左右どちらの辺になるかは、綴じ方向とページの偶数・奇数から自動で決まります（右綴じは奇数が左ページ、左綴じは奇数が右ページ）。</li>
+    <li><b>処理方法を選ぶ。</b>通常は<b>「自動」</b>のままで構いません。全ページを強制的に白／ミラーにすることもできます。</li>
+    <li><b>絵柄を残す幅を選ぶ。</b>1mm／2mm／3mm。断ち代3mmのうち指定した幅だけ絵柄にして、外側は白で伏せます。「この幅を既定にする」でブラウザに記憶されます。</li>
+    <li><b>「ノド断ち代を作る」を押す。</b>ノド際を走査したあと、プレビュー画面に切り替わります。</li>
+    <li><b>プレビューで確認する。</b>処理前／処理後を並べて表示します。「ノドを見る」でノド側に一発でズームできます。</li>
+    <li><b>必要ならページごとに直す。</b>右のページ一覧から選び、「処理を切り替え」「ノドを左右入替」「対象外にする」で個別に指定して、<b>「再処理」</b>でPDFに反映します。</li>
+    <li><b>「PDFを保存」で書き出す。</b>ファイル名の末尾に「_ノド断ち代」が付きます。</li>
+  </ol>
+
+  <h2>画面の見かた</h2>
+  <div class="cards">
+    <div class="c"><div class="t">赤い実線・破線</div><div class="d">実線が仕上がり線、破線が断ち代の端。下のバーでオン／オフできます。</div></div>
+    <div class="c"><div class="t">行ごとの判定</div><div class="d">仕上がり線の外に出る細い帯。<span class="sw" style="background:#3f9a37"></span>そのまま／<span class="sw" style="background:#1f93a6"></span>ミラー／<span class="sw" style="background:#6c7b8c"></span>白、を行単位で色分けします。</div></div>
+    <div class="c"><div class="t">下部の情報バー</div><div class="d">ページ番号・ノド側・処理内容・ノド際の絵柄の割合・倍率。分割処理のときは内訳（例：そのまま50% + ミラー50%）も出ます。</div></div>
+    <div class="c"><div class="t">ページ一覧</div><div class="d">サムネイルと判定結果。縁の色帯がノド側の位置と処理内容を表します。「ドブ不足」の赤い印が出たページは要確認です。</div></div>
+  </div>
+  <p class="lead">操作：ホイール＝ズーム／ドラッグ＝移動／<span class="tag">←</span><span class="tag">→</span>＝ページ送り／<span class="tag">g</span>＝ノドを見る／<span class="tag">f</span>＝全体。</p>
+
+  <h2>自動判定のしくみ</h2>
+  <p class="lead">仕上がり線の内側と外側を0.5mm刻みの行に分けて、それぞれ次のように判定します。</p>
+  <table class="spec">
+    <tr><th>仕上がりの内側</th><th>断ち代（外側）</th><th>処理</th></tr>
+    <tr><td>絵柄あり</td><td>奥まで絵柄が続いている</td><td>そのまま</td></tr>
+    <tr><td>絵柄あり</td><td>紙地／途中で切れる／色が食い違う</td><td>ミラー</td></tr>
+    <tr><td>紙地</td><td>絵柄あり</td><td>白にする</td></tr>
+  </table>
+  <p class="lead">絵柄の有無は<b>色の濃さではなく「真っ白かどうか」</b>で見ます。写真は淡くても真っ白（255,255,255）にはならず、紙地は必ず真っ白になるためです。これにより、色の薄い写真も取りこぼしません。</p>
+  <p class="lead">両側に絵柄があっても、<b>平坦な面で色だけが段差になっている</b>場合（＝別々の写真が隣り合っている）はミラーにします。写真が続いている場合は細部の変化も大きいため、判定のしきい値が自動的に緩みます。</p>
+  <div class="note"><b>「そのまま」はまとまった範囲にだけ：</b>ページ高さの20%以上まとまっている場合にだけ「そのまま」を使います。細い帯だけが残るような不安定な結果を避けるためで、短い範囲はミラーに倒れます。</div>
+
+  <h2>詳細設定</h2>
+  <p class="lead">通常は触る必要はありません。既定から変えた項目は、歯車ボタンの横に要約が出ます。</p>
+  <table class="spec">
+    <tr><th>断ち代の幅</th><td>3mm。PDFのドブの量に合わせます。</td></tr>
+    <tr><th>天地への延長</th><td>3mm。角の断ち代を埋めるための延長です。トンボのオフセットと同じ値にしておけばトンボに掛かりません。</td></tr>
+    <tr><th>なじませ</th><td>0.05mm。ミラーの反転軸を仕上がりの内側にわずかにずらし、継ぎ目の毛抜き合わせを避けます。</td></tr>
+    <tr><th>PDFの1ページ目</th><td>本文だけを抜き出したPDFなどで、1ページ目が見開きのどちら側か合わないときに指定します。</td></tr>
+    <tr><th>対象ページ</th><td>空欄で全ページ。「1-8,10」のように指定できます。</td></tr>
+    <tr><th>紙地とみなす明るさ</th><td>253。これ以上明るい画素を紙地とみなします。</td></tr>
+    <tr><th>そのままにする紙地率</th><td>50%未満。断ち代のうち紙地がこれ以上を占める行は「そのまま」にせずミラーにします。</td></tr>
+    <tr><th>そのままにする最小の高さ</th><td>20%以上。上げるとそのままになりにくく、下げると細かい範囲でもそのままを使います。</td></tr>
+    <tr><th>色でも確かめる</th><td>既定オン。オフにすると、両側に絵柄があれば色が食い違っていても「そのまま」になります。</td></tr>
+    <tr><th>白の色／内側へ重ねる量</th><td>CMYK 0/0/0/0。内側への重ねは通常0のまま（0より大きくすると仕上がり内側の絵柄が白で消えます）。</td></tr>
+    <tr><th>レイヤー名・OCG</th><td>「ノド断ち代」というレイヤー（OCG）として追記します。PDF/X-4はレイヤーを許容するので、通常はオンのままで構いません。</td></tr>
+  </table>
+
+  <h2>データの扱い</h2>
+  <ul class="plain">
+    <li>PDFは<b>ブラウザの中だけ</b>で処理され、どこにもアップロードされません。</li>
+    <li>元PDFのバイト列は一切書き換えず、<b>末尾に追記するだけ</b>で断ち代を作ります。OutputIntent・XMP・ID・Infoは無傷で、PDF/X-4のまま保たれます。</li>
+    <li>ミラーは、そのページの内容を参照するフォームXObjectを仕上がり線で反転して重ねる方式です。<b>画像の再サンプリングや再圧縮は起きません。</b></li>
+    <li>処理済みPDFを読み込むと、情報欄に「断ち代を付ける前のPDFに戻して保存」ボタンが出ます。追記分だけを取り除き、<b>元ファイルとバイト単位で同じPDF</b>を書き出します。設定を変えて付け直すだけなら、この操作は不要です（実行時に自動で付け直します）。</li>
+  </ul>
+
+  <h2>うまくいかないとき</h2>
+  <dl class="faq">
+    <dt>ノドの左右が逆になる</dt>
+    <dd>まず綴じ方向を確認してください。本文だけを抜き出したPDFなどで1ページ目の左右が合わない場合は、詳細設定の「PDFの1ページ目」で指定します。1ページだけ直したいときは、プレビューで「ノドを左右入替」を押して「再処理」します。</dd>
+
+    <dt>「そのまま」にしてほしいページがミラーになる／その逆</dt>
+    <dd>プレビューで該当ページを選び、「処理を切り替え」を押すと<b>自動 → そのまま → ミラー → 白 → 自動</b>の順で切り替わります。指定したら「再処理」で反映します。ページ一覧の「このページを自動に戻す」「すべて自動に戻す」で元に戻せます。</dd>
+
+    <dt>「そのまま」の範囲が細かく分かれてしまう</dt>
+    <dd>詳細設定の「そのままにする最小の高さ」を上げてください。逆に、細い範囲でもそのままを使いたい場合は下げます。</dd>
+
+    <dt>「ドブ不足」の赤い印が出る</dt>
+    <dd>そのページのノド側に、指定した断ち代の幅だけの余白がありません。PDFの書き出し設定（ブリード）を見直すか、断ち代の幅を実際のドブに合わせてください。</dd>
+
+    <dt>TrimBoxがないと警告が出る</dt>
+    <dd>仕上がり位置を推定するしかないため、ArtBox→CropBoxの順で代用しています。この場合は必ずプレビューで断ち代の位置を目視確認してください。</dd>
+
+    <dt>ミラーした絵柄の継ぎ目が気になる</dt>
+    <dd>斜めの帯や強い直線が仕上がり線を横切る場合、反転によってV字の折れが出ます。断裁されて消える範囲ですが、気になる場合はそのページを「そのまま」か「白」に切り替えてください。</dd>
+
+    <dt>全ページ「そのまま」判定で、保存できるものがないと出る</dt>
+    <dd>処理が不要だったということです。ノド側の断ち代がすでに正しく入っているPDFでは、この状態になります。</dd>
+  </dl>
+
+  <div class="foot">検版ハブ｜ノド断ち代ツール 操作マニュアル。ツール本体・ハブと同じフォルダに置いてください。内容は随時更新できます。 ｜ © FUJIWARA PRINTING.inc</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+<script src="kenpan-nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノド断ち代ツール — 開発メモ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#7c3aed;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+  --ok:#3f9a37; --ng:#d83a2e;
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e;
+  --glow:color-mix(in srgb, var(--accent) 70%, white);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+  --ok:#7ec86b; --ng:#ff5a4d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+.wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}
+.hero{background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:24px 26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero h1{margin:0 0 6px;font-size:23px;line-height:1.3}
+.hero p{margin:0;color:var(--ink-dim);font-size:14px}
+.hero .meta{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+h2{font-size:17px;margin:38px 0 14px;padding-left:12px;border-left:4px solid var(--glow);line-height:1.4}
+h3{font-size:14.5px;margin:22px 0 8px;color:var(--ink)}
+p{font-size:14px}
+.lead{color:var(--ink-dim)}
+table.t{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0}
+table.t th,table.t td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.t th{background:var(--panel2);font-weight:700;white-space:nowrap}
+table.t td.num{font-family:var(--mono);white-space:nowrap}
+.ok{color:var(--ok);font-weight:700}
+.ng{color:var(--ng);font-weight:700}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:10px 0}
+.box .t{font-weight:700;font-size:13.5px;margin-bottom:5px}
+.box .d{font-size:13.5px;color:var(--ink-dim)}
+.box .d b{color:var(--ink)}
+.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
+  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;padding-left:20px}
+ul.plain li{margin:6px 0}
+code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="back" href="index.html">← ハブに戻る</a>
+  <span class="nm">ノド断ち代ツール</span><span style="color:var(--ink-faint);font-size:13px">開発メモ</span>
+  <span class="sp"></span>
+  <a class="back" href="manual-nodo-dobu.html">操作マニュアル</a>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>開発メモ</h1>
+    <p>判定ロジックをなぜこの形にしたか、実データで何を確認したか、どこで間違えたかの記録。仕様を変えるときは、まずここを読んでください。</p>
+    <div class="meta">2026-09 ／ 検証データ: n025-034.pdf（10p・210×210mm）, 01-16_.pdf（16p・182×257mm）</div>
+  </div>
+
+  <h2>1. 何を解決するツールか</h2>
+  <p class="lead">見開きレイアウトのInDesignから単ページ書き出ししたPDFは、ノド側の断ち代に隣ページの絵柄が入ります。通常の面付では折られて隠れるため問題になりませんが、リング綴じのように折らずに4方断裁してペラで丁合する製本では、ノド側にも正しい断ち代が必要です。</p>
+  <p class="lead">当初の要件は「ノド側を白にする」「絵柄を左右反転して足す」の2択でしたが、実データを通すうちに<b>見開きでつながっている絵柄はそのまま残すべき</b>という第3の選択肢が必要だとわかり、さらに<b>1ページの中で上下に処理を分ける</b>必要も出てきました。</p>
+
+  <h2>2. 判定ロジックの根拠</h2>
+
+  <h3>2-1. 絵柄の有無は「色の濃さ」ではなく「真っ白かどうか」で見る</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">最初はインク量（255からの差が12以上の画素の割合）で絵柄の有無を判定していました。これだと<b>色の薄い写真が紙地と区別できません</b>。実データのp2では、ノド際が淡い白壁の写真で、紙地と誤判定されていました。<br>
+    調べると、写真は淡くても真っ白（255,255,255）にはならず、紙地は必ず真っ白になります。実データで、写真側は真っ白が0.0%、紙地側は98.3%と、はっきり分かれました。</div>
+  </div>
+  <div class="note"><b>注意：</b>白い画像（スキャンした白背景など）が置かれている場合は、この判定では紙地と区別できません。そのときは手動で指定してください。しきい値は詳細設定の「紙地とみなす明るさ」（既定253）で調整できます。</div>
+
+  <h3>2-2. サンプリングは仕上がり線から0.25mm離す</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">当初0.06mm離して測っていましたが、これは走査解像度で1画素未満です。<b>仕上がり線上のアンチエイリアス1画素を「絵柄あり」と拾って</b>しまい、断ち代が白なのに「両側に絵柄」と誤判定していました。0.25mmまで離すと確実に1画素以上になり、解消しました。</div>
+  </div>
+
+  <h3>2-3. 断ち代の「奥まで」絵柄が続いているかを見る</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">仕上がり線の際だけを見て「そのまま」にすると、<b>斜めの帯で白い楔が残ります</b>。帯は仕上がり線上にはあっても、断ち代の奥へ行くと上下にずれて、そこは隣ページの白紙だからです。「そのまま」はその白紙ごと温存してしまいます。<br>
+    そこで、行ごとに断ち代3mm全体を調べ、<b>紙地が50%以上を占める行は「そのまま」にせずミラー</b>にします。写真の飛んだハイライト（真っ白になる）で誤判定しないよう、全画素一致ではなく割合で見ています。</div>
+  </div>
+
+  <h3>2-4. 色の食い違いは「局所の変化との比」で見る</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">両側に絵柄があっても、別々の写真が隣り合っているだけの場合はミラーが正しい。しかし固定のしきい値では分離できませんでした。<b>見開きでつながっている写真でも、継ぎ目で色が食い違うことが実際にある</b>ためです（n025-034のp5で色差58）。<br>
+    決め手は<b>比率</b>でした。別写真が隣接している箇所（01-16_のp12下半分）は色差74.5に対して局所の変化0.5＝<b>149倍</b>。つながっている写真（p5）は色差58に対して局所の変化6.0＝<b>9.7倍</b>。<br>
+    そこで、仕上がり線をまたぐ色差を、同じ側の内部での色の変化と比べ、<code>色差 &gt; max(25, 局所の変化×14 + 10)</code> ならミラーにします。ディテールの多い写真ほどしきい値が自動的に緩みます。</div>
+  </div>
+
+  <h3>2-5. 「そのまま」はまとまった範囲にだけ使う</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">行ごとに素直に判定すると、白地ページを横切る細い帯（4mm程度）だけが「そのまま」になります。これは一見正しそうですが、<b>帯の周囲に隣ページの絵柄が中途半端に残り、かえって不安定</b>でした。<br>
+    そこで、<b>ページ高さの20%以上まとまっている「そのまま」だけを採用</b>し、短いものはミラーに倒します。絵柄はあるので白にはしません。逆に、<b>「そのまま」に挟まれた短いミラーは「そのまま」に吸収</b>します（写真の飛んだ白などで面が細切れになるのを防ぐため）。白に隣接する短いミラーは残します（紙地の面に入った帯は反転させたいため）。</div>
+  </div>
+
+  <h3>2-6. ミラーの帯は上下に広げる</h3>
+  <div class="box">
+    <div class="t">なぜそうしたか</div>
+    <div class="d">斜めの帯をミラーする場合、帯の厚み分だけの範囲で切ると、<b>断ち代の奥でずれた分が覆えず反転した絵柄が途切れます</b>。そこでミラーの帯を上下に断ち代の3倍（9mm）広げます。紙地を反転しても紙地のままなので、白の区間に食い込んでも害はありません。「そのまま」の区間に隣接するときは、そちらを上書きしないよう広げません。</div>
+  </div>
+
+  <h3>2-7. 走査の仕様（まとめ）</h3>
+  <table class="t">
+    <tr><th>解像度</th><td>ページ高さを400分割（A5で約0.5mm刻み）。走査倍率は辺の長さから5〜10倍で自動決定。</td></tr>
+    <tr><th>測る位置</th><td>仕上がり線から0.25mm離し、0.15mm厚の帯を内外に3本ずつ。色の比較は長手方向に1mmの移動平均をかけてから。</td></tr>
+    <tr><th>最小区間</th><td>ページ高さの1%。それ未満の区間は隣に吸収。</td></tr>
+    <tr><th>間引き</th><td>判定済みの行だけで先に多数決（半径3バケット）を取り、そのあと紙地の行を最も近い判定で埋める。<b>順序が逆だと1バケットの誤判定が広範囲に伝播します。</b></td></tr>
+  </table>
+
+  <h2>3. 実データでの検証結果</h2>
+  <p class="lead">下表が現在の期待値です。<b>仕様を変えたら、この2ファイルを通して同じ結果になるか必ず確認してください。</b></p>
+
+  <h3>n025-034.pdf（10ページ・210×210mm・左綴じ）</h3>
+  <table class="t">
+    <tr><th>ページ</th><th>ノド</th><th>判定</th><th>内容</th></tr>
+    <tr><td class="num">p1</td><td class="num">左</td><td class="num">ミラー</td><td>全面写真、隣は白紙</td></tr>
+    <tr><td class="num">p2</td><td class="num">右</td><td class="num">ミラー</td><td>全面写真、隣は白紙</td></tr>
+    <tr><td class="num">p3</td><td class="num">左</td><td class="num">白 + ミラー</td><td>白地ページ。黄色い帯の範囲だけミラー</td></tr>
+    <tr><td class="num">p4</td><td class="num">右</td><td class="num">そのまま</td><td>見開き写真。飛んだ窓の白があるが全面そのまま</td></tr>
+    <tr><td class="num">p5</td><td class="num">左</td><td class="num">そのまま</td><td>見開き写真。継ぎ目は実際にずれているが、そのままでよい</td></tr>
+    <tr><td class="num">p6</td><td class="num">右</td><td class="num">ミラー</td><td>p2と同構成</td></tr>
+    <tr><td class="num">p7</td><td class="num">左</td><td class="num">白 + ミラー</td><td>p3と同構成</td></tr>
+    <tr><td class="num">p8〜10</td><td class="num">—</td><td class="num">そのまま</td><td>見開き写真</td></tr>
+  </table>
+
+  <h3>01-16_.pdf（16ページ・182×257mm・右綴じ）</h3>
+  <table class="t">
+    <tr><th>ページ</th><th>判定</th><th>内容</th></tr>
+    <tr><td class="num">p1〜3</td><td class="num">そのまま</td><td>見開き写真</td></tr>
+    <tr><td class="num">p4</td><td class="num">ミラー</td><td>ノドまで絵柄、隣は紙地</td></tr>
+    <tr><td class="num">p5</td><td class="num">白</td><td>白地ページ</td></tr>
+    <tr><td class="num">p6</td><td class="num">そのまま50% + 白50%</td><td>上下で構成が違う</td></tr>
+    <tr><td class="num">p7</td><td class="num">そのまま50% + ミラー50%</td><td><b>上半分はつながり、下半分は別写真</b></td></tr>
+    <tr><td class="num">p8〜11</td><td class="num">そのまま</td><td>見開き写真</td></tr>
+    <tr><td class="num">p12</td><td class="num">白37% + ミラー64%</td><td>下半分は別写真どうし</td></tr>
+    <tr><td class="num">p13〜14</td><td class="num">ミラー</td><td>下半分は別写真どうし</td></tr>
+    <tr><td class="num">p15</td><td class="num">白</td><td>白地ページ</td></tr>
+    <tr><td class="num">p16</td><td class="num">そのまま</td><td>見開き写真</td></tr>
+  </table>
+
+  <h2>4. 見つけたバグと原因</h2>
+
+  <div class="box">
+    <div class="t"><span class="ng">1</span>　ページ一覧が10ページまでしか表示されない</div>
+    <div class="d"><b>原因：</b>スクロール領域に <code>min-height:0</code> が抜けていた。flexboxでは <code>flex:1</code> を指定しても <code>min-height</code> の初期値が <code>auto</code>（＝中身の高さ）なので、要素は中身の高さまで膨らみ、パネルの外にはみ出して下が切れる。<code>overflow-y:auto</code> はコンテナが中身より小さいときにしか効かないので、スクロールも機能しない。<br>
+    <b>なぜ見逃したか：</b>DOM上は全ページ分の行が存在していたため、行数を数えるテストでは検出できなかった。10ページなら高さが収まって問題が出ず、16ページで初めて露見した。<b>「ページ数が増えたときだけ起きる」という手がかりを読み違え、キャッシュの問題だと誤診した。</b></div>
+  </div>
+
+  <div class="box">
+    <div class="t"><span class="ng">2</span>　ドロップすると同じファイルが2つ読み込まれる</div>
+    <div class="d"><b>原因：</b>ドロップゾーンと <code>document</code> の両方にドロップハンドラを付けており、イベントが親へ伝播して2回処理されていた。ゾーン側で <code>stopPropagation()</code> し、<code>document</code> 側は画面外に落とされたときだけ拾う担当に分離した。</div>
+  </div>
+
+  <div class="box">
+    <div class="t"><span class="ng">3</span>　走査処理の関数が丸ごと消えていた</div>
+    <div class="d"><b>原因：</b>コードを範囲置換した際、隣接する関数を巻き込んで削除した。自動判定が一切動かず、結果が全てフォールバックに落ちていた。<br>
+    <b>なぜ見逃したか：</b>テストが走査結果を直接注入していたため、その関数を一度も呼ばない経路を通っていた。<br>
+    <b>対策：</b>インラインスクリプト内で呼ばれている関数名を全て拾い、定義が存在しないものを検出する静的チェックを追加。走査を素通しで実行するテストも追加した。</div>
+  </div>
+
+  <h2>5. 出力の仕組み</h2>
+  <ul class="plain">
+    <li>元PDFのバイト列は一切書き換えず、<b>末尾に増分更新として追記</b>する。OutputIntent・XMP・ID・Infoは無傷で、PDF/X-4のまま保たれる。</li>
+    <li>白は <code>0 0 0 0 k</code>（ExtGStateでOP/op false）。ミラーは、そのページの内容を複製したフォームXObjectを、仕上がり線を軸とした反転行列 <code>-1 0 0 1 2x₀ 0</code> ＋クリップで重ねる。<b>画像の再サンプリングや再圧縮は起きない。</b></li>
+    <li>反転軸は「なじませ」分（既定0.05mm）だけ内側にずらす。軸ちょうどだと仕上がり線上に毛抜き合わせの継ぎ目が出るため。軸を内側にずらしても参照元は必ず自ページ側なので、隣の絵柄は拾わない。</li>
+    <li>「ノド断ち代」というOCGレイヤーに入れる。<code>/Usage /Print /PrintState /ON</code> と <code>/AS [/Print]</code> を付け、PDF/X-4が許容する形にしている。</li>
+    <li>取り消しは追記部分の切り捨てで、<b>元ファイルとバイト単位で一致</b>する。</li>
+    <li>天地への延長は既定で断ち代と同値（3mm）。InDesignのトンボオフセットが3mmなら、角の断ち代を埋めてもトンボ線に掛からない。</li>
+  </ul>
+
+  <h2>6. 検証に使ったテスト</h2>
+  <p class="lead">開発時に用意したもの。仕様変更時はこれらを再実行すること。</p>
+  <table class="t">
+    <tr><th>エンジン</th><td>xref表／xrefストリーム＋オブジェクトストリーム、<code>/Rotate 90</code>、画像＋テキスト混在、トンボ付き／断ち代のみ。いずれも取り消しでバイト一致することを確認。</td></tr>
+    <tr><th>判定</th><td>合成PDF（写真のディテール別・またぎ有無別）と、実データ2ファイルの全ページ。</td></tr>
+    <tr><th>画面</th><td>jsdomでページ全体を読み込み、初期化→ファイル読込→走査→実行→ページ操作→表示切替→リセットまで通しで実行し、エラーが出ないこと。</td></tr>
+    <tr><th>静的</th><td>インラインスクリプトの構文チェック、参照している要素IDの存在確認、未定義関数の呼び出し検出。</td></tr>
+  </table>
+
+  <h2>7. 今後の課題</h2>
+  <ul class="plain">
+    <li><b>行単位の限界。</b>現在の処理は水平な帯の集まりなので、斜めの絵柄では境界が階段状になります。断ち代の中だけの話なので実害は出ませんが、<b>画素単位のマスク</b>（PDFのソフトマスク）にすれば正確に扱えます。斜めの帯も文字も、紙地の部分だけを正確に埋められます。</li>
+    <li><b>フィードバックの到達確認。</b>送信は <code>mode:'no-cors'</code> のため、GAS側が受け取れていなくてもブラウザ側では検知できず、画面には「送信しました」と出ます。確実に確認するにはスプレッドシート側を見るしかありません。</li>
+    <li><b>白い画像の扱い。</b>紙地の判定を「真っ白かどうか」で行っているため、白背景の画像が置かれている場合は区別できません。</li>
+  </ul>
+
+  <div class="foot">検版ハブ｜ノド断ち代ツール 開発メモ。ツール本体・ハブと同じフォルダに置いてください。 ｜ © FUJIWARA PRINTING.inc</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+<script src="kenpan-nav.js"></script>
+</body>
+</html>
