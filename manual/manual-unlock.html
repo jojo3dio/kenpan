@@ -164,11 +164,11 @@ th{background:var(--panel2);color:var(--ink);font-weight:700;white-space:nowrap;
 document.getElementById('btnOpenTool').onclick = function(){
   if(window.parent && window.parent !== window){
     try{
-      window.parent.postMessage({ kenpan:'openTool', url:'pdf-unlock.html' }, location.origin);
+      window.parent.postMessage({ kenpan:'openTool', url:'edit/pdf-unlock.html' }, location.origin);
       return;
     }catch(e){}
   }
-  window.open('pdf-unlock.html', '_blank', 'noopener');
+  window.open('../edit/pdf-unlock.html', '_blank', 'noopener');
 };
 </script>
 </body>

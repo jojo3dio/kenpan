@@ -1,0 +1,2878 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ISBN検版 — バーコード照合チェッカー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<style>
+/* ---------- light (default / 紙色) ---------- */
+:root{
+  --bg:#eef3fd; --panel:#ffffff; --panel2:#eaeff7; --line:#ddd5c4;
+  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
+  --amber:#2563eb; --amber-bg:#e8effd;
+  --err:#c8362a; --err-bg:#f9e8e6; --warn:#a87412; --warn-bg:#f7efd9;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#eaf1fd; --shadow:0 1px 4px rgba(60,45,20,.10);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+/* ---------- dark (下版チェッカー系) ---------- */
+[data-theme="dark"]{
+  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#6ea0f5; --amber-bg:#182a44;
+  --err:#e5604f; --err-bg:#3a1d18; --warn:#d9a428; --warn-bg:#332a12;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+     font-size:14px;transition:background .2s,color .2s}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+.mk{width:26px;height:26px;border-radius:5px;display:block;
+  background:
+    repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 4px,var(--ink) 4px 5px,transparent 5px 9px,var(--ink) 9px 11px,transparent 11px 13px);
+  background-color:var(--amber-bg);border:1px solid var(--line)}
+.brand b{font-weight:700;font-size:16px;letter-spacing:.02em}
+.brand span{color:var(--ink-faint);font-size:12px}
+.sp{flex:1}
+.tools{display:flex;align-items:center;gap:8px}
+button,.btn{font-family:var(--ui);font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:7px;padding:7px 12px;transition:.15s}
+button:hover,.btn:hover{border-color:var(--amber);background:var(--amber-bg)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.icobtn{padding:7px 10px}
+.opt{display:flex;align-items:center;gap:6px;color:var(--ink-dim);font-size:12px}
+
+/* ---------- body ---------- */
+.main{flex:1;display:flex;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0}
+.left{flex:0 0 224px;border-right:1px solid var(--line);background:var(--panel)}
+.center{flex:1;background:var(--stage);position:relative;display:flex;flex-direction:column;overflow:hidden}
+.canvaswrap{flex:1;position:relative;overflow:auto;cursor:grab}
+.canvaswrap.grabbing{cursor:grabbing}
+/* ---------- プレビュー上部の固定バー(ウェブ確認リンクのみ) ---------- */
+.previewbar{flex:0 0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+  box-shadow:0 1px 0 rgba(0,0,0,.04)}
+/* ---------- ヘッダー内「入力して照合」トグル＋ドロップダウン ---------- */
+.hdr-manual{position:relative}
+.pv-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:12px;font-weight:700;
+  color:var(--ink-dim);background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  padding:7px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
+.pv-toggle svg{width:14px;height:14px}
+.pv-toggle:hover{border-color:var(--amber);color:var(--ink)}
+.pv-toggle:disabled{opacity:.45;cursor:not-allowed}
+.pv-toggle .car{font-size:9px;color:var(--ink-faint);transition:transform .15s}
+.pv-toggle[aria-expanded="true"]{border-color:var(--amber);color:var(--amber);background:var(--amber-bg)}
+.pv-toggle[aria-expanded="true"] .car{transform:rotate(90deg)}
+.pv-drawer{position:absolute;left:0;top:100%;margin-top:6px;z-index:30;display:flex;flex-direction:column;gap:10px;
+  min-width:380px;max-width:calc(100vw - 32px);padding:12px 14px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 14px 30px rgba(40,32,20,.18)}
+.pv-drawer.collapsed{display:none}
+.pb-group{display:flex;align-items:center;gap:8px;min-width:0}
+.pb-label{font-size:11px;color:var(--ink-faint);white-space:nowrap;letter-spacing:.04em}
+.pb-input{font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel2);color:var(--ink);font-family:var(--mono);min-width:0}
+.pb-input.isbn{width:170px}.pb-input.c{width:78px}.pb-input.p{width:72px}
+.pb-input:focus{outline:none;border-color:var(--amber);background:var(--panel)}
+.pb-btn{font-size:12px;padding:6px 15px;border:1px solid var(--amber);background:var(--amber);
+  color:#fff;font-weight:700;border-radius:7px;cursor:pointer;white-space:nowrap;transition:.15s}
+.pb-btn:hover{filter:brightness(1.05)}
+[data-theme="dark"] .pb-btn{color:#1a1205}.pb-btn:disabled{opacity:.6;cursor:default}
+[data-theme="dark"] .fbbtn{color:#0d1526}
+.pb-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 0}
+.pb-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pb-links a{font-size:11px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;
+  color:var(--ink-dim);text-decoration:none;background:var(--panel2);
+  display:inline-flex;gap:5px;align-items:center;white-space:nowrap;transition:.15s}
+.pb-links a:hover{border-color:var(--amber);color:var(--ink);background:var(--amber-bg)}
+.pb-links a.visited{border-color:var(--amber);color:#fff;background:var(--amber)}
+[data-theme="dark"] .pb-links a.visited{color:#0d1526}
+.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);overflow:auto}
+.colhd{height:34px;line-height:34px;padding:0 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--panel);z-index:3;letter-spacing:.04em}
+
+/* ---------- drop / empty ---------- */
+.drop{margin:auto;max-width:520px;text-align:center;padding:40px}
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);transition:.18s;cursor:pointer}
+.dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
+/* 読み込み中の表示。中央のドロップ面は利用者が必ず見ている場所なので、
+   上部バナーだけでなくここでも進行中であることを示す。 */
+.dzload{display:none;border:2px solid var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);text-align:center}
+.dzload.show{display:block}
+.dzload .spin{width:34px;height:34px;border-width:3px;margin:0 auto 16px}
+.dzload h2{margin:.4em 0 .2em;font-size:18px}
+.dzload p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dzload .bar{height:6px;max-width:260px;margin:18px auto 0}
+.dropzone h2{margin:.4em 0 .2em;font-size:18px}
+.dropzone p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dropmk{width:64px;height:46px;margin:0 auto 14px;border-radius:8px;
+  background:
+    repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px,var(--ink) 6px 8px,transparent 8px 13px,var(--ink) 13px 16px,transparent 16px 19px,var(--ink) 19px 22px,transparent 22px 27px);
+  background-color:var(--amber-bg);border:1px solid var(--line);opacity:.85}
+
+/* ---------- page list ---------- */
+.plist{overflow:auto;flex:1}
+.prow{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid var(--line);
+  cursor:pointer;font-size:13px}
+.prow:hover{background:var(--panel2)}
+.prow.sel{background:var(--amber-bg)}
+.prow.empty{opacity:.5}
+.pno{font-family:var(--mono);color:var(--ink-dim);min-width:34px}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--ink-faint)}
+.dot.NG{background:var(--err)} .dot.WARN{background:var(--warn)} .dot.OK{background:var(--ok)}
+.prow .lbl{flex:1;color:var(--ink-dim)}
+
+/* ---------- viewer ---------- */
+.viewer{position:relative;display:inline-block;margin:18px}
+#pageCanvas{display:block;box-shadow:var(--shadow);background:#fff}
+#overlay{position:absolute;left:0;top:0;pointer-events:none}
+.zoomctl{position:absolute;right:14px;bottom:12px;z-index:5;display:flex;align-items:center;gap:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:4px 6px;
+  box-shadow:var(--shadow)}
+.zoomctl button{font-size:14px;line-height:1;min-width:30px;height:28px;padding:0 6px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.zoomctl button#zFit{font-size:11px;min-width:auto;padding:0 9px}
+.zoomctl button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:42px;text-align:center}
+/* 単ページPDFのときは左のページ一覧を隠す */
+.main.single .left{display:none}
+/* ---------- 外部確認リンク ---------- */
+.links{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}
+.links a{font-size:11px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;
+  color:var(--ink-dim);text-decoration:none;background:var(--panel2);
+  display:inline-flex;gap:5px;align-items:center;transition:.15s}
+.links a:hover{border-color:var(--amber);color:var(--ink);background:var(--amber-bg)}
+.links-hd{font-size:11px;color:var(--ink-dim);margin:10px 0 4px}
+/* ---------- 上段ツールバー（手入力＋ウェブ確認）---------- */
+.toolbar{position:sticky;top:0;z-index:4;padding:11px;border-bottom:1px solid var(--line);
+  background:var(--panel2);border-radius:11px 11px 0 0}
+.manual-hd{font-size:11px;color:var(--ink-dim);line-height:1.5;margin-bottom:8px}
+.mrow-inline{display:flex;gap:6px;align-items:center}
+.mrow-inline input{flex:1;min-width:0;font-size:12px;padding:6px 7px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);font-family:var(--mono)}
+.mrow-inline input.mi-isbn{flex:1.6}
+.mrow-inline input:focus{outline:none;border-color:var(--amber)}
+.mbtn{flex:0 0 auto;font-size:12px;padding:6px 14px;border:1px solid var(--amber);
+  background:var(--amber-bg);color:var(--ink);border-radius:7px;cursor:pointer;transition:.15s}
+.mbtn:hover{background:var(--amber)}
+.mbtn:disabled{opacity:.6;cursor:default}
+
+/* ---------- progress ---------- */
+.banner{display:none;align-items:center;gap:12px;padding:8px 16px;background:var(--amber-bg);
+  border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-dim)}
+.banner.show{display:flex}
+.bar{flex:1;height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--amber);transition:width .15s}
+/* 所要時間が読めない工程(ファイル読込・エンジン初期化)用の不定進捗バー */
+.bar.indet>i{width:35%;transition:none;animation:indet 1.1s ease-in-out infinite}
+@keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+.spin{flex:0 0 auto;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--amber);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .spin{animation-duration:2.4s}
+  .bar.indet>i{animation-duration:2.4s}
+}
+
+/* ---------- summary tiles ---------- */
+.tiles{display:flex;gap:8px;padding:12px 13px;border-bottom:1px solid var(--line);
+  position:sticky;top:34px;z-index:2;background:var(--panel)}
+.tile{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px;text-align:center;background:var(--panel2)}
+.tile b{display:block;font-family:var(--mono);font-size:20px;line-height:1.1}
+.tile span{font-size:11px;color:var(--ink-dim)}
+.tile.NG b{color:var(--err)} .tile.WARN b{color:var(--warn)} .tile.OK b{color:var(--ok)}
+.tile.jump{cursor:pointer;transition:.12s}
+.tile.jump:hover{border-color:currentColor;filter:brightness(1.03)}
+.tile.jump:active{transform:translateY(1px)}
+@keyframes chkflash{0%,100%{box-shadow:none}35%{box-shadow:0 0 0 3px color-mix(in srgb, var(--amber) 55%, transparent)}}
+.chk.flash{animation:chkflash 1.1s ease}
+
+/* ---------- result cards ---------- */
+.cards{padding:12px 13px;display:flex;flex-direction:column;gap:13px}
+.card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.card>.h{display:flex;align-items:center;gap:8px;padding:9px 11px;font-weight:700;font-size:13px;
+  border-bottom:1px solid var(--line)}
+.card.NG>.h{background:var(--err-bg)} .card.WARN>.h{background:var(--warn-bg)} .card.OK>.h{background:var(--ok-bg)}
+.pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:11px;border:1px solid var(--line)}
+.pill.NG{color:var(--err);border-color:var(--err)} .pill.WARN{color:var(--warn);border-color:var(--warn)} .pill.OK{color:var(--ok);border-color:var(--ok)}
+.kv{padding:8px 11px;border-bottom:1px solid var(--line);font-size:12px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--ink-faint);font-size:11px;margin-bottom:2px}
+.kv .v{font-family:var(--mono);word-break:break-all}
+.chk{display:flex;align-items:flex-start;gap:8px;padding:7px 11px;border-bottom:1px solid var(--line);font-size:12px}
+.chk:last-child{border-bottom:0}
+.chk .mark{flex:0 0 auto;font-family:var(--mono);font-weight:600}
+.chk.NG .mark{color:var(--err)} .chk.WARN .mark{color:var(--warn)} .chk.OK .mark{color:var(--ok)}
+.chk .body .t{font-weight:500}
+.chk .body .d{color:var(--ink-dim);font-family:var(--mono);font-size:11px;margin-top:1px;word-break:break-all}
+/* NG(不一致)を目立たせる */
+.chk.NG{background:var(--err-bg,rgba(220,60,60,.10));border-left:3px solid var(--err);padding-left:9px}
+.chk.NG .mark{font-size:16px;line-height:1.2}
+.chk.NG .body .t{color:var(--err);font-weight:700;font-size:13px}
+.chk.NG .body .d{color:var(--err);font-weight:600;font-size:12px}
+.note{padding:11px 13px;color:var(--ink-dim);font-size:12px;line-height:1.6}
+.empty-msg{padding:24px 16px;color:var(--ink-faint);text-align:center;font-size:13px}
+.foot{padding:9px 13px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:11px;line-height:1.6}
+.kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
+a.lnk{color:var(--amber)}
+.hidden{display:none!important}
+
+/* ---- フィードバック（目次整合検版と同形） ---- */
+/* ---- フィードバック（目次整合検版と同形） ---- */
+.fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:13px;font-weight:700;
+  color:#fff;background:var(--amber);border:1px solid var(--amber);border-radius:7px;
+  padding:7px 12px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em}
+.fbbtn:hover{filter:brightness(1.08)}
+.fbbtn svg{width:15px;height:15px}
+.fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+  background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
+.fbmodal.show{display:flex}
+.fbcard{width:min(460px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
+.fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--ink-dim);line-height:1.6}
+.fbfield{margin-bottom:13px}
+.fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-dim);margin-bottom:5px}
+.fbfield label .req{color:var(--err);margin-left:3px}
+.fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--ui);font-size:13px;color:var(--ink);
+  background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
+.fbfield textarea{min-height:64px;line-height:1.5}
+.fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:4px;word-break:break-all}
+.fbrow2{display:flex;gap:9px}
+.fbrow2 .fbfield{flex:1;margin-bottom:13px}
+.fbverdict{display:flex;gap:7px}
+.fbverdict button{flex:1;font-family:var(--ui);font-size:12px;color:var(--ink-dim);background:var(--panel2);
+  border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
+.fbverdict button:hover{border-color:var(--amber)}
+.fbverdict button.on{background:var(--amber);color:#fff;border-color:var(--amber);font-weight:700}
+.fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
+.fbactions{display:flex;gap:9px;margin-top:18px}
+.fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+.fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+.fbactions .fbcancel:hover{color:var(--ink)}
+.fbactions .fbsend{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .fbactions .fbsend{color:#1a1205}
+.fbactions .fbsend:hover{filter:brightness(1.06)}
+.fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
+.fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
+  background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+.fbnote.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+/* ---------- 奥付け照合モーダル ---------- */
+.obcard{width:min(560px,92vw)}
+.obstep-hd{font-size:12px;color:var(--ink-dim);margin:0 0 10px;line-height:1.6}
+.obdrop{border:2px dashed var(--line);border-radius:10px;padding:26px 16px;text-align:center;
+  background:var(--panel2);cursor:pointer;transition:.15s;font-size:12.5px;color:var(--ink-dim)}
+.obdrop:hover,.obdrop.hot{border-color:var(--amber);background:var(--amber-bg)}
+.obcand{display:flex;flex-direction:column;gap:6px;max-height:170px;overflow-y:auto;margin-bottom:12px}
+.obcand button{text-align:left;font-family:var(--ui);font-size:12px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel2);color:var(--ink);cursor:pointer;transition:.12s}
+.obcand button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.obcand button.sel{border-color:var(--amber);background:var(--amber-bg);font-weight:700}
+.obcand .sc{color:var(--ink-faint);font-size:10.5px;margin-left:6px;font-weight:400}
+.obcand .sn{display:block;color:var(--ink-dim);font-size:10.5px;margin-top:2px;font-family:var(--mono);
+  font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.obnav{display:flex;align-items:center;gap:8px;margin:2px 0 10px;flex-wrap:wrap}
+.obnav input{width:56px;font-family:var(--mono);font-size:12px;padding:5px 6px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);text-align:center}
+.obnav button{font-size:12px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel2);color:var(--ink);cursor:pointer;transition:.12s}
+.obnav button:hover{border-color:var(--amber);background:var(--amber-bg)}
+.obnav button:disabled{opacity:.4;cursor:not-allowed}
+.obnav .oblabel{font-size:11px;color:var(--ink-faint)}
+.obpreview{border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:280px;background:var(--stage);
+  display:flex;justify-content:center;padding:8px;margin-bottom:10px;position:relative}
+.obpreview canvas{max-width:100%;box-shadow:var(--shadow)}
+.obpreview .obload{color:var(--ink-faint);font-size:12px;padding:30px}
+.obactions2{display:flex;gap:9px;margin-top:6px}
+.obactions2 button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+.obactions2 .obback{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+.obactions2 .obconfirm{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .obactions2 .obconfirm{color:#1a1205}
+.obactions2 .obconfirm:hover{filter:brightness(1.06)}
+.obactions2 button:disabled{opacity:.5;cursor:not-allowed}
+.obbtn{display:inline-flex;align-items:center;gap:6px}
+.obbtn svg{width:14px;height:14px}
+@keyframes obPulse{
+  0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--amber) 60%, transparent)}
+  70%{box-shadow:0 0 0 8px color-mix(in srgb, var(--amber) 0%, transparent)}
+  100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent)}
+}
+.obbtn.glow{border-color:var(--amber);background:var(--amber-bg);color:var(--ink);
+  animation:obPulse 1.8s ease-out infinite}
+.obbtn.glow:hover{animation-play-state:paused}
+.chk .issfb{margin-left:auto;background:var(--panel2);border:1px solid var(--line);
+  color:var(--ink-faint);cursor:pointer;font-size:10.5px;font-family:var(--ui);font-weight:600;
+  border-radius:6px;padding:2px 8px;line-height:1.4;transition:.12s;white-space:nowrap;flex:0 0 auto}
+.chk .issfb:hover{color:var(--err);border-color:var(--err);background:var(--err-bg)}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-09</small></span>
+    </div>
+    <div class="sp"></div>
+    <div class="tools">
+      <div class="hdr-manual">
+        <button class="pv-toggle" id="pvToggle" type="button" aria-expanded="false" disabled
+          title="ISBN・JANの印字を手入力して再照合">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <span>入力して照合</span><span class="car">▸</span>
+        </button>
+        <div class="pv-drawer collapsed" id="pvDrawer"></div>
+      </div>
+      <label class="opt"><input type="checkbox" id="optRot"> 縦向きも探索(90°)</label>
+      <label class="opt"><input type="checkbox" id="optOcr" checked> 文字はOCRで補完</label>
+      <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
+      <button id="btnDbg">OCR確認</button>
+      <button id="btnReset" disabled>リセット</button>
+      <button id="btnOpen" class="btn">PDFを選択</button>
+      <input type="file" id="file" accept="application/pdf" class="hidden">
+      <button id="obOpen" class="btn obbtn" disabled title="本文PDFの奥付けに記載されたISBN・Cコードを、バーコード読取値・表紙印字と照合します">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+        <span>奥付け照合</span>
+      </button>
+      <button class="fbbtn" id="fbOpen" title="この検版結果についてのフィードバックを送信（検出の正誤・気づいた点）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>フィードバック</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner">
+    <span class="spin" id="bannerSpin" aria-hidden="true"></span>
+    <span id="bannerText" role="status" aria-live="polite">解析中…</span>
+    <div class="bar"><i id="barFill"></i></div>
+    <button id="btnCancel" class="icobtn">中止</button>
+  </div>
+
+  <div class="main">
+    <!-- 左: ページ一覧 -->
+    <div class="col left">
+      <div class="colhd">ページ</div>
+      <div class="plist" id="plist">
+        <div class="empty-msg">PDF未読込</div>
+      </div>
+    </div>
+
+    <!-- 中央: プレビュー -->
+    <div class="col center" id="center">
+      <div class="previewbar hidden" id="previewbar"></div>
+      <div class="canvaswrap" id="canvaswrap">
+      <div class="drop" id="drop">
+        <div class="dropzone" id="dropzone">
+          <div class="dropmk" aria-hidden="true"></div>
+          <h2>PDFをドラッグ＆ドロップ</h2>
+          <p>またはクリックして選択（このPDFは外部に送信されません）</p>
+          <p style="margin-top:14px;color:var(--ink-faint)">表紙・カバーPDFを読み込むと、2段バーコードを自動検出し、<br>近傍のISBN・Cコード・価格の印字と照合します。販売用JANコードが<br>別掲されている場合も、印字数字列との照合対象になります。</p>
+        </div>
+        <div class="dzload" id="dzload" role="status" aria-live="polite">
+          <div class="spin" aria-hidden="true"></div>
+          <h2 id="dzloadTitle">PDFを読み込み中…</h2>
+          <p id="dzloadSub">ファイルは外部に送信されません</p>
+          <div class="bar indet" id="dzloadBar"><i></i></div>
+        </div>
+      </div>
+      <div class="viewer hidden" id="viewer">
+        <canvas id="pageCanvas"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      </div>
+      <div class="zoomctl hidden" id="zoomctl">
+        <button id="zOut" title="縮小">−</button>
+        <span id="zoomhint">100%</span>
+        <button id="zIn" title="拡大">＋</button>
+        <button id="zFit" title="全体表示">全体</button>
+      </div>
+    </div>
+
+    <!-- 右: 結果 -->
+    <div class="col right">
+      <div class="colhd">照合結果</div>
+      <div class="tiles" id="tiles"><div class="empty-msg" style="padding:6px 0">—</div></div>
+      <div id="result"><div class="empty-msg">—</div></div>
+      <div class="foot">
+        判定: <b style="color:var(--err)">NG</b> 値の不一致／壊れたチェックデジット ・
+        <b style="color:var(--warn)">要確認</b> 読取不可・旧フラッグ等 ・
+        <b style="color:var(--ok)">OK</b><br>
+        2段目 = <span style="font-family:var(--mono)">192＋Cコード4桁＋税抜本体価格5桁＋CD</span>
+      </div>
+    </div>
+  </div>
+<div class="kp-strip">© FUJIWARA PRINTING.inc</div>
+</div>
+
+<!-- ============ フィードバック機能（目次整合検版と同形） ============ -->
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">この検版結果について気づいた点を送ってください。検出の正誤を集めて、判定ロジックの改良に使います。<br>※該当箇所（または表示中のページ）の画像を含みます。PDFファイル全体は送信されません。</p>
+
+    <div class="fbfield">
+      <label>検出結果は正しかった？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">正しい<span class="vm">妥当な検出</span></button>
+        <button type="button" data-v="false_positive">誤検知<span class="vm">出すぎ</span></button>
+        <button type="button" data-v="missed">見逃し<span class="vm">出てない</span></button>
+      </div>
+    </div>
+
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="ISBN">ISBN</option>
+          <option value="日本図書コード">日本図書コード</option>
+          <option value="Cコード">Cコード</option>
+          <option value="価格">価格</option>
+          <option value="バーコード品質">バーコード品質</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>ページ</label>
+        <input id="fbPage" type="text" placeholder="例: p1">
+      </div>
+    </div>
+
+    <div class="fbfield">
+      <label>ファイル名</label>
+      <input id="fbFile" type="text" placeholder="自動入力されます" readonly>
+      <div class="fbhint" id="fbFileHint"></div>
+    </div>
+
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：p1のISBN不一致を誤検知している など"></textarea>
+    </div>
+
+    <div class="fbfield">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
+    </div>
+
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ============ 奥付け照合機能 ============ -->
+<div class="fbmodal" id="obModal">
+  <div class="fbcard obcard">
+    <h3>奥付け照合</h3>
+    <p class="fbsub">本文PDFを読み込み、奥付けページに記載されたISBN・Cコードを、現在開いている表紙PDFのバーコード読取値・印字と突き合わせます。単ページのPDFはそのまま使い、複数ページのPDFは奥付けページを自動検出します（PDFは外部に送信されません）。</p>
+    <div id="obBody"></div>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="obCancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 奥付けページのプレビュー(画面いっぱいのオーバーレイ・ポップアップ許可不要) ============ -->
+<div class="fbmodal" id="obPreviewModal">
+  <div class="fbcard" style="width:min(820px,94vw)">
+    <h3>奥付けページの照合プレビュー</h3>
+    <div id="obPreviewBody"></div>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="obPreviewClose" onclick="closeObPreview()">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   ISBN検版 — バーコード照合チェッカー
+   pdf.js: レンダリング & 実テキスト抽出
+   ZXing : EAN-13 検出（帯スキャンで上下2段）
+   Tesseract: アウトライン化された目視文字のOCRフォールバック
+   Pyodide: 検証済みPythonコアで整合照合
+   ============================================================ */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const DETECT_SCALE = 3.2;     // 検出時のレンダリング倍率(72base → ≈230dpi)
+const RENDER_BOOST = 2;       // 表示用の余分なレンダリング解像度(拡大してもシャープに)
+const ZMIN = 0.5, ZMAX = 8;   // ズーム下限・上限
+const $ = s => document.querySelector(s);
+
+const PY_CORE = String.raw`
+# === barcode_core (検証済み) ===
+import re, unicodedata, json
+def ean13_check_digit(d12):
+    ds=[int(c) for c in str(d12)]
+    s=sum(d*(1 if i%2==0 else 3) for i,d in enumerate(ds))
+    return (10-s%10)%10
+def ean13_valid(code):
+    code=re.sub(r"\D","",str(code))
+    return len(code)==13 and ean13_check_digit(code[:12])==int(code[12])
+def isbn10_check_char(d9):
+    ds=[int(c) for c in str(d9)]; s=sum(d*(10-i) for i,d in enumerate(ds))
+    r=(11-s%11)%11; return "X" if r==10 else str(r)
+def isbn10_valid(s):
+    s=re.sub(r"[^0-9Xx]","",s)
+    return len(s)==10 and isbn10_check_char(s[:9]).upper()==s[9].upper()
+def isbn10_to_13(s):
+    s=re.sub(r"[^0-9Xx]","",s)
+    if len(s)!=10: return None
+    core="978"+s[:9]; return core+str(ean13_check_digit(core))
+_C_TARGET={0:"一般",1:"教養",2:"実用",3:"専門",4:"検定教科書等",5:"婦人",6:"学参I(小中)",7:"学参II(高校)",8:"児童",9:"雑誌扱い"}
+_C_FORM={0:"単行本",1:"文庫",2:"新書",3:"全集・双書",4:"ムック等",5:"事・辞典",6:"図鑑",7:"絵本",8:"磁性媒体等",9:"コミック"}
+def decode_ccode(cccc):
+    cccc=re.sub(r"\D","",str(cccc))
+    if len(cccc)!=4: return None
+    return {"target":_C_TARGET.get(int(cccc[0]),"?"),"form":_C_FORM.get(int(cccc[1]),"?"),"content":cccc[2:4]}
+def parse_isbn_barcode(code13):
+    code=re.sub(r"\D","",str(code13)); r={"raw":code,"errors":[],"warns":[]}
+    if len(code)!=13: r["errors"].append("桁数が13ではありません(%d桁)"%len(code)); return r
+    r["prefix"]=code[:3]
+    if code[:3] not in ("978","979"): r["errors"].append("ISBNフラッグが978/979ではありません(%s)"%code[:3])
+    r["country"]="日本(4)" if code[:4]=="9784" else ("言語圏 "+code[3] if code[:3] in("978","979") else "?")
+    r["cd_expected"]=ean13_check_digit(code[:12]); r["cd_ok"]=(r["cd_expected"]==int(code[12]))
+    if not r["cd_ok"]: r["errors"].append("チェックデジット不一致(正:%d/印字:%s)"%(r["cd_expected"],code[12]))
+    r["isbn13"]=code; return r
+def parse_dnc_barcode(code13):
+    code=re.sub(r"\D","",str(code13)); r={"raw":code,"errors":[],"warns":[]}
+    if len(code)!=13: r["errors"].append("桁数が13ではありません(%d桁)"%len(code)); return r
+    r["prefix"]=code[:3]
+    if code[:3]=="191": r["warns"].append("旧フラッグ191(内税表示)。現行は192(税抜本体価格)")
+    elif code[:3]!="192": r["errors"].append("2段目フラッグが192ではありません(%s)"%code[:3])
+    r["ccode"]=code[3:7]; r["price"]=int(code[7:12])
+    r["cd_expected"]=ean13_check_digit(code[:12]); r["cd_ok"]=(r["cd_expected"]==int(code[12]))
+    if not r["cd_ok"]: r["errors"].append("チェックデジット不一致(正:%d/印字:%s)"%(r["cd_expected"],code[12]))
+    r["ccode_decoded"]=decode_ccode(r["ccode"]); return r
+def parse_jan_barcode(code13):
+    # 書籍用(978/979/192/191)以外のEAN-13(JAN/一般商品コード)。表紙・カバーに販売用JANが
+    # 別掲される場合があるため、チェックデジットと印字数字列の突き合わせのみ行う。
+    code=re.sub(r"\D","",str(code13)); r={"raw":code,"errors":[],"warns":[]}
+    if len(code)!=13: r["errors"].append("桁数が13ではありません(%d桁)"%len(code)); return r
+    r["prefix"]=code[:3]
+    r["cd_expected"]=ean13_check_digit(code[:12]); r["cd_ok"]=(r["cd_expected"]==int(code[12]))
+    if not r["cd_ok"]: r["errors"].append("チェックデジット不一致(正:%d/印字:%s)"%(r["cd_expected"],code[12]))
+    r["jan13"]=code; return r
+def norm(s): return unicodedata.normalize("NFKC",s or "")
+def extract_isbn_text(text):
+    t=norm(text)
+    m=re.search(r"ISBN[\s:]*([0-9Xx\-‐ー－—–\s]{10,20})",t,re.I); cand=m.group(1) if m else None
+    if not cand:
+        m2=re.search(r"(97[89][0-9Xx\-‐ー－—–\s]{10,18})",t); cand=m2.group(1) if m2 else None
+    if not cand: return None
+    digits=re.sub(r"[^0-9Xx]","",cand).upper()
+    if len(digits)>13 and digits[:3] in ("978","979"): digits=digits[:13]
+    res={"text":cand.strip(),"digits":digits}
+    if len(digits)==13:
+        if not digits.startswith(("978","979")):
+            for pre in ("978","979"):
+                c13=pre+digits[3:]
+                if ean13_valid(c13):
+                    res["note"]="先頭桁をOCR誤読補正(%s→%s)"%(digits[:3],pre); digits=c13; res["digits"]=digits; break
+        res["isbn13"]=digits; res["cd_ok"]=ean13_valid(digits)
+    elif len(digits)==10: res["isbn10"]=digits; res["isbn13"]=isbn10_to_13(digits); res["cd_ok"]=isbn10_valid(digits); res["note"]="ISBN-10表記(13桁へ換算して照合)"
+    else: res["error"]="桁数異常(%d桁)"%len(digits)
+    return res
+def extract_ccode_text(text):
+    t=norm(text)
+    # "C"の文字のみを対象とする(©記号や括弧は対象外)。©2026のような発行年の誤検出を防ぐため、
+    # 直前が英数字でない・直後に5桁目の数字が続かないことも確認する。
+    m=re.search(r"(?<![A-Za-z0-9])[Cc]\s?([0-9]{4})(?!\d)", t)
+    if m: return m.group(1)
+    m=re.search(r"(?<![0-9¥￥])([0-9]{4})\s*[¥￥Ee]", t)
+    if m: return m.group(1)
+    return None
+def extract_price_text(text):
+    t=norm(text)
+    for pat in [r"[¥\\]\s*([0-9][0-9,]{1,7})\s*E", r"本体(?:価格)?\s*([0-9][0-9,]{1,7})\s*円?",
+                r"定価[：:]*\s*(?:本体)?\s*([0-9][0-9,]{1,7})\s*円", r"[¥\\]\s*([0-9][0-9,]{1,7})"]:
+        m=re.search(pat,t)
+        if m: return int(m.group(1).replace(",",""))
+    return None
+def extract_jan_text(text):
+    # バーコード直下等に印字される「人が読む数字列」(スペース区切りが多い)から
+    # 13桁のEAN-13として妥当な数字列を拾う。ハイフン区切りのISBN等は対象外。
+    # バーコードのガードバーは主バーより下へ伸びて数字列に食い込むため、OCRでは
+    # " ' | ! . , 等の記号として読まれる(実例: 4"510993"566613)。これらは
+    # 数字の区切りとして許容する。13桁かつチェックデジットが妥当なものだけ採用するので
+    # 誤って別の数値を拾う心配は小さい。
+    t=norm(text)
+    for m in re.finditer(r"(?:(?<=[^0-9])|^)([0-9][0-9\s\"'|!.,:;]{10,24}[0-9])(?:(?=[^0-9])|$)",t):
+        d=re.sub(r"[^0-9]","",m.group(1))
+        if len(d)==13 and ean13_valid(d): return d
+        for i in range(0,max(0,len(d)-12)):
+            w=d[i:i+13]
+            if ean13_valid(w): return w
+    return None
+def cross_check(isbn_bc,dnc_bc,ocr_text,layout=""):
+    rep={"items":[],"status":"OK"}
+    def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
+        rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
+                              "ruleId":rid,"expected":exp,"actual":act,"box":box})
+    isbn=parse_isbn_barcode(isbn_bc) if isbn_bc else None
+    dnc=parse_dnc_barcode(dnc_bc) if dnc_bc else None
+    ti=extract_isbn_text(ocr_text); tc=extract_ccode_text(ocr_text); tp=extract_price_text(ocr_text)
+    if isbn:
+        add("ISBNバーコード チェックデジット",isbn["cd_ok"],"OK" if isbn["cd_ok"] else "／".join(isbn["errors"]),
+            rid="ISBN-1", exp="有効なチェックデジット", act=("OK" if isbn["cd_ok"] else "／".join(isbn["errors"])), box="isbn")
+        if ti and ti.get("isbn13"):
+            same=(isbn["isbn13"]==ti["isbn13"])
+            d=("　"+diff_pos(isbn["isbn13"],ti["isbn13"])) if not same else ""
+            add(lbl("ISBN バーコード↔印字",same),same,"BC:%s ／ 印字:%s%s%s"%(isbn["isbn13"],ti["isbn13"],"("+ti["note"]+")" if ti.get("note") else "",d),
+                rid="ISBN-2", exp=isbn["isbn13"], act=ti["isbn13"], box="isbn")
+        else:
+            add("ISBN 印字の読取",False,"印字ISBNを読み取れませんでした",level="WARN",
+                rid="ISBN-3", exp="印字ISBNの読取成功", act="読取失敗", box="isbn")
+    else:
+        add("ISBN(1段目)の欠落",False,"1段目(ISBN)が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
+            rid="ISBN-4", exp="ISBNバーコード(1段目)の検出", act="未検出", box=None)
+    if dnc:
+        add("日本図書コード チェックデジット",dnc["cd_ok"],"OK" if dnc["cd_ok"] else "／".join(dnc["errors"]),
+            rid="ISBN-5", exp="有効なチェックデジット", act=("OK" if dnc["cd_ok"] else "／".join(dnc["errors"])), box="dnc")
+        for w in dnc.get("warns",[]):
+            add("日本図書コード フラッグ",True,w,level="WARN",
+                rid="ISBN-6", exp="現行フラッグ(192)", act=w, box="dnc")
+        if tc is not None:
+            cs=(dnc["ccode"]==tc); cd=("　"+diff_pos(dnc["ccode"],tc)) if not cs else ""
+            add(lbl("Cコード バーコード↔印字",cs),cs,"BC:C%s ／ 印字:C%s%s"%(dnc["ccode"],tc,cd),
+                rid="ISBN-7", exp=dnc["ccode"], act=tc, box="dnc")
+        else:
+            add("Cコード 印字の読取",False,"印字Cコードを読み取れませんでした",level="WARN",
+                rid="ISBN-8", exp="印字Cコードの読取成功", act="読取失敗", box="dnc")
+        if tp is not None:
+            ps=(dnc["price"]==tp)
+            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s"%(dnc["price"],tp,"" if ps else "　金額が異なります"),
+                rid="ISBN-9", exp=dnc["price"], act=tp, box="dnc")
+        else:
+            add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN",
+                rid="ISBN-10", exp="印字価格の読取成功", act="読取失敗", box="dnc")
+    else:
+        if layout=="slip":
+            # スリップ(売上カード)はISBNバーコード1本だけが正規の仕様。
+            # 2段目が無いのは異常ではないので警告にしない。
+            add("日本図書コード(2段目)",True,"スリップのため2段目なしで正常",
+                rid="ISBN-11S", exp="—", act="—", box=None)
+        else:
+            add("日本図書コード(2段目)の欠落",False,"2段目が検出されません。2段組のカバー・表紙では片側欠落の疑い",level="WARN",
+                rid="ISBN-11", exp="日本図書コード(2段目)の検出", act="未検出", box=None)
+    ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
+    wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
+    rep["status"]="NG" if ng else ("WARN" if wn else "OK")
+    rep["isbn"]=isbn; rep["dnc"]=dnc; rep["text"]={"isbn":ti,"ccode":tc,"price":tp}
+    return rep
+def diff_pos(a,b):
+    a=str(a); b=str(b)
+    if len(a)!=len(b): return "桁数が異なります(BC %d桁/印字 %d桁)"%(len(a),len(b))
+    ds=[str(i+1) for i in range(len(a)) if a[i]!=b[i]]
+    return ("%s桁目が異なります"%("・".join(ds))) if ds else ""
+def lbl(name,ok): return name+(" 一致" if ok else " 不一致")
+def run_check(isbn_bc,dnc_bc,ocr_text,layout=""):
+    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or "",layout or ""),ensure_ascii=False)
+def cross_check_jan(jan_bc,ocr_text):
+    # ISBN/日本図書コードの帯とは別に印字される、販売用JAN(一般商品コード)の照合。
+    rep={"items":[],"status":"OK"}
+    def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
+        rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
+                              "ruleId":rid,"expected":exp,"actual":act,"box":box})
+    jan=parse_jan_barcode(jan_bc) if jan_bc else None
+    tj=extract_jan_text(ocr_text)
+    if jan:
+        add("JANコード チェックデジット",jan["cd_ok"],"OK" if jan["cd_ok"] else "／".join(jan["errors"]),
+            rid="JAN-1", exp="有効なチェックデジット", act=("OK" if jan["cd_ok"] else "／".join(jan["errors"])), box="jan")
+        if tj:
+            same=(jan["jan13"]==tj)
+            d=("　"+diff_pos(jan["jan13"],tj)) if not same else ""
+            add(lbl("JANコード バーコード↔印字",same),same,"BC:%s ／ 印字:%s%s"%(jan["jan13"],tj,d),
+                rid="JAN-2", exp=jan["jan13"], act=tj, box="jan")
+        else:
+            add("JANコード 印字の読取",False,"近傍の印字数字列を読み取れませんでした",level="WARN",
+                rid="JAN-3", exp="印字JANコードの読取成功", act="読取失敗", box="jan")
+    else:
+        add("JANコードの欠落",False,"バーコード値が空です",level="WARN",
+            rid="JAN-4", exp="JANコードの検出", act="未検出", box=None)
+    ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
+    wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
+    rep["status"]="NG" if ng else ("WARN" if wn else "OK")
+    rep["jan"]=jan; rep["text"]={"jan":tj}
+    return rep
+def run_check_jan(jan_bc,ocr_text):
+    return json.dumps(cross_check_jan(jan_bc or None,ocr_text or ""),ensure_ascii=False)
+def cross_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
+    # 表紙バーコード↔表紙印字の照合(cross_check)に、本文PDFの奥付け記載を第三の情報源として追加する。
+    # 「バーコード↔奥付け」「表紙印字↔奥付け」の両方を突き合わせ、3点で一致するかを見る。
+    rep=cross_check(isbn_bc,dnc_bc,cover_text)
+    def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
+        rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
+                              "ruleId":rid,"expected":exp,"actual":act,"box":box})
+    isbn=rep.get("isbn"); dnc=rep.get("dnc")
+    ti=rep["text"]["isbn"]; tc=rep["text"]["ccode"]
+    ci=extract_isbn_text(colophon_text) if colophon_text else None
+    cc=extract_ccode_text(colophon_text) if colophon_text else None
+    if colophon_text:
+        if ci and ci.get("isbn13"):
+            if isbn:
+                same=(isbn["isbn13"]==ci["isbn13"]); d=("　"+diff_pos(isbn["isbn13"],ci["isbn13"])) if not same else ""
+                add(lbl("ISBN バーコード↔奥付け",same),same,"BC:%s ／ 奥付:%s%s%s"%(isbn["isbn13"],ci["isbn13"],"("+ci["note"]+")" if ci.get("note") else "",d),
+                    rid="ISBN-C1", exp=isbn["isbn13"], act=ci["isbn13"], box="isbn")
+            if ti and ti.get("isbn13"):
+                same2=(ti["isbn13"]==ci["isbn13"]); d2=("　"+diff_pos(ti["isbn13"],ci["isbn13"])) if not same2 else ""
+                add(lbl("ISBN 表紙印字↔奥付け",same2),same2,"表紙:%s ／ 奥付:%s%s"%(ti["isbn13"],ci["isbn13"],d2),
+                    rid="ISBN-C2", exp=ti["isbn13"], act=ci["isbn13"], box="isbn")
+        else:
+            add("奥付け ISBN の読取",False,"奥付けページからISBNを読み取れませんでした",level="WARN",
+                rid="ISBN-C3", exp="奥付けISBNの読取成功", act="読取失敗", box="isbn")
+        if cc is not None:
+            if dnc:
+                cs=(dnc["ccode"]==cc); d3=("　"+diff_pos(dnc["ccode"],cc)) if not cs else ""
+                add(lbl("Cコード バーコード↔奥付け",cs),cs,"BC:C%s ／ 奥付:C%s%s"%(dnc["ccode"],cc,d3),
+                    rid="ISBN-C4", exp=dnc["ccode"], act=cc, box="dnc")
+            if tc is not None:
+                cs2=(tc==cc); d4=("　"+diff_pos(tc,cc)) if not cs2 else ""
+                add(lbl("Cコード 表紙印字↔奥付け",cs2),cs2,"表紙:C%s ／ 奥付:C%s%s"%(tc,cc,d4),
+                    rid="ISBN-C5", exp=tc, act=cc, box="dnc")
+        else:
+            add("奥付け Cコード の読取",False,"奥付けページからCコードを読み取れませんでした",level="WARN",
+                rid="ISBN-C6", exp="奥付けCコードの読取成功", act="読取失敗", box="dnc")
+    rep["colophon"]={"isbn":ci,"ccode":cc}
+    ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
+    wn=any((not it["ok"]) and it["level"]=="WARN" for it in rep["items"])
+    rep["status"]="NG" if ng else ("WARN" if wn else "OK")
+    return rep
+def run_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
+    return json.dumps(cross_check_colophon(isbn_bc or None,dnc_bc or None,cover_text or "",colophon_text or ""),ensure_ascii=False)
+`;
+
+/* ---------- 状態 ---------- */
+let pdfDoc=null, pyReady=null, pages=[], selected=-1, cancelFlag=false, ocrWorker=null;
+let zoom=1, baseCssW=0, baseCssH=0;   // プレビューのズーム状態(1=フィット表示)
+let fbFileName="";   // フィードバック送信用（ファイル名の表示のみに使用）
+let fbIssues=[];     // フィードバック「誤検知?」用：直近renderResult()で構築された指摘一覧
+/* ---------- 奥付け照合の状態 ---------- */
+let obState={step:'file', doc:null, fileName:'', numPages:0, curPage:1,
+             candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+const OB_SCORE_MIN=3;   // このスコア以上を「奥付けらしいページ」の候補とする
+
+/* ---------- Pyodide 起動 ---------- */
+async function ensurePy(){
+  if(pyReady) return pyReady;
+  pyReady=(async()=>{
+    const py=await loadPyodide();
+    py.runPython(PY_CORE);
+    return py;
+  })();
+  return pyReady;
+}
+
+/* ---------- ZXing 設定 ---------- */
+const Z=window.ZXing;
+const zHints=new Map();
+zHints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13]);
+zHints.set(Z.DecodeHintType.TRY_HARDER,true);
+const zReader=new Z.MultiFormatReader();
+zReader.setHints(zHints);
+
+/* HTMLCanvasElementLuminanceSource は crop非対応(例外)のため、
+   帯はキャンバス側で切り出し、都度ソースを作って復号する */
+function decodeCanvas(canvas){
+  try{
+    const source=new Z.HTMLCanvasElementLuminanceSource(canvas);
+    const bmp=new Z.BinaryBitmap(new Z.HybridBinarizer(source));
+    const res=zReader.decode(bmp,zHints);
+    zReader.reset();
+    const pts=res.getResultPoints?res.getResultPoints():[];
+    const xs=pts.map(p=>p.getX()), ys=pts.map(p=>p.getY());
+    // ZXingはTRY_HARDER時、キャンバスを内部で90°回転して再読取を試みる
+    // (HTMLCanvasElementLuminanceSource.isRotateSupported()がtrueのため)。
+    // その場合、結果点は元座標系に戻されるがバーコードの伸びる向きはYになるので、
+    // x0/x1だけでboxを作ると幅ゼロの縦長スリバーになってしまう。
+    // ORIENTATION(90/270)を拾って「回転している」ことを呼び出し側に伝える。
+    let ori=0;
+    try{ const md=res.getResultMetadata(); if(md){ const o=md.get(Z.ResultMetadataType.ORIENTATION); if(o!=null) ori=o|0; } }catch(e){}
+    const xSpan=xs.length?Math.max(...xs)-Math.min(...xs):0;
+    const ySpan=ys.length?Math.max(...ys)-Math.min(...ys):0;
+    const rotated = (ori===90||ori===270) || (ySpan>xSpan*3 && ySpan>canvas.height*0.05);
+    return {text:res.getText(), rotated, ori,
+            x0:xs.length?Math.min(...xs):0, x1:xs.length?Math.max(...xs):canvas.width,
+            y0:ys.length?Math.min(...ys):0, y1:ys.length?Math.max(...ys):canvas.height,
+            x:xs.length?(xs.reduce((a,b)=>a+b,0)/xs.length):canvas.width/2,
+            y:ys.length?(ys.reduce((a,b)=>a+b,0)/ys.length):canvas.height/2};
+  }catch(e){ zReader.reset(); return null; }
+}
+
+/* バーコードの黒縞領域を画素から検出してboxを精密化する。
+   ZXingのResultPointsは不安定なので、読めた値の概略y付近で黒が密集する矩形を実測する */
+function refineBox(canvas, approxYmin, approxYmax, approxX0, approxX1){
+  const W=canvas.width, H=canvas.height;
+  const ctx=canvas.getContext('2d');
+  // 概略帯を少し広げてサンプリング
+  const y0s=Math.max(0,Math.floor(approxYmin-(approxYmax-approxYmin)*0.5));
+  const y1s=Math.min(H,Math.ceil(approxYmax+(approxYmax-approxYmin)*0.5));
+  const hh=Math.max(1,y1s-y0s);
+  let img; try{ img=ctx.getImageData(0,y0s,W,hh).data; }catch(e){ return null; }
+  const lum=(i)=>0.299*img[i]+0.587*img[i+1]+0.114*img[i+2];
+  // 各列の暗画素数
+  const colDark=new Float32Array(W);
+  for(let x=0;x<W;x++){
+    let d=0;
+    for(let y=0;y<hh;y+=2){ const i=(y*W+x)*4; if(lum(i)<110) d++; }
+    colDark[x]=d;
+  }
+  const thr=Math.max(3, hh*0.12);   // 縞とみなす最低暗画素
+  // 探索xを概略バーコード位置の周辺に限定(本文・タイトルの黒を拾わないため)
+  let sx0=0, sx1=W;
+  if(isFinite(approxX0)&&isFinite(approxX1)&&approxX1>approxX0){
+    const m=(approxX1-approxX0)*0.6;
+    sx0=Math.max(0,Math.floor(approxX0-m)); sx1=Math.min(W,Math.ceil(approxX1+m));
+  }
+  let best=null, cur=null, gap=0;
+  const maxGap=Math.round(W*0.02);
+  for(let x=sx0;x<sx1;x++){
+    if(colDark[x]>=thr){
+      if(!cur) cur={x0:x,x1:x}; else { cur.x1=x; }
+      gap=0;
+    }else if(cur){
+      gap++; if(gap>maxGap){ if(!best||(cur.x1-cur.x0)>(best.x1-best.x0)) best=cur; cur=null; gap=0; }
+      else cur.x1=x;
+    }
+  }
+  if(cur&&(!best||(cur.x1-cur.x0)>(best.x1-best.x0))) best=cur;
+  if(!best||best.x1-best.x0< W*0.03) return null;
+  // 縦範囲: その列区間内で暗画素が出る行の範囲
+  let ymin=hh, ymax=0;
+  for(let y=0;y<hh;y++){
+    let d=0;
+    for(let x=best.x0;x<=best.x1;x+=2){ const i=(y*W+x)*4; if(lum(i)<110) d++; }
+    if(d> (best.x1-best.x0)*0.10){ if(y<ymin)ymin=y; if(y>ymax)ymax=y; }
+  }
+  if(ymax<=ymin) return null;
+  return {x0:best.x0, x1:best.x1, y0:y0s+ymin, y1:y0s+ymax};
+}
+
+/* バーコードの簡易品質判定: 複数の走査線で縞のrun-lengthを解析し、
+   EAN-13として妥当か(遷移数・バー幅の規格適合・走査線間の安定性)を見る。
+   線の欠け/かすれ/異常な隙間があると検出する。boxは0..1正規化座標。 */
+/* 縞検出box(t)と元box(o)から、左端は縞、幅は控えめ側を採って横広がりを抑える */
+function tightenWidth(o, t){
+  if(!t||!t.w) return o;
+  const ny=(t.y!=null?t.y:o.y), nh=(t.h!=null?t.h:o.h);
+  // 縞検出box(t)が元boxと大きく矛盾しない(幅・かつ中心Yが元boxの近傍にある)場合のみ採用。
+  // 中心Yのチェックが無いと、バーコード直上・直下の印字行(価格表示など)を
+  // 誤って「縞」と判定し、そちらを囲ってしまうことがある。
+  const oCy=o.y+o.h/2, nCy=ny+nh/2;
+  const yOk=Math.abs(nCy-oCy)<=o.h*0.6;
+  if(t.w>0.01 && t.w<=o.w*1.2 && yOk) return {x:t.x, y:ny, w:t.w, h:nh};
+  return o;
+}
+function checkBarcodeQuality(canvas, box, label){
+  const dbg=label?(...a)=>console.log('[品質診断詳細]',label,...a):()=>{};
+  const W=canvas.width, H=canvas.height, ctx=canvas.getContext('2d');
+  const px0=Math.max(0,Math.round(box.x*W)), py0=Math.max(0,Math.round(box.y*H));
+  const pw=Math.min(W-px0,Math.round(box.w*W)), ph=Math.min(H-py0,Math.round(box.h*H));
+  dbg('pw,ph', pw, ph);
+  if(pw<20||ph<10) return {ok:true, note:"領域が小さく品質判定をスキップ"};
+  let data; try{ data=ctx.getImageData(px0,py0,pw,ph).data; }catch(e){ return {ok:true,note:"判定不可"}; }
+  // 印刷PDFは「何も塗られていない=用紙の白」を表すため透明(alpha低)なことが多く、
+  // 特にcheckBarcodeQualityHiResの高解像度クロップ再レンダリングでは背景が
+  // 塗られない(透明)まま返ってくることがある。alphaを無視してRGBだけで輝度を
+  // 取ると、透明画素が黒(0,0,0)として読まれ、バーコードの白地部分まで「暗い」
+  // と誤判定してしまう。白背景に合成してから輝度を計算することでこれを防ぐ。
+  const lum=(x,y)=>{ const i=(y*pw+x)*4; const af=data[i+3]/255;
+    return af*(0.299*data[i]+0.587*data[i+1]+0.114*data[i+2])+(1-af)*255; };
+  // 1) バー本体の縦帯を特定(数字や余白を除く)。各行の暗画素数が多い行=バー
+  // 「暗い」の境目を輝度128の固定値にすると、バーが黒(K)以外のインキで
+  // 刷られている表紙で破綻する。例: シアン100%のバーは輝度が約136あり、
+  // 見た目は十分濃いのに「128より明るい＝紙の白」に分類されてしまい、
+  // バーが1本も見つからず「潰れ・かすれ」と誤検知する。実際の画素分布から
+  // 大津の方法でしきい値を決め、インキの色に依存しないようにする。
+  const hist=new Uint32Array(256); let nSamp=0, lmin=255, lmax=0;
+  for(let y=0;y<ph;y++) for(let x=0;x<pw;x+=2){
+    const v=lum(x,y)|0; hist[v]++; nSamp++;
+    if(v<lmin)lmin=v; if(v>lmax)lmax=v;
+  }
+  let hsum=0; for(let i=0;i<256;i++) hsum+=i*hist[i];
+  let wB=0,sumB=0,bestVar=-1,otsu=128;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(!wB) continue;
+    const wF=nSamp-wB; if(!wF) break;
+    sumB+=t*hist[t];
+    const d=sumB/wB-(hsum-sumB)/wF, v=wB*wF*d*d;
+    if(v>bestVar){ bestVar=v; otsu=t; }
+  }
+  // コントラストが乏しい領域では大津のしきい値はノイズを二分するだけなので、
+  // 従来通り128を使って「バー無し」に倒す。
+  const DARK = (lmax-lmin>=40) ? Math.max(40, Math.min(otsu, 230)) : 128;
+  dbg('lmin,lmax,otsu,DARK', lmin, lmax, otsu, DARK);
+  // バーのインキ色を控えておく(黒以外で刷られている場合の警告に使う)。
+  // しきい値ぎりぎりの画素はバーと紙の境界のアンチエイリアスなので、
+  // 濃い側だけを平均してインキ本来の色に近づける。
+  const INK = lmin + (DARK-lmin)*0.4;
+  let br=0,bg=0,bb=0,bn=0;
+  for(let y=0;y<ph;y++) for(let x=0;x<pw;x+=2){
+    if(lum(x,y)<INK){ const i=(y*pw+x)*4; const af=data[i+3]/255;
+      br+=af*data[i]+(1-af)*255; bg+=af*data[i+1]+(1-af)*255; bb+=af*data[i+2]+(1-af)*255; bn++; }
+  }
+  const barColor = bn ? {r:Math.round(br/bn), g:Math.round(bg/bn), b:Math.round(bb/bn)} : null;
+  const rowDark=[];
+  const sampleCnt=Math.ceil(pw/2);
+  for(let y=0;y<ph;y++){ let d=0; for(let x=0;x<pw;x+=2) if(lum(x,y)<DARK) d++; rowDark.push(d); }
+  const maxRD=Math.max(...rowDark,1);
+  // バー帯候補(連続する暗行のかたまり)を全部洗い出す。
+  // 「全体最大値の50%」という相対判定は、box周囲の余白に表紙の黒背景など
+  // 真っ黒な領域が写り込むと、そちらにmaxRDが引っ張られてバー本体の行
+  // (黒画素比率は本来45〜50%程度)が除外されてしまう。そのため、黒画素比率
+  // が「縞らしい範囲(20〜85%)」にあるかという絶対基準で判定する。
+  const yGapMax=Math.max(3,Math.round(ph*0.04));
+  const bands=[]; let b0=-1,gap=0;
+  for(let y=0;y<ph;y++){
+    const frac=rowDark[y]/sampleCnt;
+    if(frac>0.20 && frac<0.85){ if(b0<0)b0=y; gap=0; }
+    else if(b0>=0){ gap++; if(gap>yGapMax){ bands.push([b0,y-gap]); b0=-1; } }
+  }
+  if(b0>=0) bands.push([b0,ph-1]);
+  dbg('maxRD', maxRD, 'bands', JSON.stringify(bands));
+  if(!bands.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", barColor};
+  // バーコードの縞は、印字1行分の文字(かすれても数ピクセル程度)と比べて
+  // 縦方向にずっと厚みのある帯になる。「box中心に最も近い帯」を採用すると、
+  // バーコード直上・直下の印字行(価格表示など)をバー帯と誤認し、そちらを
+  // 囲ってしまう/品質異常と誤検知することがあるため、最も背の高い帯を採用する。
+  let ry0,ry1,bestH=-1;
+  for(const [a,b2] of bands){ const h=b2-a; if(h>bestH){bestH=h; ry0=a; ry1=b2;} }
+  // 採用した帯には、バー本体だけでなく直下の目視数字行まで含まれていることが多い。
+  // 数字行を混ぜたまま次の縦平均プロファイルを取ると、数字と数字の間の余白が
+  // 「大きな白ギャップ」と見なされ、バーコードが分割されてしまう。
+  // 走査線あたりの明暗の遷移数はバー本体で圧倒的に多いので、それを使って
+  // バー本体の行だけに絞り込む(枠表示用の帯 bandY0..bandY1 は元のまま残す)。
+  const bandY0=ry0, bandY1=ry1;
+  const trans=[];
+  for(let y=ry0;y<=ry1;y++){
+    let t=0, prev=lum(0,y)<DARK;
+    for(let x=2;x<pw;x+=2){ const d=lum(x,y)<DARK; if(d!==prev){ t++; prev=d; } }
+    trans.push(t);
+  }
+  const tMax=Math.max(...trans,0);
+  if(tMax>=20){
+    const tThr=tMax*0.6;
+    let bs=-1,bl=0,cs=-1;
+    for(let i=0;i<=trans.length;i++){
+      const on = i<trans.length && trans[i]>=tThr;
+      if(on){ if(cs<0) cs=i; }
+      else if(cs>=0){ if(i-cs>bl){ bl=i-cs; bs=cs; } cs=-1; }
+    }
+    if(bl>=Math.max(6,(ry1-ry0)*0.15)){ ry0=bandY0+bs; ry1=bandY0+bs+bl-1; }
+  }
+  dbg('bandY0,bandY1', bandY0, bandY1, '-> バー行 ry0,ry1', ry0, ry1, 'tMax', tMax);
+  // 2) 縞の実x範囲を特定。バー帯の縦平均プロファイルでrun-lengthを取り、
+  //    モジュール幅の数倍を超える白ギャップ(=本文との余白)で縞の連続を打ち切る
+  const prof=new Float32Array(pw);
+  for(let x=0;x<pw;x++){ let sm=0; for(let y=ry0;y<=ry1;y++) sm+=lum(x,y); prof[x]=sm/(ry1-ry0+1); }
+  let psum=0; for(let x=0;x<pw;x++) psum+=prof[x];
+  const pthr=psum/pw*0.85;
+  const pb=new Uint8Array(pw); for(let x=0;x<pw;x++) pb[x]=prof[x]<pthr?1:0;
+  dbg('pthr', pthr, 'darkCols', pb.reduce((s,v)=>s+v,0), 'profMin', Math.min(...prof), 'profMax', Math.max(...prof));
+  // run-length(開始位置付き)
+  const pruns=[]; let pc=pb[0],pl=1,ps=0;
+  for(let x=1;x<pw;x++){ if(pb[x]===pc) pl++; else{ pruns.push([pc,pl,ps]); pc=pb[x]; ps=x; pl=1; } }
+  pruns.push([pc,pl,ps]);
+  const ws=pruns.map(r=>r[1]).sort((a,b)=>a-b);
+  const mod=Math.max(1, ws[Math.floor(ws.length*0.2)]||2);
+  // 分割しきい値。EAN-13の要素は最大4モジュール、クワイエットゾーン(バーコード外の
+  // 余白)はクロップ端まで続くため遥かに長い。modは低解像度だと1px単位で量子化され
+  // 20%程度ずれるので、mod*5では正規の4モジュール幅の白まで「大きな隙間」と誤認して
+  // バーコードを分割してしまう(実測: 1モジュール3.8pxのJANで mod=3/4 により結果が反転)。
+  // 4モジュールとクワイエットゾーンの間には十分な開きがあるのでmod*8まで広げる。
+  const maxbar=mod*8;
+  dbg('numPruns', pruns.length, 'mod', mod, 'maxbar', maxbar);
+  // 大きな白ギャップ(maxbar超)でプロファイルを区切り、複数の候補区間(セグメント)を作る。
+  // その中で最もバー本数が多い区間を「本物の縞」として採用する。
+  // (単純に「最初の黒→最初の大ギャップ」で打ち切ると、box端に紛れ込んだ縁の黒画素
+  //  など孤立したノイズを先頭と誤認し、直後の余白で即座に打ち切ってしまうため)
+  const segments=[]; let segStart=0;
+  for(let idx=0; idx<pruns.length; idx++){
+    if(pruns[idx][1]>maxbar){
+      if(idx>segStart) segments.push(pruns.slice(segStart, idx));
+      segStart=idx+1;
+    }
+  }
+  if(segStart<pruns.length) segments.push(pruns.slice(segStart));
+  let best=null, bestBars=-1;
+  for(const seg of segments){
+    const bars=seg.filter(r=>r[0]===1).length;
+    if(bars>bestBars){ bestBars=bars; best=seg; }
+  }
+  dbg('numSegments', segments.length, 'segBarCounts', JSON.stringify(segments.map(s=>s.filter(r=>r[0]===1).length)), 'bestBars', bestBars);
+  if(best){
+    while(best.length && best[0][0]===0) best.shift();
+    while(best.length && best[best.length-1][0]===0) best.pop();
+  }
+  if(!best || !best.length) return {ok:false, note:"読み込みができません（バーコードを認識できません）", barColor};
+  const cx0=best[0][2], last=best[best.length-1], cx1=last[2]+last[1]-1;
+  dbg('cx0,cx1', cx0, cx1);
+  // 縞の実x範囲(元canvas正規化座標)を返す→枠補正に使う
+  const tightBox={x:(px0+cx0)/W, y:(py0+bandY0)/H, w:(cx1-cx0+1)/W, h:(bandY1-bandY0+1)/H};
+  // barBox は目視数字行を含まない「バー本体だけ」の範囲。OCR時にバーを白で塗る
+  // 用途に使う(tightBoxで塗るとバー直下の印字数字まで消えてしまうため)。
+  const barBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
+  // 3) バー帯内の複数走査線でrun-length
+  const lines=[]; const nScan=7;
+  for(let k=0;k<nScan;k++){
+    const y=Math.round(ry0+(ry1-ry0)*(0.2+0.6*k/(nScan-1)));
+    let sum=0,cnt=0; for(let x=cx0;x<=cx1;x++){ sum+=lum(x,y); cnt++; }
+    const thr=sum/cnt*0.82;
+    const b=[]; for(let x=cx0;x<=cx1;x++) b.push(lum(x,y)<thr?1:0);
+    const runs=[]; let cur=b[0],ln=1;
+    for(let i=1;i<b.length;i++){ if(b[i]===cur) ln++; else{ runs.push([cur,ln]); cur=b[i]; ln=1; } }
+    runs.push([cur,ln]);
+    while(runs.length&&runs[0][0]===0) runs.shift();
+    while(runs.length&&runs[runs.length-1][0]===0) runs.pop();
+    const bars=runs.filter(r=>r[0]===1).length;
+    if(bars){
+      const mods=runs.map(r=>r[1]).filter(n=>n>=1).sort((p,q)=>p-q);
+      const mod=Math.max(1, mods[Math.floor(mods.length*0.2)]||1); // 細い側20%点をモジュール幅とする
+      const maxRatio=Math.max(...runs.map(r=>r[1]))/mod;
+      lines.push({bars, trans:runs.length, maxRatio});
+    }
+  }
+  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox, barBox, barColor};
+  const med=arr=>{const a=[...arr].sort((p,q)=>p-q);return a[Math.floor(a.length/2)];};
+  const barsMed=med(lines.map(l=>l.bars));
+  const transMed=med(lines.map(l=>l.trans));
+  const maxRatioMed=med(lines.map(l=>l.maxRatio));
+  const transOutliers=lines.filter(l=>Math.abs(l.trans-transMed)>=6).length;
+  const issues=[];
+  // EAN-13: 黒バー30本/遷移59前後。端処理で前後するので幅を持たせる
+  // EAN-13は規格上、要素(白黒run)59・黒バー30が固定。1本でも欠けると遷移が2減る。
+  // 端処理のぶれを±1だけ許容し、それ以外は欠け/混入として検出する。
+  if(barsMed<29||barsMed>31) issues.push("読み込みができません（バーの欠け・余分の可能性）");
+  if(transMed<58||transMed>60) issues.push("読み込みができません（バーの欠け・つぶれの可能性）");
+  if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
+  if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
+  const uniq=[...new Set(issues)];
+  return {ok:issues.length===0, note:uniq.join(" / "), tightBox, barBox, barColor,
+          metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transOutliers}};
+}
+
+/* 品質判定を、検出用canvas(DETECT_SCALE=3.2固定)ではなく、
+   該当box部分だけをPDFから高解像度で再レンダリングした画像に対して行う。
+   バーコードが小さく印刷されている(例: 通常の90%縮小)場合、DETECT_SCALEが
+   固定倍率のためモジュール幅のピクセル数が不足し、アンチエイリアスの影響で
+   バーの融合/欠落を誤検出しやすい。box部分だけを高倍率で再レンダリングし、
+   モジュールあたりのピクセル数を確保することで誤判定を防ぐ。 */
+const QUALITY_TARGET_PX = 480;   // 品質判定用に確保したいバー領域の目安ピクセル幅
+const QUALITY_MAX_SCALE = 14;    // 再レンダリング倍率の上限(メモリ・速度対策)
+const QUALITY_PAD = 0.15;        // クロップ時に周囲へ持たせる余白(縁の欠けを防ぐ)
+async function checkBarcodeQualityHiRes(page, box, label, rot){
+  if(!box || !box.w || !box.h) return {ok:true, note:"判定不可"};
+  const base=page.getViewport({scale:1});
+  // 縦向きバーコードでは、95モジュールが並ぶ方向は box の高さ側になる
+  const codeSpan = rot ? box.h*base.height : box.w*base.width;
+  const rawScale=QUALITY_TARGET_PX/Math.max(codeSpan,1);
+  const scale=Math.min(Math.max(rawScale, DETECT_SCALE), QUALITY_MAX_SCALE);
+  const vp=page.getViewport({scale});
+  const padX=box.w*(rot?0.03:QUALITY_PAD), padY=box.h*(rot?QUALITY_PAD:0.03);
+  const cx0=Math.max(0, Math.floor((box.x-padX)*vp.width));
+  const cy0=Math.max(0, Math.floor((box.y-padY)*vp.height));
+  const cx1=Math.min(vp.width,  Math.ceil((box.x+box.w+padX)*vp.width));
+  const cy1=Math.min(vp.height, Math.ceil((box.y+box.h+padY)*vp.height));
+  const cw=Math.max(1, cx1-cx0), ch=Math.max(1, cy1-cy0);
+  let cv, ctx;
+  try{
+    cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+    ctx=cv.getContext('2d');
+    // クロップ再レンダリングでは、PDF側で何も塗られていない(=用紙の白を意味する)
+    // 部分が透明のまま残ることがあるため、先に白で塗り潰しておく
+    ctx.fillStyle="#fff"; ctx.fillRect(0,0,cw,ch);
+    ctx.translate(-cx0,-cy0);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+  }catch(e){ return {ok:true, note:"判定不可(高解像度レンダ失敗)"}; }
+  let localBox={
+    x:(box.x*vp.width-cx0)/cw, y:(box.y*vp.height-cy0)/ch,
+    w:box.w*vp.width/cw,       h:box.h*vp.height/ch
+  };
+  // 縦向きの場合はクロップを90°回して縞を縦向きに直してから解析する。
+  // 検出側と同じ変換(元(x,y)→回転後(高さ-y, x))を使うので、戻す式も共通。
+  let src=cv, rw=cw, rh=ch;
+  if(rot){
+    const rc=document.createElement('canvas'); rc.width=ch; rc.height=cw;
+    const rx=rc.getContext('2d');
+    rx.fillStyle="#fff"; rx.fillRect(0,0,rc.width,rc.height);
+    rx.translate(rc.width,0); rx.rotate(Math.PI/2); rx.drawImage(cv,0,0);
+    src=rc; rw=ch; rh=cw;
+    localBox={ x:1-localBox.y-localBox.h, y:localBox.x, w:localBox.h, h:localBox.w };
+  }
+  const q=checkBarcodeQuality(src, localBox, label);
+  // 回転解析の座標 → クロップ座標 → ページ全体の正規化座標 の順に戻す
+  const unrot=r=> rot ? {x:r.y, y:1-r.x-r.w, w:r.h, h:r.w} : r;
+  const toPage=r=>{ r=unrot(r);
+    return { x:(r.x*cw+cx0)/vp.width, y:(r.y*ch+cy0)/vp.height,
+             w:r.w*cw/vp.width,       h:r.h*ch/vp.height }; };
+  if(q.tightBox) q.tightBox=toPage(q.tightBox);
+  if(q.barBox)   q.barBox=toPage(q.barBox);
+  return q;
+}
+
+
+
+/* 縦向きバーコードの「バーの長さ方向」(ページ上の x)を画素から測り直す。
+   回転再探索では、この軸の値が走査線の当たった位置の分布から来るため
+   実際より短く・中心もずれて出る。95モジュールが並ぶ y 方向は
+   ZXingの結果点から正確に取れているので、その帯の中で
+   「列ごとの明暗の遷移数」が多い区間＝バー本体、として範囲を決める。 */
+function refineRotBoxX(canvas, box){
+  const W=canvas.width, H=canvas.height;
+  const y0=Math.max(0, Math.round(box.y*H)), y1=Math.min(H-1, Math.round((box.y+box.h)*H));
+  if(y1-y0<8) return box;
+  let data;
+  try{ data=canvas.getContext('2d').getImageData(0,y0,W,y1-y0+1).data; }catch(e){ return box; }
+  const rows=y1-y0+1;
+  const lum=(x,y)=>{ const i=(y*W+x)*4, a=data[i+3]/255;
+    return 0.299*(a*data[i]+(1-a)*255)+0.587*(a*data[i+1]+(1-a)*255)+0.114*(a*data[i+2]+(1-a)*255); };
+  // 帯全体の輝度分布から暗さのしきい値を決める(インキ色に依存しないように)
+  let lmin=255,lmax=0;
+  for(let y=0;y<rows;y+=2) for(let x=0;x<W;x+=2){ const v=lum(x,y); if(v<lmin)lmin=v; if(v>lmax)lmax=v; }
+  if(lmax-lmin<40) return box;
+  const DARK=(lmin+lmax)/2;
+  const tr=new Int32Array(W);
+  for(let x=0;x<W;x++){
+    let t=0, prev=lum(x,0)<DARK;
+    for(let y=1;y<rows;y++){ const d=lum(x,y)<DARK; if(d!==prev){ t++; prev=d; } }
+    tr[x]=t;
+  }
+  let tmax=0; for(let x=0;x<W;x++) if(tr[x]>tmax) tmax=tr[x];
+  if(tmax<20) return box;                 // バーらしい縞が無い
+  const thr=Math.max(8, tmax*0.5);
+  let bs=-1,bl=0,cs=-1;
+  for(let x=0;x<=W;x++){
+    const on = x<W && tr[x]>=thr;
+    if(on){ if(cs<0) cs=x; }
+    else if(cs>=0){ if(x-cs>bl){ bl=x-cs; bs=cs; } cs=-1; }
+  }
+  if(bl<Math.max(8, W*0.02)) return box;
+  const padX=W*0.02;
+  return {x:Math.max(0,(bs-padX)/W), y:box.y, w:Math.min(1,(bl+padX*2)/W), h:box.h};
+}
+/* canvasから上下2段を含む全EAN-13を帯スキャンで収集 */
+function scanBarcodes(canvas){
+  const W=canvas.width, H=canvas.height;
+  const hits={};        // value -> [{y,x0,x1}, ...]
+  let rotSeen=false;    // ZXingが内部回転で読んだ＝ページ内容が縦向きの可能性
+  function record(r,offY,useX){
+    if(!r) return;
+    if(r.rotated){ rotSeen=true; return; }  // 座標が使えないので採用しない
+    const v=r.text;
+    if(!hits[v]) hits[v]=[];
+    hits[v].push({y:r.y+offY, x0:useX?r.x0:null, x1:useX?r.x1:null});
+  }
+  // 全面スキャンは検出専用。座標は信頼度が低いので box 集計には使わない(useX=false)
+  record(decodeCanvas(canvas),0,false);
+  const bandH=Math.max(24,Math.round(H*0.16)), step=Math.max(12,Math.round(H*0.07));
+  const band=document.createElement('canvas'); band.width=W; band.height=bandH;
+  const bx=band.getContext('2d');
+  for(let top=0; top+bandH<=H; top+=step){
+    bx.clearRect(0,0,W,bandH);
+    bx.drawImage(canvas,0,top,W,bandH,0,0,W,bandH);  // 帯はフル幅なのでx座標はそのまま
+    record(decodeCanvas(band),top,true);
+  }
+  const median=arr=>{ const a=[...arr].sort((p,q)=>p-q); const n=a.length; return n?(n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2):0; };
+  // 同じ値のバーコードが1ページに複数ある(スリップは坊主と売上カードに同じISBNを刷る)
+  // 場合、値だけで束ねると2本の中間に枠が落ちてしまう。位置で塊に分ける。
+  const clusterGap=Math.max(bandH*1.6, H*0.08);
+  const out=[];
+  const pad=H*0.045, padX=W*0.012;
+  for(const v of Object.keys(hits)){
+    const ds=hits[v].slice().sort((a,b)=>a.y-b.y);
+    const groups=[]; let cur=[ds[0]];
+    for(let i=1;i<ds.length;i++){
+      if(ds[i].y-cur[cur.length-1].y>clusterGap){ groups.push(cur); cur=[ds[i]]; }
+      else cur.push(ds[i]);
+    }
+    groups.push(cur);
+    for(const g of groups){
+      const ys=g.map(d=>d.y);
+      const xs0=g.filter(d=>d.x0!=null).map(d=>d.x0);
+      const xs1=g.filter(d=>d.x1!=null).map(d=>d.x1);
+      const ymin=Math.min(...ys), ymax=Math.max(...ys);
+      const x0=xs0.length?median(xs0):0, x1=xs1.length?median(xs1):W;
+      out.push({value:v,
+        box:{x:(x0-padX)/W, y:(ymin-pad)/H, w:(x1-x0+padX*2)/W, h:(ymax-ymin+pad*2)/H}});
+    }
+  }
+  out.rotSeen=rotSeen;
+  return out;
+}
+
+/* ---------- pdf.js 実テキスト抽出 ---------- */
+
+/* OCR-B等のシンボリックフォントは、バー下の数字を通常の'0'〜'9'ではなく
+   私用領域(U+F030〜F039)の符号で持っていることがある。ToUnicodeが効かず
+   「□□□□」になって印字照合が落ちるため、U+F000のオフセットを剥がす。 */
+function normalizePuaDigits(str){
+  if(!str || !/[\uF000-\uF0FF]/.test(str)) return str;
+  return str.replace(/[\uF000-\uF0FF]/g, c=>{
+    const n=c.charCodeAt(0)-0xF000;
+    return (n>=0x20 && n<=0x7E) ? String.fromCharCode(n) : c;
+  });
+}
+
+/* テンプレートのダミー印字(ゼロ埋め)を印字候補から外す。
+   実在のISBN・Cコード・価格が全桁ゼロになることはないので、
+   全桁ゼロのパターンだけを安全に落とせる。 */
+function stripDummyPrint(txt){
+  if(!txt) return txt;
+  return txt
+    .replace(/ISBN[\s0\-]*0[\s0\-]*(?![0-9])/gi, " ")
+    .replace(/\bC0000\b/g, " ")
+    .replace(/[¥\\]\s*0+\s*E?\b/g, " ")
+    .replace(/本体\s*0+\s*円/g, " ")
+    .replace(/\s{2,}/g, " ").trim();
+}
+
+/* --- 目視されない(＝印刷されない)テキストの検出 ---
+   PDFは「描いた順に上へ重ねる」構造なので、あるテキストより後に、
+   そのテキストを覆う不透明なベタ塗りが描かれていれば、その文字は
+   最終的に見えない＝印刷されない。テンプレートのダミー印字の上に
+   白いフタを置き、その上に正しい印字をアウトラインで乗せる作りの
+   データで、getTextContent()が下敷きのダミーを拾ってしまうのを防ぐ。
+   pdf.jsの操作リスト(描画順)からCTM・クリップ・不透明度を追跡して判定する。 */
+const _hiddenRunsCache=new WeakMap();
+function _pathToRect(ops,coords,mm){
+  const O=pdfjsLib.OPS;
+  if(!mm) return null;
+  if(ops.every(o=>o===O.rectangle)) return [mm[0],mm[2],mm[1],mm[3]];
+  if(!ops.every(o=>o===O.moveTo||o===O.lineTo||o===O.closePath)) return null;
+  const pts=[]; for(let i=0;i+1<coords.length;i+=2) pts.push([coords[i],coords[i+1]]);
+  if(pts.length<4||pts.length>5) return null;
+  for(const p of pts){
+    const onX=Math.abs(p[0]-mm[0])<0.01||Math.abs(p[0]-mm[1])<0.01;
+    const onY=Math.abs(p[1]-mm[2])<0.01||Math.abs(p[1]-mm[3])<0.01;
+    if(!(onX&&onY)) return null;
+  }
+  return [mm[0],mm[2],mm[1],mm[3]];
+}
+function _devRect(r,ctm){
+  const U=pdfjsLib.Util;
+  const a=U.applyTransform([r[0],r[1]],ctm), b=U.applyTransform([r[2],r[3]],ctm);
+  return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
+}
+function _isectRect(a,b){
+  if(!a) return b; if(!b) return a;
+  const r=[Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])];
+  return (r[0]<r[2]&&r[1]<r[3])?r:[0,0,0,0];
+}
+async function hiddenTextRuns(page){
+  if(_hiddenRunsCache.has(page)) return _hiddenRunsCache.get(page);
+  let out=[];
+  try{
+    const O=pdfjsLib.OPS, U=pdfjsLib.Util;
+    const vp=page.getViewport({scale:1});
+    const ol=await page.getOperatorList();
+    const F=ol.fnArray, A=ol.argsArray;
+    const inv={}; for(const k in O) inv[O[k]]=k;
+    let ctm=vp.transform.slice(), alpha=1, clip=null, clipExact=true;
+    const st=[];
+    let tm=null,tlm=null,leading=0,fsize=0,cs=0,ws=0,pend=null,clipPending;
+    const fills=[], texts=[];
+    for(let i=0;i<F.length;i++){
+      const n=inv[F[i]], a=A[i];
+      switch(n){
+        case 'save': st.push({ctm:ctm.slice(),alpha,clip:clip&&clip.slice(),clipExact}); break;
+        case 'restore': { const s=st.pop(); if(s){ctm=s.ctm;alpha=s.alpha;clip=s.clip;clipExact=s.clipExact;} break; }
+        case 'transform': ctm=U.transform(ctm,a); break;
+        case 'setGState': for(const kv of (a[0]||[])){ if(kv[0]==='ca') alpha=kv[1]; if(kv[0]==='SMask'&&kv[1]) clipExact=false; } break;
+        case 'constructPath': pend=_pathToRect(a[0],a[1],a[2]); break;
+        case 'clip': case 'eoClip': clipPending = pend ? _devRect(pend,ctm) : 'complex'; break;
+        case 'endPath':
+          if(clipPending!==undefined){
+            if(clipPending==='complex') clipExact=false; else clip=_isectRect(clip,clipPending);
+            clipPending=undefined;
+          }
+          pend=null; break;
+        case 'fill': case 'eoFill': case 'fillStroke': case 'eoFillStroke':
+          if(pend && alpha>=0.999 && clipExact){
+            let r=_isectRect(_devRect(pend,ctm), clip);
+            if(r[2]>r[0] && r[3]>r[1]) fills.push({i,rect:r});
+          }
+          pend=null; break;
+        case 'beginText': tm=[1,0,0,1,0,0]; tlm=tm.slice(); break;
+        case 'setTextMatrix': tm=a.slice(); tlm=a.slice(); break;
+        case 'setLeading': leading=a[0]; break;
+        case 'setLeadingMoveText': leading=-a[1]; tlm=U.transform(tlm,[1,0,0,1,a[0],a[1]]); tm=tlm.slice(); break;
+        case 'setFont': fsize=a[1]; break;
+        case 'setCharSpacing': cs=a[0]; break;
+        case 'setWordSpacing': ws=a[0]; break;
+        case 'moveText': tlm=U.transform(tlm,[1,0,0,1,a[0],a[1]]); tm=tlm.slice(); break;
+        case 'nextLine': tlm=U.transform(tlm,[1,0,0,1,0,-leading]); tm=tlm.slice(); break;
+        case 'showText': {
+          if(!tm) break;
+          let s="",adv=0;
+          for(const g of (a[0]||[])){
+            if(typeof g==='number'){ adv-=g/1000*fsize; continue; }
+            if(!g) continue;
+            s+=(g.unicode!=null?g.unicode:"");
+            adv+=g.width/1000*fsize+cs+(g.isSpace?ws:0);
+          }
+          if(s.trim()){
+            const M=U.transform(ctm,tm);
+            const p0=U.applyTransform([0,0],M), p1=U.applyTransform([adv,0],M);
+            texts.push({i,x0:p0[0],y0:p0[1],x1:p1[0],y1:p1[1]});
+          }
+          tm=U.transform(tm,[1,0,0,1,adv,0]);
+          break;
+        }
+      }
+    }
+    for(const t of texts){
+      const a=Math.min(t.x0,t.x1), b=Math.max(t.x0,t.x1), w=Math.max(b-a,0.01);
+      const f=fills.find(f=>{
+        if(f.i<=t.i) return false;
+        if(t.y0<f.rect[1]-0.5 || t.y0>f.rect[3]+0.5) return false;
+        return (Math.min(b,f.rect[2])-Math.max(a,f.rect[0]))/w >= 0.9;
+      });
+      if(f) out.push({x0:a, x1:b, y:t.y0});
+    }
+  }catch(e){ out=[]; }   // 解析できないPDFでは従来通り全テキストを使う
+  _hiddenRunsCache.set(page,out);
+  return out;
+}
+function _isHiddenAt(runs, x, y, scale){
+  const tol=2*scale;
+  for(const r of runs){
+    if(Math.abs(y-r.y*scale)<=tol && x>=r.x0*scale-tol && x<=r.x1*scale+tol) return true;
+  }
+  return false;
+}
+
+async function pageTextItems(page,scale){
+  const vp=page.getViewport({scale});
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const hidden=await hiddenTextRuns(page);
+  const out=[];
+  for(const it of tc.items){
+    if(!it.str || !it.str.trim()) continue;
+    const m=pdfjsLib.Util.transform(vp.transform,it.transform);
+    const x=m[4], y=m[5], w=(it.width||0)*scale;
+    if(hidden.length && _isHiddenAt(hidden,x,y,scale)) continue; // 白フタの下＝印刷されない
+    out.push({str:normalizePuaDigits(it.str), x, y, w}); // x,y はデバイス座標(左上原点), yはベースライン
+  }
+  return out;
+}
+/* バーコード群の近傍テキストを連結 */
+function textNearBarcodes(items,boxesPx,W,H){
+  if(!boxesPx.length) return "";
+  let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
+  let y0=Math.min(...boxesPx.map(b=>b.y)), y1=Math.max(...boxesPx.map(b=>b.y+b.h));
+  const bw=x1-x0, bh=y1-y0;
+  // 綴じ向き・デザインで印字位置(左/右/上/下)が変わるため、四方を広めに探索する
+  const rx0=x0-bw*1.4, rx1=x1+bw*1.4, ry0=y0-bh*1.8, ry1=y1+bh*2.2;
+  return items.filter(t=>t.x+ t.w>rx0 && t.x<rx1 && t.y>ry0 && t.y<ry1)
+              .sort((a,b)=>a.y-b.y||a.x-b.x).map(t=>t.str).join(" ");
+}
+
+/* ---------- OCR フォールバック ---------- */
+async function ensureOcr(){
+  if(ocrWorker) return ocrWorker;
+  if(typeof Tesseract==='undefined') throw new Error('Tesseract.js未読込');
+  ocrWorker=await Tesseract.createWorker('eng');
+  const psm=(window.Tesseract&&Tesseract.PSM&&Tesseract.PSM.SINGLE_BLOCK)||'6';
+  try{ await ocrWorker.setParameters({tessedit_pageseg_mode:psm}); }catch(e){}
+  // whitelistは付けない方が誤読しにくいことがあるため、既定は外す。必要十分な文字のみ後段の正規表現で抽出する
+  return ocrWorker;
+}
+/* バーコード周囲の「白いラベル面」の実際の外形を検出し、OCR切り出し範囲とする。
+   表紙デザインによっては、固定倍率の余白だけで切り出すと、隣接する大きな見出し文字や
+   色地のイラストまで巻き込んでしまい、OCRの結果が丸ごと崩れることがある(実例：
+   バーコード右側に大きなタイトル文字がある表紙で、OCRが完全な誤読文字列を返す)。
+   バーコードラベルは通常、印刷面の中で白地の版下として作られているため、
+   四方それぞれについて「白地が続く範囲」を実測し、そこまでを切り出し範囲とする。
+   デザイン上の理由で白地がほとんど無い場合に備え、上限(従来の固定倍率)は残す。 */
+function detectLabelCrop(canvas, x0,y0,x1,y1){
+  const W=canvas.width, H=canvas.height, ctx=canvas.getContext('2d');
+  const bw=x1-x0, bh=y1-y0;
+  if(bw<=0||bh<=0) return null;
+  const capL=bw*2.0, capR=bw*2.0, capT=bh*0.8, capB=bh*0.8;
+  const rx0=Math.max(0,Math.floor(x0-capL)), rx1=Math.min(W,Math.ceil(x1+capR));
+  const ry0=Math.max(0,Math.floor(y0-capT)), ry1=Math.min(H,Math.ceil(y1+capB));
+  const rw=rx1-rx0, rh=ry1-ry0;
+  if(rw<=0||rh<=0) return null;
+  let data; try{ data=ctx.getImageData(rx0,ry0,rw,rh).data; }catch(e){ return null; }
+  const WHITE=232, WHITE_FRAC=0.55;
+  const STEP=Math.max(2,Math.round(Math.min(bw,bh)*0.02));
+  const isWhite=(lx,ly)=>{ if(lx<0||lx>=rw||ly<0||ly>=rh) return false;
+    const i=(ly*rw+lx)*4; return data[i]>WHITE&&data[i+1]>WHITE&&data[i+2]>WHITE; };
+  const ySamp=[]; for(let ly=Math.max(0,Math.round(y0-ry0));ly<=Math.min(rh-1,Math.round(y1-ry0));ly+=2) ySamp.push(ly);
+  const xSamp=[]; for(let lx=Math.max(0,Math.round(x0-rx0));lx<=Math.min(rw-1,Math.round(x1-rx0));lx+=2) xSamp.push(lx);
+  if(!ySamp.length||!xSamp.length) return null;
+  const colWhiteFrac=(lx)=>{ let c=0; for(const ly of ySamp) if(isWhite(lx,ly)) c++; return c/ySamp.length; };
+  const rowWhiteFrac=(ly)=>{ let c=0; for(const lx of xSamp) if(isWhite(lx,ly)) c++; return c/xSamp.length; };
+  const x0l=Math.round(x0-rx0), x1l=Math.round(x1-rx0), y0l=Math.round(y0-ry0), y1l=Math.round(y1-ry0);
+  let padL=0; for(let d=STEP; d<=capL; d+=STEP){ if(colWhiteFrac(x0l-d)<WHITE_FRAC) break; padL=d; }
+  let padR=0; for(let d=STEP; d<=capR; d+=STEP){ if(colWhiteFrac(x1l+d)<WHITE_FRAC) break; padR=d; }
+  let padT=0; for(let d=STEP; d<=capT; d+=STEP){ if(rowWhiteFrac(y0l-d)<WHITE_FRAC) break; padT=d; }
+  let padB=0; for(let d=STEP; d<=capB; d+=STEP){ if(rowWhiteFrac(y1l+d)<WHITE_FRAC) break; padB=d; }
+  const margin=Math.max(4,Math.round(Math.min(bw,bh)*0.04));
+  return {
+    cx0: Math.max(0, x0-padL-margin), cx1: Math.min(W, x1+padR+margin),
+    cy0: Math.max(0, y0-padT-margin), cy1: Math.min(H, y1+padB+margin)
+  };
+}
+/* OCRでバーコードの縞を白く塗り潰す範囲。品質判定が実測したバー本体(barBox)があれば
+   それを使い、無ければZXingの検出枠にフォールバックする。検出枠は縦にページ高の4.5%も
+   余白を持つため、そのまま塗るとバー直下の目視数字や、その下の印字(ISBN・Cコード・
+   価格)まで消えてしまい、OCRが何も読めなくなる。 */
+function maskBoxesPx(canvas, qualities, fallbackPx){
+  const W=canvas.width, H=canvas.height;
+  return fallbackPx.map((b,i)=>{
+    const bb=qualities[i] && qualities[i].barBox;
+    return bb ? {x:bb.x*W, y:bb.y*H, w:bb.w*W, h:bb.h*H} : b;
+  });
+}
+async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
+  if(!boxesPx.length) return "";
+  const W=canvas.width,H=canvas.height;
+  let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
+  let y0=Math.min(...boxesPx.map(b=>b.y)), y1=Math.max(...boxesPx.map(b=>b.y+b.h));
+  const bw=x1-x0,bh=y1-y0;
+  // 印字位置はデザイン依存なので、まず周囲の白いラベル面の実際の外形を検出して切り出す。
+  // 検出できない場合のみ、従来通りの固定倍率(四方を広めに)にフォールバックする。
+  const det=detectLabelCrop(canvas,x0,y0,x1,y1);
+  let cx0,cx1,cy0,cy1;
+  if(det){ cx0=det.cx0; cx1=det.cx1; cy0=det.cy0; cy1=det.cy1; }
+  else{
+    cx0=Math.max(0,x0-bw*2.0); cx1=Math.min(W,x1+bw*2.0);
+    cy0=Math.max(0,y0-bh*0.8); cy1=Math.min(H,y1+bh*0.8);
+  }
+  const cw=cx1-cx0, ch=cy1-cy0; if(cw<10||ch<10) return "";
+  const up=3, tmp=document.createElement('canvas');
+  tmp.width=cw*up; tmp.height=ch*up;
+  const tg=tmp.getContext('2d');
+  tg.drawImage(canvas,cx0,cy0,cw,ch,0,0,cw*up,ch*up);
+  // バーコードの黒縞があるとOCRの行認識が乱れるので、縞の部分だけを白で塗って印字は残す
+  tg.fillStyle='#fff';
+  const masks = (maskPx && maskPx.length===boxesPx.length) ? maskPx : boxesPx;
+  const tight = masks!==boxesPx;   // 実測のバー範囲なら余白は最小限でよい
+  masks.forEach(b=>{
+    const padX=(tight?3:8)*up, padY=(tight?2:10)*up;
+    tg.fillRect((b.x-cx0)*up-padX, (b.y-cy0)*up-padY, b.w*up+padX*2, b.h*up+padY*2);
+  });
+  // 縦向きのデータ(スリップ等)は印字も90°回っているため、そのままではOCRが読めない。
+  // さらにスリップは坊主と売上カードを天地逆に並べて刷るので、同じ紙面でも
+  // 印字の向きが±90°の両方あり得る。両方向を試して読めた方を採用する。
+  // 単語座標は回転後のものになりマーカー表示に使えないので、その場合は座標を返さない。
+  const rotCanvas=(srcCv,cw2)=>{
+    const rc=document.createElement('canvas'); rc.width=srcCv.height; rc.height=srcCv.width;
+    const rx=rc.getContext('2d');
+    rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
+    if(cw2){ rx.translate(rc.width,0); rx.rotate(Math.PI/2); }
+    else   { rx.translate(0,rc.height); rx.rotate(-Math.PI/2); }
+    rx.drawImage(srcCv,0,0);
+    return rc;
+  };
+  const cands = rot ? [rotCanvas(tmp,true), rotCanvas(tmp,false)] : [tmp];
+  try{
+    const w=await ensureOcr();
+    let best=null;
+    for(const img of cands){
+      const {data}=await w.recognize(img);
+      const text=data.text||"";
+      // ISBN・Cコード・価格らしい並びが取れているものを優先する
+      let score=0;
+      if(/ISBN|97[89]\d{10}/.test(text)) score+=100;
+      if(/C\s*\d{4}/.test(text)) score+=30;
+      if(/[¥\\]\s*\d{3,5}/.test(text)) score+=30;
+      score+=(text.match(/\d/g)||[]).length;
+      if(!best||score>best.score) best={score,text,data,img};
+    }
+    const text=best.text;
+    const words=rot?[]:collectWords(best.data).map(wd=>{
+      const b=wd.bbox||{}; 
+      return {text:(wd.text||"").trim(),
+              x:(cx0+((b.x0||0)/up))/W, y:(cy0+((b.y0||0)/up))/H,
+              w:(((b.x1||0)-(b.x0||0))/up)/W, h:(((b.y1||0)-(b.y0||0))/up)/H};
+    });
+    window.__lastOcr={img:best.img.toDataURL('image/png'), text};
+    return {text, words};
+  }catch(e){ window.__lastOcr={img:cands[0].toDataURL('image/png'), text:'[OCR error] '+e}; return {text:"",words:[]}; }
+}
+/* Tesseractのデータ構造から単語配列を取り出す(v5は blocks→paragraphs→lines→words) */
+function pickMarks(words, rep){
+  if(!words||!words.length) return [];
+  const targets=[];
+  const isbn=rep.isbn&&(rep.isbn.isbn13||rep.isbn.raw);
+  if(isbn){ targets.push(isbn); targets.push(isbn.slice(-7)); } // 末尾も手掛かりに
+  if(rep.dnc){ targets.push("C"+rep.dnc.ccode); targets.push(String(rep.dnc.ccode)); 
+               targets.push(String(rep.dnc.price)); targets.push(rep.dnc.price.toLocaleString()); }
+  if(rep.jan&&rep.jan.jan13){ targets.push(rep.jan.jan13); }
+  const out=[];
+  for(const wd of words){
+    const raw=(wd.text||"").replace(/\s/g,"");
+    if(!raw) continue;
+    const dg=ocrFixDigits(raw).replace(/[^0-9A-Za-z]/g,"");
+    const hit=targets.some(t=>{ const tt=t.replace(/[^0-9A-Za-z]/g,""); return tt.length>=3 && (dg.includes(tt)||raw.includes(t)); });
+    if(hit && wd.w>0 && wd.h>0) out.push({x:wd.x,y:wd.y,w:wd.w,h:wd.h});
+  }
+  return out;
+}
+function collectWords(data){
+  if(Array.isArray(data.words)) return data.words;
+  const out=[];
+  (data.blocks||[]).forEach(bl=>(bl.paragraphs||[]).forEach(pa=>(pa.lines||[]).forEach(ln=>(ln.words||[]).forEach(w=>out.push(w)))));
+  return out;
+}
+
+/* ---------- バーコードのペアリング(1段目↔2段目) ---------- */
+function buildSets(bars){
+  const isbns=bars.filter(b=>/^(978|979)/.test(b.value));
+  const dncs =bars.filter(b=>/^(192|191)/.test(b.value));
+  const others=bars.filter(b=>!/^(978|979|192|191)/.test(b.value));
+  const sets=[]; const usedD=new Set();
+  for(const i of isbns){
+    let best=-1,bestDy=1e9;
+    dncs.forEach((d,idx)=>{ if(usedD.has(idx))return;
+      const dy=Math.abs((d.box.y+d.box.h/2)-(i.box.y+i.box.h/2));
+      if(dy<bestDy){bestDy=dy;best=idx;}});
+    let d=null; if(best>=0){d=dncs[best];usedD.add(best);}
+    sets.push({isbn:i,dnc:d});
+  }
+  dncs.forEach((d,idx)=>{ if(!usedD.has(idx)) sets.push({isbn:null,dnc:d}); });
+  others.forEach(o=>sets.push({isbn:null,dnc:null,other:o})); // EAN-13だが書籍以外
+  return sets;
+}
+
+/* スリップ(売上カード)判定。
+   スリップはISBNバーコードだけを刷るのが正規の仕様で、日本図書コード(2段目)は無い。
+   通常の表紙・カバーと同じ「2段目の欠落」警告を出すと毎回の誤検知になるため、
+   細長い紙面(短辺100mm以下・縦横比3倍以上)で2段目が無く、
+   バーコードが縦向き、あるいは「売上カード」等の文字がある場合はスリップとみなす。 */
+function isSlipLayout(page, items, bars){
+  if(bars.some(b=>/^(192|191)/.test(b.value))) return false;   // 2段目があるなら表紙・カバー
+  if(!bars.some(b=>/^(978|979)/.test(b.value))) return false;
+  const txt=(items||[]).map(t=>t.str).join("");
+  if(/売上カード|スリップ|短冊|補充注文/.test(txt)) return true;
+  const v=page.getViewport({scale:1});
+  const shortPt=Math.min(v.width,v.height), longPt=Math.max(v.width,v.height);
+  const slim = longPt/shortPt>=3 && shortPt<=283;              // 283pt ≒ 100mm
+  return slim && bars.some(b=>b.rot);
+}
+
+/* ---------- ページ解析 ---------- */
+async function analyzePage(pageNum){
+  const page=await pdfDoc.getPage(pageNum);
+  const vp=page.getViewport({scale:DETECT_SCALE});
+  const cv=document.createElement('canvas');
+  cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+
+  let bars=scanBarcodes(cv);
+  // 縦向きバーコードへの対応。ZXingは内部で90°回転して読んでしまうことがあり、
+  // その検出は座標が使えないので scanBarcodes 側で捨てて rotSeen を立てている。
+  // スリップのように紙面全体が縦向きのデータでは通常向きで0件になるため、
+  // チェックボックスに頼らず自動で回転再探索する。
+  const needRot = bars.rotSeen || bars.length===0;
+  if(needRot || ($("#optRot").checked && bars.length<2)){
+    // 90°回転して再探索（縦置きバーコード対応）
+    const rc=document.createElement('canvas'); rc.width=cv.height; rc.height=cv.width;
+    const rx=rc.getContext('2d'); rx.translate(rc.width,0); rx.rotate(Math.PI/2); rx.drawImage(cv,0,0);
+    const rb=scanBarcodes(rc);
+    // 回転座標→元座標へ：元(x,y)は回転後(H-y, x)に写るので、逆変換は x=y', y=1-x'
+    rb.forEach(b=>{ let nb={x:b.box.y, y:1-b.box.x-b.box.w, w:b.box.h, h:b.box.w};
+      nb=refineRotBoxX(cv, nb);   // バー長方向を画素から測り直す
+      bars.push({value:b.value,box:nb,rot:true}); });
+    // 回転側で見つかった値と同じものが通常向きにもある場合は、通常向きを優先して重複を除く
+    const seen=new Set();
+    bars=bars.filter(b=>{ const k=b.value+'@'+Math.round(b.box.y*40)+','+Math.round(b.box.x*40);
+      if(seen.has(k)) return false; seen.add(k); return true; });
+  }
+
+  const sets=buildSets(bars);
+  // 近傍テキスト：実テキスト→無ければOCR
+  const items=await pageTextItems(page,DETECT_SCALE);
+  const slipLayout=isSlipLayout(page, items, bars);
+  const py=await ensurePy(); const runCheck=py.globals.get('run_check');
+  const runCheckJan=py.globals.get('run_check_jan');
+
+  const results=[];
+  for(const s of sets){
+    if(s.other){
+      // 書籍コード(978/979/192/191)以外のEAN-13＝販売用JAN等。専用の照合コアで検証する。
+      const boxesPx=[{x:s.other.box.x*cv.width,y:s.other.box.y*cv.height,w:s.other.box.w*cv.width,h:s.other.box.h*cv.height}];
+      // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく。OCRでバーを白く
+      // 塗る際にZXingの粗い検出枠を使うと、縦余白(ページ高の4.5%)が大きいため
+      // バー直下の目視数字まで消えてOCRが何も読めなくなる。
+      const qJan = s.other.box ? await checkBarcodeQualityHiRes(page,s.other.box,'jan',s.other.rot) : null;
+      const maskPx = maskBoxesPx(cv,[qJan],boxesPx);
+      let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
+      const hasJanText=/[0-9][0-9\s]{10,20}[0-9]/.test(txt);
+      let ocrWords=[];
+      if($("#optOcr").checked && !hasJanText){
+        const o=await ocrNearBarcodes(cv,boxesPx,maskPx,s.other.rot);
+        if(o&&o.text) txt=(txt+" "+o.text).trim();
+        if(o&&o.words) ocrWords=o.words;
+      }
+      const janVal=s.other.value;
+      const repJson=runCheckJan(janVal, txt);
+      window.__lastChk={bcIsbn:janVal, txtIn:txt, txtNorm:txt, repJson:repJson};
+      const rep=JSON.parse(repJson);
+      rep.marks=pickMarks(ocrWords, rep);
+      rep.ocrText=txt; rep.boxes={jan:s.other.box}; rep.isJan=true;
+      rep.quality={};
+      if(qJan){ rep.quality.jan=qJan;
+        if(qJan.tightBox) rep.boxes.jan=tightenWidth(s.other.box, qJan.tightBox); }
+      results.push(rep);
+      continue;
+    }
+    // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく(OCRの塗り潰し用)
+    const qIsbn = (s.isbn&&s.isbn.box) ? await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn',s.isbn.rot) : null;
+    const qDnc  = (s.dnc &&s.dnc.box ) ? await checkBarcodeQualityHiRes(page,s.dnc.box ,'dnc' ,s.dnc.rot ) : null;
+    const boxesPx=[], qs=[];
+    if(s.isbn){ boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height}); qs.push(qIsbn); }
+    if(s.dnc) { boxesPx.push({x:s.dnc.box.x*cv.width, y:s.dnc.box.y*cv.height, w:s.dnc.box.w*cv.width, h:s.dnc.box.h*cv.height });  qs.push(qDnc);  }
+    const maskPx = maskBoxesPx(cv,qs,boxesPx);
+    let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
+    const hasISBN=/ISBN|97[89]/.test(txt), hasC=/C\s*[0-9]{4}/.test(txt), hasP=/[¥\\]|本体|定価/.test(txt);
+    let ocrWords=[];
+    if($("#optOcr").checked && (!hasISBN||!hasC||!hasP)){
+      const o=await ocrNearBarcodes(cv,boxesPx,maskPx,(s.isbn&&s.isbn.rot)||(s.dnc&&s.dnc.rot));
+      if(o&&o.text) txt=(txt+" "+o.text).trim();
+      if(o&&o.words) ocrWords=o.words;
+    }
+    const bcIsbnVal=s.isbn?s.isbn.value:"";
+    const repTxt=normalizeOcrIsbn(txt, bcIsbnVal);
+    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt, slipLayout?"slip":"");
+    window.__lastChk={bcIsbn:bcIsbnVal, txtIn:txt, txtNorm:repTxt, repJson:repJson};
+    const rep=JSON.parse(repJson);
+    // マーカー：OCR単語のうち、照合した実値(ISBN/Cコード/価格)に一致するものだけを採用
+    rep.marks=pickMarks(ocrWords, rep);
+    rep.ocrText=txt; rep.boxes={isbn:s.isbn?s.isbn.box:null,dnc:s.dnc?s.dnc.box:null};
+    // バーコード品質(欠け・かすれ・縞の異常)を画素で簡易判定
+    rep.quality={};
+    if(qIsbn){ rep.quality.isbn=qIsbn;
+      if(qIsbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, qIsbn.tightBox); }
+    if(qDnc){ rep.quality.dnc=qDnc;
+      if(qDnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, qDnc.tightBox); }
+    results.push(rep);
+  }
+  runCheck.destroy?.(); runCheckJan.destroy?.();
+  return {page:pageNum, sets:results,
+          hasBars:bars.length>0,
+          status:rollup(results)};
+}
+const OCR_A2D={O:'0',o:'0',Q:'0',D:'0',I:'1',l:'1',i:'1','|':'1',Z:'2',z:'2',E:'3',A:'4',S:'5',s:'5',G:'6',b:'6',T:'7',B:'8',g:'9',q:'9'};
+function ocrFixDigits(str){ return str.replace(/[A-Za-z|]/g,c=>OCR_A2D[c]||c); }
+function normalizeOcrIsbn(txt, bcIsbn){
+  if(!txt) return txt;
+  // OCRは数字を英字に誤読する(9→O, 1→I 等)。ISBN直後の英数混在列を数字へ補正し、
+  // バーコード値やチェックデジットで13桁に整える。
+  return txt.replace(/(ISBN[ :]*)([0-9A-Za-z|Xx\-‐ー－—– ]{10,40})/i, (m, head, body)=>{
+    let coll='', consumed=0;
+    for(let i=0;i<body.length;i++){
+      const ch=body[i];
+      if(/[0-9Xx]/.test(ch)){ coll+=ch.toUpperCase(); consumed=i+1; if(coll.length>=13) break; continue; }
+      const f=ocrFixDigits(ch);
+      if(/[0-9]/.test(f)){ coll+=f; consumed=i+1; if(coll.length>=13) break; continue; }
+      if(/[A-Za-z]/.test(ch)) break;
+      if(coll.length>=13) break;
+      consumed=i+1;
+    }
+    if(coll.length<13) return m;
+    let digits=coll.slice(0,13);
+    const rest=body.slice(consumed);
+    let fixed=null;
+    if(/^\d{13}$/.test(bcIsbn||'') && bcIsbn.slice(4)===digits.slice(4)) fixed=bcIsbn; // 末9桁一致ならBC採用
+    else if(/^97[89]/.test(digits) && ean13ok(digits)) fixed=digits;
+    else if(ean13ok('978'+digits.slice(3))) fixed='978'+digits.slice(3);
+    else if(ean13ok('979'+digits.slice(3))) fixed='979'+digits.slice(3);
+    if(!fixed) return head+digits+rest;
+    return head+fixed+rest;
+  });
+}
+function ean13ok(code){
+  if(!/^\d{13}$/.test(code)) return false;
+  let s=0; for(let i=0;i<12;i++){ s+=(+code[i])*(i%2?3:1); }
+  return ((10-s%10)%10)===(+code[12]);
+}
+function rollup(results){
+  if(!results.length) return null;
+  let st="OK";
+  for(const r of results){
+    if(r.status==="NG") return "NG";
+    if(r.status==="WARN") st="WARN";
+  }
+  return st;
+}
+
+/* ---------- 全ページ解析 ---------- */
+async function runAll(){
+  cancelFlag=false;
+  pages=[]; selected=-1;
+  // Pyodideの初回ダウンロードは十数秒かかることがあるので、所要時間不明の表示にする
+  showBanner(true,"検出エンジンを準備中…（初回は少し時間がかかります）",-1);
+  showLoading(true,"検出エンジンを準備中…","初回のみ数十秒かかることがあります");
+  await ensurePy();
+  const n=pdfDoc.numPages;
+  for(let p=1;p<=n;p++){
+    if(cancelFlag) break;
+    showBanner(true,`解析中… ${p}/${n}ページ`, (p-1)/n*100);
+    // ページが選択されると中央はプレビューに切り替わるので、それまでの間だけ表示する
+    if(selected<0) showLoading(true,`解析中… ${p}/${n}ページ`,"バーコードの検出と印字の照合を行っています");
+    const r=await analyzePage(p);
+    pages.push(r);
+    renderList();
+    if(selected<0 && r.hasBars){ selectPage(pages.length-1); }
+  }
+  showBanner(false);
+  showLoading(false);
+  renderList();
+  if(selected<0 && pages.length){ selectPage(0); }
+  // 単ページPDFなら左の一覧は不要なので畳む(複数ページ時のみ表示)
+  $(".main").classList.toggle('single', (pdfDoc?pdfDoc.numPages:0)<=1);
+}
+
+/* ---------- 一覧描画 ---------- */
+function renderList(){
+  const el=$("#plist");
+  if(!pages.length){ el.innerHTML='<div class="empty-msg">解析待ち…</div>'; return; }
+  el.innerHTML="";
+  pages.forEach((p,i)=>{
+    const row=document.createElement('div');
+    row.className="prow"+(i===selected?" sel":"")+(p.hasBars?"":" empty");
+    const st=p.status||"";
+    const cnt=p.sets.length;
+    row.innerHTML=`<span class="pno">P${p.page}</span>
+      <span class="dot ${st}"></span>
+      <span class="lbl">${p.hasBars?(st==="NG"?"不一致あり":st==="WARN"?"要確認":"OK")+(cnt>1?`・${cnt}組`:""):"バーコードなし"}</span>`;
+    row.onclick=()=>selectPage(i);
+    el.appendChild(row);
+  });
+}
+
+/* ---------- ページ表示 ---------- */
+async function selectPage(i){
+  selected=i; renderList();
+  const rec=pages[i];
+  $("#drop").classList.add('hidden'); $("#viewer").classList.remove('hidden');
+  $("#zoomctl").classList.remove('hidden');
+  // previewbarの表示/非表示をここで確定させてから幅・高さを測る
+  // (先に計測してしまうと、この後previewbarが出現/消失した分だけ
+  //  実際の表示可能領域とズレて「全体表示」が真にフィットしなくなる)
+  renderPreviewBar(rec);
+  const page=await pdfDoc.getPage(rec.page);
+  const center=$("#canvaswrap");
+  const avail=Math.max(300, center.clientWidth-40), availH=Math.max(300, center.clientHeight-40);
+  const base=page.getViewport({scale:1});
+  const fit=Math.min(avail/base.width, availH/base.height, 3);   // フィット倍率(zoom=1の基準)
+  const renderScale=Math.min(fit*RENDER_BOOST, 6);               // 実レンダは高めに(拡大時シャープ)
+  const vp=page.getViewport({scale:renderScale});
+  const cv=$("#pageCanvas"); cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+  // overlay(内部解像度はcanvasと同じ。表示サイズはCSSで揃える)
+  const ov=$("#overlay"); ov.width=cv.width; ov.height=cv.height;
+  drawOverlay(rec);
+  // ズーム基準サイズ(フィット表示時のCSSピクセル)
+  baseCssW=base.width*fit; baseCssH=base.height*fit;
+  zoom=1; applyZoom();
+  centerViewer(center, baseCssW, baseCssH);
+  renderResult(rec);
+}
+/* 全体表示時、canvaswrap内でプレビューが中央に来るよう余白(margin)を調整する。
+   .viewerはinline-blockでcanvasの実寸に合わせて伸縮するため、
+   左右/上下の余白を均等にすることで見た目上センタリングされる。
+   ズームイン/アウト時はこの余白を再計算しない(既存のポインタ追従スクロール計算を崩さないため)。 */
+function centerViewer(cen, w, h){
+  const vw=$("#viewer"); if(!vw||!cen) return;
+  const mx=Math.max(18,(cen.clientWidth-w)/2), my=Math.max(18,(cen.clientHeight-h)/2);
+  vw.style.margin=`${my}px ${mx}px`;
+}
+/* オーバーレイ(バーコード枠)を描く。手入力照合後の再描画でも使う */
+function pbExtLinks(isbn){
+  const i13=(isbn.isbn13||isbn.raw||"").replace(/[^0-9Xx]/g,"");
+  if(!/^\d{13}$/.test(i13)) return "";
+  const q=encodeURIComponent(i13);
+  const L=[["Amazon",`https://www.amazon.co.jp/s?k=${q}&i=stripbooks`],
+    ["Google 書影",`https://www.google.com/search?tbm=isch&q=${q}`],
+    ["国会図書館",`https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${q}`],
+    ["版元ドットコム",`https://www.hanmoto.com/bd/isbn/${i13}`]];
+  return L.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer" onclick="markVisited(this)">↗ ${esc(n)}</a>`).join("");
+}
+function pbJanLinks(jan){
+  if(!/^\d{13}$/.test(jan)) return "";
+  const q=encodeURIComponent(jan);
+  const L=[["Google 検索",`https://www.google.com/search?q=${q}`],
+    ["Amazon",`https://www.amazon.co.jp/s?k=${q}`],
+    ["Yahoo!ショッピング",`https://shopping.yahoo.co.jp/search?p=${q}`],
+    ["楽天市場",`https://search.rakuten.co.jp/search/mall/${q}/`]];
+  return L.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer" onclick="markVisited(this)">↗ ${esc(n)}</a>`).join("");
+}
+/* ウェブ確認リンクは実際に検索結果と一致するかまでは自動判定できない(他サイトの
+   内容を読み取ることはできないため)。せめて「すでに開いた」ことが分かるよう、
+   クリックしたリンクの見た目を変える(視認性のためだけの簡易マーキング)。 */
+function markVisited(a){ a.classList.add('visited'); }
+window.markVisited=markVisited;
+let pvDrawerOpen=false;
+function setPvDrawer(open){
+  pvDrawerOpen=open;
+  const d=$("#pvDrawer"), t=$("#pvToggle");
+  if(d) d.classList.toggle('collapsed', !open);
+  if(t) t.setAttribute('aria-expanded', open?"true":"false");
+}
+/* プレビュー上部の固定バー：ISBN/JANのウェブ確認リンクのみ(横並び・常時表示)。
+   手入力欄はヘッダーの「入力して照合」トグルを開いたときだけ出す(普段は使わないため)。 */
+function renderPreviewBar(rec){
+  const bar=$("#previewbar");
+  const sets=(rec&&rec.sets)?rec.sets:[];
+  const bookIdx=sets.findIndex(s=>!s.isJan);
+  const janIdxs=[]; sets.forEach((s,i)=>{ if(s.isJan) janIdxs.push(i); });
+
+  // ---- 常時表示：ISBN・JANのウェブ確認リンク(横並び) ----
+  let top="";
+  if(bookIdx>=0){
+    const s=sets[bookIdx];
+    const links=s.isbn?pbExtLinks(s.isbn):"";
+    if(links) top+=`<div class="pb-group"><span class="pb-label">ISBNをウェブで確認</span><div class="pb-links">${links}</div></div>`;
+  }
+  janIdxs.forEach(i=>{
+    const s=sets[i]; const jval=(s.jan&&(s.jan.jan13||s.jan.raw))||"";
+    const jlinks=jval?pbJanLinks(jval):"";
+    if(jlinks){ if(top) top+=`<div class="pb-sep"></div>`; top+=`<div class="pb-group"><span class="pb-label">JANをウェブで確認</span><div class="pb-links">${jlinks}</div></div>`; }
+  });
+  bar.innerHTML=top;
+  bar.classList.toggle('hidden', !top);
+
+  // ---- ヘッダーの「入力して照合」ドロップダウン：手入力欄(ISBN 1組＋JANは組ごと) ----
+  let drawer="";
+  if(bookIdx>=0){
+    const s=sets[bookIdx]; const m=s.manual||{};
+    const phI=s.isbn?(s.isbn.isbn13||s.isbn.raw):"978…";
+    const phC=s.dnc?("C"+s.dnc.ccode):"C0000";
+    const phP=s.dnc?String(s.dnc.price):"価格";
+    drawer+=`<div class="pb-group">
+      <span class="pb-label">ISBNを入力して照合</span>
+      <input class="pb-input isbn mi-isbn" placeholder="ISBN ${esc(phI)}" value="${esc(m.isbn||'')}">
+      <input class="pb-input c mi-c" placeholder="${esc(phC)}" value="${esc(m.ccode||'')}">
+      <input class="pb-input p mi-p" placeholder="${esc(phP)}" value="${esc(m.price||'')}">
+      <button class="pb-btn" onclick="recheckManual(${bookIdx})">照合</button>
+    </div>`;
+  }
+  janIdxs.forEach(i=>{
+    const s=sets[i]; const m=s.manual||{};
+    const jval=(s.jan&&(s.jan.jan13||s.jan.raw))||"";
+    const phJ=jval||"JANコード13桁";
+    drawer+=`<div class="pb-group">
+      <span class="pb-label">JANを入力して照合</span>
+      <input class="pb-input isbn mi-jan" data-idx="${i}" placeholder="${esc(phJ)}" value="${esc(m.jan||'')}">
+      <button class="pb-btn" onclick="recheckManualJan(${i})">照合</button>
+    </div>`;
+  });
+  if(!drawer) drawer=`<div class="note" style="padding:2px 0">このページには手入力できる印字項目がありません。</div>`;
+  $("#pvDrawer").innerHTML=drawer;
+
+  const tgl=$("#pvToggle");
+  if(tgl) tgl.disabled=!sets.length;
+  if(!sets.length && pvDrawerOpen) setPvDrawer(false);
+}
+$("#pvToggle").onclick=(e)=>{ e.stopPropagation(); if(!$("#pvToggle").disabled) setPvDrawer(!pvDrawerOpen); };
+document.addEventListener("mousedown",(e)=>{
+  if(!pvDrawerOpen) return;
+  const d=$("#pvDrawer"), t=$("#pvToggle");
+  if((d&&d.contains(e.target)) || (t&&t.contains(e.target))) return;
+  setPvDrawer(false);
+});
+document.addEventListener("keydown",(e)=>{
+  if(e.key==="Escape" && pvDrawerOpen) setPvDrawer(false);
+});
+function drawOverlay(rec){
+  const ov=$("#overlay"), cv=$("#pageCanvas"); if(!ov||!cv) return;
+  const g=ov.getContext('2d'); g.clearRect(0,0,ov.width,ov.height);
+  const css=getComputedStyle(document.body);
+  const col={NG:css.getPropertyValue('--err'),WARN:css.getPropertyValue('--warn'),OK:css.getPropertyValue('--ok')};
+  rec.sets.forEach(s=>{
+    const c=col[s.status]||col.OK;
+    if(s.isJan){
+      if(s.boxes&&s.boxes.jan) drawBox(g,s.boxes.jan,cv,c,"JAN "+(s.jan?(s.jan.jan13||s.jan.raw):""));
+      return;
+    }
+    if(s.boxes&&s.boxes.isbn) drawBox(g,s.boxes.isbn,cv,c,"1段目 "+(s.isbn?(s.isbn.isbn13||s.isbn.raw):""));
+    if(s.boxes&&s.boxes.dnc)  drawBox(g,s.boxes.dnc,cv,c,"2段目 "+(s.dnc?s.dnc.raw:""));
+  });
+}
+/* ズーム適用: canvasの内部解像度は固定のまま、表示サイズ(style)だけ変える */
+function applyZoom(){
+  const w=Math.round(baseCssW*zoom), h=Math.round(baseCssH*zoom);
+  const cv=$("#pageCanvas"), ov=$("#overlay");
+  if(cv){ cv.style.width=w+'px'; cv.style.height=h+'px'; }
+  if(ov){ ov.style.width=w+'px'; ov.style.height=h+'px'; }
+  const hint=$("#zoomhint"); if(hint) hint.textContent=Math.round(zoom*100)+'%';
+}
+/* プレビュー中心を基準に倍率を変更(+/-ボタン用) */
+function zoomBy(factor){
+  const cen=$("#canvaswrap"), cv=$("#pageCanvas"); if(!cv) return;
+  const old=zoom;
+  zoom=Math.min(ZMAX,Math.max(ZMIN,zoom*factor));
+  if(zoom===old) return;
+  const r=cv.getBoundingClientRect(), cr=cen.getBoundingClientRect();
+  // ビュー中心を固定点にする
+  const fx=cr.left+cr.width/2-r.left, fy=cr.top+cr.height/2-r.top;
+  const ratio=zoom/old;
+  applyZoom();
+  cen.scrollLeft+=fx*(ratio-1);
+  cen.scrollTop +=fy*(ratio-1);
+}
+/* 全体表示：現在のウインドウ(プレビュー領域)サイズに対して改めてフィット計算し直す */
+function zoomFit(){
+  if(selected>=0){ selectPage(selected); return; }
+  zoom=1; applyZoom();
+  const cen=$("#canvaswrap"); if(cen){cen.scrollLeft=0;cen.scrollTop=0;}
+  const vw=$("#viewer"); if(vw) vw.style.margin="18px";
+}
+function drawBox(g,box,cv,color,label){
+  const x=box.x*cv.width,y=box.y*cv.height,w=box.w*cv.width,h=box.h*cv.height;
+  g.strokeStyle=color; g.lineWidth=2; g.strokeRect(x,y,w,h);
+  g.fillStyle=color; g.font="11px monospace";
+  const tw=g.measureText(label).width+8;
+  g.globalAlpha=.92; g.fillRect(x,Math.max(0,y-15),tw,15); g.globalAlpha=1;
+  g.fillStyle="#fff"; g.fillText(label,x+4,Math.max(10,y-4));
+}
+
+/* ---------- 結果描画 ---------- */
+function renderResult(rec){
+  const tilesEl=$("#tiles");
+  const el=$("#result");
+  fbIssues=[];
+  const real=rec.sets;
+  if(!real.length){
+    tilesEl.innerHTML=`<div class="tile NG jump" onclick="jumpToStatus('NG')"><b>!</b><span>バーコード読取不可</span></div>`;
+    el.innerHTML=`<div class="card NG"><div class="h">バーコードを読み取れません<span class="sp" style="flex:1"></span><span class="pill NG">要確認</span></div>
+        <div class="chk NG"><span class="mark">✕</span><span class="body"><span class="t">バーコードが検出できませんでした</span><span class="d">線の欠け・潰れ・かすれ等で読み取り不能になっている可能性があります。バーの破損や、版ずれで一部が欠けていないか、現物を確認してください。</span></span></div>
+        <div class="note" style="padding:10px 12px">小さい・縦向きの場合は「縦向きも探索(90°)」を有効に。なお正常なスリップ等で元々バーコードが無いページの場合は、この警告は無視してください。</div></div>`;
+    return;
+  }
+  const counts={NG:0,WARN:0,OK:0};
+  real.forEach(s=>counts[s.status]++);
+  tilesEl.innerHTML=`
+    <div class="tile NG${counts.NG?' jump':''}"${counts.NG?' onclick="jumpToStatus(\'NG\')"':''}><b>${counts.NG}</b><span>不一致</span></div>
+    <div class="tile WARN${counts.WARN?' jump':''}"${counts.WARN?' onclick="jumpToStatus(\'WARN\')"':''}><b>${counts.WARN}</b><span>要確認</span></div>
+    <div class="tile OK"><b>${counts.OK}</b><span>OK</span></div>`;
+  let html=`<div class="cards">`;
+  real.forEach((s,idx)=>{
+    const lbl={NG:"不一致あり",WARN:"要確認",OK:"OK"}[s.status];
+    html+=`<div class="card ${s.status}" data-ri="${idx}"><div class="h">バーコード組 ${real.length>1?'#'+(idx+1):''}
+      <span class="sp" style="flex:1"></span><span class="pill ${s.status}">${lbl}</span></div>`;
+    // 値
+    if(s.isJan){
+      html+=kv("JANコード", s.jan?(s.jan.jan13||s.jan.raw):"—");
+    }
+    if(s.isbn){
+      const i=s.isbn; html+=kv("ISBN (1段目)",`${i.isbn13||i.raw}`+(i.country?`　${i.country}`:""));
+    }
+    if(s.dnc){
+      const d=s.dnc, dc=d.ccode_decoded;
+      html+=kv("日本図書コード (2段目)",`192-${d.ccode}-${String(d.price).padStart(5,'0')}　C${d.ccode}`);
+      html+=kv("Cコード内訳",dc?`${dc.target}／${dc.form}／内容${dc.content}`:"—");
+      html+=kv("本体価格(バーコード)",`${d.price.toLocaleString()} 円（税抜）`);
+    }
+    if(s.colophon){
+      const ci=s.colophon.isbn, cc=s.colophon.ccode;
+      const meta=s.colophonMeta||{};
+      html+=kv("奥付け記載 ISBN", ci&&ci.isbn13?ci.isbn13:(ci&&ci.error?"読取異常："+ci.error:"（読取不可）"));
+      html+=kv("奥付け記載 Cコード", cc!=null?("C"+cc):"（読取不可）");
+      if(meta.page) html+=kv("奥付け照合の元ページ", `${esc(meta.fileName||"")} P${meta.page}${meta.ocrUsed?"（OCR補完）":""}`);
+      if(s.colophonPreview) html+=`<div class="kv"><button class="btn obbtn glow" style="width:100%;justify-content:center;font-weight:700" onclick="showColophonPreview(${idx})">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        奥付けページを別ウィンドウで確認</button></div>`;
+    }
+    // チェック項目
+    s.items.forEach(it=>{
+      const mk=it.ok?"✓":(it.level==="WARN"?"△":"✕");
+      const cls=it.ok?"OK":it.level;
+      let fbBtn="";
+      if(!it.ok){
+        const fbIdx=fbIssues.length;
+        fbIssues.push({
+          ruleId: it.ruleId||"", expected: it.expected!=null?String(it.expected):"",
+          actual: it.actual!=null?String(it.actual):"",
+          box: (it.box && s.boxes) ? s.boxes[it.box] : null,
+          page: rec.page, msg: it.label+"："+it.detail, setIdx: idx
+        });
+        fbBtn=`<button class="issfb" title="この判定は誤検知だと報告する" onclick="event.stopPropagation();fbFromIssue(${fbIdx})">👎 誤検知?</button>`;
+      }
+      html+=`<div class="chk ${cls}"><span class="mark">${mk}</span>
+        <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span>${fbBtn}</div>`;
+    });
+    // バーコード品質判定の結果(欠け・かすれ等)
+    if(s.quality){
+      const qrows=[["ISBNバーコード品質",s.quality.isbn],["日本図書コード品質",s.quality.dnc],["JANコード品質",s.quality.jan]];
+      qrows.forEach(([nm,q])=>{
+        if(!q) return;
+        const ok=q.ok;
+        html+=`<div class="chk ${ok?'OK':'NG'}"><span class="mark">${ok?'✓':'✕'}</span>
+          <span class="body"><span class="t">${esc(nm)}</span><span class="d">${ok?'縞パターン正常':esc(q.note||'異常の疑い')}</span></span></div>`;
+        // バーが黒以外のインキで刷られている場合の注意喚起。
+        // EAN読取機の光源は赤(660nm前後)なので、シアン・青・緑系のバーは
+        // 反射してしまい読み取れないことがある。
+        const bc=q.barColor;
+        if(bc){
+          const mx=Math.max(bc.r,bc.g,bc.b), mn=Math.min(bc.r,bc.g,bc.b);
+          const lm=0.299*bc.r+0.587*bc.g+0.114*bc.b;
+          if(mx-mn>60 || lm>110){
+            const sw=`rgb(${bc.r},${bc.g},${bc.b})`;
+            html+=`<div class="chk WARN"><span class="mark">▲</span>
+              <span class="body"><span class="t">${esc(nm.replace('品質','のインキ色'))}</span>
+              <span class="d">バーが黒以外の色（<span style="display:inline-block;width:9px;height:9px;border:1px solid #999;background:${sw};vertical-align:middle"></span> R${bc.r} G${bc.g} B${bc.b}）で刷られています。赤色光源のスキャナで読み取れない可能性があるため、現物での読み取り確認を推奨します。</span></span></div>`;
+          }
+        }
+      });
+    }
+    if(s.ocrText){ html+=`<div class="kv"><div class="k">読み取った近傍テキスト</div><div class="v" style="font-size:11px">${esc(s.ocrText).slice(0,200)||"（なし）"}</div></div>`; }
+    html+=`</div>`;
+  });
+  html+=`</div>`;
+  el.innerHTML=html;
+}
+function kv(k,v){return `<div class="kv"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`;}
+/* 集計タイル(不一致/要確認)クリックで該当詳細までジャンプ＆一瞬ハイライト */
+function jumpToStatus(st){
+  const target=$("#result").querySelector('.chk.'+st);
+  if(!target) return;
+  target.scrollIntoView({block:"center",behavior:"smooth"});
+  target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash');
+  setTimeout(()=>target.classList.remove('flash'),1200);
+}
+window.jumpToStatus=jumpToStatus;
+/* 手入力した印字値でバーコードと再照合する(印字が読めない/バーコードのみの場合の救済) */
+async function recheckManual(atIdx){
+  const rec=pages[selected]; if(!rec) return;
+  const bar=$("#previewbar");
+  const gv=cl=>{ const el=bar.querySelector(cl); return el?(el.value||"").trim():""; };
+  const isbn=gv('.mi-isbn'), ccode=gv('.mi-c'), price=gv('.mi-p');
+  const old=rec.sets[atIdx]; if(!old) return;
+  // 手入力を照合コアが解釈できるテキストに組み立てる
+  const parts=[];
+  if(isbn)  parts.push("ISBN"+isbn);
+  if(ccode) parts.push("C"+ccode.replace(/\D/g,""));
+  if(price) parts.push("本体"+price.replace(/[^\d]/g,"")+"円");
+  const txt=parts.join("  ");
+  const btn=bar.querySelector('.pb-btn'); if(btn){ btn.disabled=true; btn.textContent="照合中…"; }
+  try{
+    const py=await ensurePy(); const rc=py.globals.get('run_check');
+    const isbnBc=old.isbn?old.isbn.raw:"";
+    const dncBc =old.dnc ?old.dnc.raw :"";
+    const nrep=JSON.parse(rc(isbnBc,dncBc,txt)); rc.destroy?.();
+    nrep.boxes=old.boxes; nrep.ocrText=txt; nrep.manual={isbn,ccode,price};
+    rec.sets[atIdx]=nrep;
+    rec.status=rollup(rec.sets);
+    renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="照合"; }
+  }
+}
+window.recheckManual=recheckManual;
+/* JANコード組の手入力照合(近傍印字の数字列が読み取れない場合の救済) */
+async function recheckManualJan(idx){
+  const rec=pages[selected]; if(!rec) return;
+  const bar=$("#previewbar");
+  const inp=bar.querySelector(`.mi-jan[data-idx="${idx}"]`);
+  const janTxt=inp?(inp.value||"").trim():"";
+  const old=rec.sets[idx]; if(!old) return;
+  const btn=inp?inp.nextElementSibling:null;
+  if(btn){ btn.disabled=true; btn.textContent="照合中…"; }
+  try{
+    const py=await ensurePy(); const rc=py.globals.get('run_check_jan');
+    const janBc=old.jan?old.jan.raw:"";
+    const txt=janTxt.replace(/[^0-9]/g,"");
+    const nrep=JSON.parse(rc(janBc,txt)); rc.destroy?.();
+    nrep.boxes=old.boxes; nrep.ocrText=txt; nrep.isJan=true; nrep.manual={jan:janTxt};
+    rec.sets[idx]=nrep;
+    rec.status=rollup(rec.sets);
+    renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="照合"; }
+  }
+}
+window.recheckManualJan=recheckManualJan;
+
+/* ============================================================
+   奥付け照合機能
+   本文PDFを読み込み、奥付けページのISBN・Cコード記載を
+   現在のバーコード読取値・表紙印字と3点照合する
+   ============================================================ */
+function scoreColophonText(text){
+  if(!text) return 0;
+  let s=0;
+  if(/ISBN[\s:]*97[89][\d\-‐ー－\s]{9,}/i.test(text)) s+=4;
+  else if(/97[89][\d\-‐ー－\s]{9,}/.test(text)) s+=2;
+  if(/C\s?[0-9]{4}/.test(text)) s+=2;
+  if(/発行所|発行者|発売元|印刷所|製本所|Printed in Japan/.test(text)) s+=2;
+  if(/定価/.test(text)) s+=1;
+  if(/著者|訳者|編集/.test(text)) s+=1;
+  return s;
+}
+async function obGetPageText(n){
+  if(obState.textCache[n]!=null) return obState.textCache[n];
+  const page=await obState.doc.getPage(n);
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ tc={items:[]}; }
+  const text=tc.items.map(it=>normalizePuaDigits(it.str||"")).join(" ").replace(/\s+/g," ").trim();
+  obState.textCache[n]=text;
+  return text;
+}
+/* 奥付け確定ページ用: 白フタの下に隠れた(＝印刷されない)テキストを除いた本文。
+   全ページ走査で使うobGetPageTextとは別に、確定した1ページだけ解析する。 */
+async function obGetPageTextVisible(n){
+  const page=await obState.doc.getPage(n);
+  const items=await pageTextItems(page,1);
+  return items.map(it=>it.str).join(" ").replace(/\s+/g," ").trim();
+}
+async function obScanAllPages(){
+  const n=obState.numPages;
+  const scored=[];
+  for(let p=1;p<=n;p++){
+    showBanner(true,`奥付けページを検索中… ${p}/${n}`, (p-1)/n*100);
+    const text=await obGetPageText(p);
+    const sc=scoreColophonText(text);
+    if(sc>0) scored.push({page:p, score:sc, snippet:text.slice(0,60)});
+  }
+  showBanner(false);
+  scored.sort((a,b)=>b.score-a.score);
+  obState.candidates=scored.filter(c=>c.score>=OB_SCORE_MIN).slice(0,8);
+  obState.scanned=true;
+}
+/* 奥付けページのプレビュー描画(モーダル内の小さいcanvas) */
+async function obRenderPreview(n){
+  const wrap=document.getElementById('obPrevWrap'); if(!wrap) return;
+  wrap.innerHTML='<div class="obload">読み込み中…</div>';
+  try{
+    const page=await obState.doc.getPage(n);
+    const vp0=page.getViewport({scale:1});
+    const scale=Math.min(1.6, 480/vp0.width);
+    const vp=page.getViewport({scale});
+    const cv=document.createElement('canvas');
+    cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+    await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    wrap.innerHTML=''; wrap.appendChild(cv);
+  }catch(e){ wrap.innerHTML='<div class="obload">プレビューを表示できません</div>'; }
+}
+function selectObPage(n){
+  n=Math.max(1,Math.min(obState.numPages,n));
+  obState.curPage=n;
+  renderOb();
+  obRenderPreview(n);
+}
+window.selectObPage=selectObPage;
+/* 奥付けページ確定→実テキスト抽出(不足時はOCR補完)→確認ステップへ */
+async function obConfirmPage(){
+  const n=obState.curPage;
+  showBanner(true,"奥付けページのテキストを抽出中…",30);
+  let text=await obGetPageTextVisible(n);
+  if(!text) text=await obGetPageText(n);
+  let ocrUsed=false;
+  obState.ocrWords=null;
+  if((text||"").replace(/\s/g,"").length<20){
+    // 実テキストがほぼ無い(アウトライン化・画像化されたページ)のでOCRで補完する
+    try{
+      const page=await obState.doc.getPage(n);
+      const vp0=page.getViewport({scale:1});
+      const scale=Math.min(3, 2200/vp0.width);
+      const vp=page.getViewport({scale});
+      const cv=document.createElement('canvas');
+      cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+      await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+      showBanner(true,"奥付けページをOCR中…（実テキストが読み取れないため）",60);
+      const w=await ensureOcr();
+      const {data}=await w.recognize(cv);
+      text=((text||"")+" "+(data.text||"")).trim();
+      ocrUsed=true;
+      const W=cv.width,H=cv.height;
+      obState.ocrWords=collectWords(data).map(wd=>{
+        const b=wd.bbox||{};
+        return {text:(wd.text||"").trim(),
+                x:(b.x0||0)/W, y:(b.y0||0)/H,
+                w:((b.x1||0)-(b.x0||0))/W, h:((b.y1||0)-(b.y0||0))/H};
+      });
+    }catch(e){ /* OCR失敗時は実テキストのみで続行 */ }
+  }
+  showBanner(false);
+  obState.text=text; obState.ocrUsed=ocrUsed; obState.step='review';
+  renderOb();
+}
+window.obConfirmPage=obConfirmPage;
+/* ---------- 奥付けプレビュー(別ウィンドウ)用: 読取位置の推定 ---------- */
+/* pdf.jsの実テキストを行単位にグルーピングし、ISBN/Cコードが載っている行のboxを探す */
+async function obPageTextLines(page, scale){
+  const vp=page.getViewport({scale});
+  let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const items=[];
+  for(const it of tc.items){
+    if(!it.str || !it.str.trim()) continue;
+    const m=pdfjsLib.Util.transform(vp.transform,it.transform);
+    const x=m[4], w=(it.width||0)*scale, h=Math.abs(m[3])||10, y=m[5]-h; // yはベースラインなので上端側へおおまかに補正
+    items.push({str:it.str, x, y, w, h:h*1.3});
+  }
+  items.sort((a,b)=>a.y-b.y||a.x-b.x);
+  const lines=[]; let cur=null;
+  for(const it of items){
+    if(cur && Math.abs(it.y-cur.y0)<cur.h*0.7){
+      cur.text+=it.str;
+      cur.x1=Math.max(cur.x1, it.x+it.w); cur.y1=Math.max(cur.y1, it.y+it.h);
+      cur.x0=Math.min(cur.x0, it.x);
+    }else{
+      cur={text:it.str, x0:it.x, y0:it.y, x1:it.x+it.w, y1:it.y+it.h, h:it.h};
+      lines.push(cur);
+    }
+  }
+  return lines;
+}
+function obFindLineBox(lines, isbn13, ccode, W, H){
+  if(!lines||!lines.length) return null;
+  const isbnDigits=(isbn13||"").replace(/\D/g,"");
+  for(const ln of lines){
+    const t=ln.text||"";
+    const compact=t.replace(/[^0-9A-Za-z]/g,"");
+    const hasIsbn=isbnDigits && compact.includes(isbnDigits);
+    const hasC=ccode && new RegExp("C\\s?"+ccode).test(t.toUpperCase());
+    if(hasIsbn || hasC || /ISBN/i.test(t)) return {x:ln.x0/W, y:ln.y0/H, w:(ln.x1-ln.x0)/W, h:(ln.y1-ln.y0)/H};
+  }
+  return null;
+}
+/* OCR単語(0..1正規化済)から、ISBN・Cコードに一致する単語のboxをまとめる */
+function obFindOcrBox(words, isbn13, ccode){
+  if(!words||!words.length) return null;
+  const targets=[]; if(isbn13) targets.push(isbn13); if(ccode) targets.push("C"+ccode);
+  let x0=null,y0=null,x1=null,y1=null;
+  for(const wd of words){
+    const raw=(wd.text||"").replace(/\s/g,""); if(!raw) continue;
+    const dg=ocrFixDigits(raw).replace(/[^0-9A-Za-z]/g,"");
+    const hit=targets.some(t=>{ const tt=t.replace(/[^0-9A-Za-z]/g,""); return tt.length>=3 && dg.includes(tt); });
+    if(hit){
+      x0=(x0==null)?wd.x:Math.min(x0,wd.x); y0=(y0==null)?wd.y:Math.min(y0,wd.y);
+      x1=(x1==null)?wd.x+wd.w:Math.max(x1,wd.x+wd.w); y1=(y1==null)?wd.y+wd.h:Math.max(y1,wd.y+wd.h);
+    }
+  }
+  if(x0==null) return null;
+  return {x:x0, y:y0, w:x1-x0, h:y1-y0};
+}
+/* 奥付けページを画像化し、読取位置のboxを添えてプレビューデータを作る */
+async function buildColophonPreview(nrep){
+  try{
+    const page=await obState.doc.getPage(obState.curPage);
+    const vp0=page.getViewport({scale:1});
+    const scale=Math.min(2.2, 1500/vp0.width);
+    const vp=page.getViewport({scale});
+    const cv=document.createElement('canvas');
+    cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+    await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    const ci=nrep.colophon&&nrep.colophon.isbn, cc=nrep.colophon&&nrep.colophon.ccode;
+    let box=null;
+    if(obState.ocrUsed && obState.ocrWords && obState.ocrWords.length){
+      box=obFindOcrBox(obState.ocrWords, ci&&ci.isbn13, cc);
+    }else{
+      const lines=await obPageTextLines(page, scale);
+      box=obFindLineBox(lines, ci&&ci.isbn13, cc, cv.width, cv.height);
+    }
+    return {img:cv.toDataURL('image/png'), box, page:obState.curPage};
+  }catch(e){ return null; }
+}
+/* 奥付けページを画面いっぱいのオーバーレイで表示し、読取位置を囲み、照合OK/NGを大きく表示する。
+   window.open()のポップアップ許可設定はブラウザごと・サイトごとに必要で全員に周知するのが難しいため、
+   同一ページ内のオーバーレイ表示にして、許可設定なしで確実に動くようにする。 */
+function showColophonPreview(idx){
+  const rec=pages[selected]; if(!rec) return;
+  const s=rec.sets[idx]; if(!s||!s.colophonPreview) return;
+  const pv=s.colophonPreview;
+  const cItems=(s.items||[]).filter(it=>(it.ruleId||"").indexOf("ISBN-C")===0);
+  const ng=cItems.some(it=>!it.ok && it.level==="NG");
+  const warn=cItems.some(it=>!it.ok && it.level==="WARN");
+  const status=ng?"NG":(warn?"WARN":"OK");
+  const label={NG:"✕ 照合NG（不一致あり）",WARN:"△ 要確認（読取不可あり）",OK:"✓ 照合OK（一致）"}[status];
+  const color={NG:"var(--err)",WARN:"var(--warn)",OK:"var(--ok)"}[status];
+  const bg={NG:"var(--err-bg)",WARN:"var(--warn-bg)",OK:"var(--ok-bg)"}[status];
+  const boxHtml=pv.box?`<div style="position:absolute;left:${(pv.box.x*100).toFixed(3)}%;top:${(pv.box.y*100).toFixed(3)}%;
+    width:${(pv.box.w*100).toFixed(3)}%;height:${(pv.box.h*100).toFixed(3)}%;
+    border:3px solid ${color};border-radius:3px;pointer-events:none"></div>`:"";
+  const noteTxt=pv.box?"枠内が、ISBN・Cコードの記載として読み取った位置です（自動検出のため多少ずれる場合があります）。"
+    :"読み取り位置は自動検出できませんでした。画像全体をご確認ください。";
+  const itemsHtml=cItems.map(it=>`<div class="chk ${it.ok?'OK':it.level}"><span class="mark">${it.ok?'✓':(it.level==='WARN'?'△':'✕')}</span>
+    <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span></div>`).join("");
+  document.getElementById('obPreviewBody').innerHTML=`
+    <div style="position:sticky;top:-1px;z-index:5;font-size:20px;font-weight:800;color:${color};background:${bg};
+      border:2px solid ${color};border-radius:10px;padding:14px 18px;text-align:center;margin-bottom:16px;
+      box-shadow:0 4px 10px rgba(0,0,0,.08)">${label}</div>
+    <div style="position:relative;display:inline-block;border:1px solid var(--line);line-height:0;max-width:100%">
+      <img src="${pv.img}" style="max-width:100%;display:block">
+      ${boxHtml}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12px;margin:10px 0 14px">奥付け P${pv.page}／${noteTxt}</p>
+    <div class="cards" style="padding:0">${itemsHtml}</div>`;
+  document.getElementById('obPreviewModal').classList.add('show');
+}
+window.showColophonPreview=showColophonPreview;
+function closeObPreview(){ document.getElementById('obPreviewModal').classList.remove('show'); }
+window.closeObPreview=closeObPreview;
+/* 実際の照合を実行し、現在ページの書籍バーコード組にマージする */
+async function applyColophon(){
+  const rec=pages[selected];
+  const sets=(rec&&rec.sets)?rec.sets:[];
+  const bookIdx=sets.findIndex(s=>!s.isJan);
+  if(!rec || bookIdx<0){
+    alert("先に表紙PDFを読み込み、ISBN・日本図書コードのバーコードを検出したページを選択してください。");
+    return;
+  }
+  const ta=document.getElementById('obText');
+  const colophonText=ta?ta.value:obState.text;
+  const old=sets[bookIdx];
+  const btn=document.getElementById('obApply');
+  if(btn){ btn.disabled=true; btn.textContent="照合中…"; }
+  try{
+    const py=await ensurePy(); const rc=py.globals.get('run_check_colophon');
+    const isbnBc=old.isbn?old.isbn.raw:"";
+    const dncBc =old.dnc ?old.dnc.raw :"";
+    const coverTxt=old.ocrText||"";
+    const nrep=JSON.parse(rc(isbnBc,dncBc,coverTxt,colophonText)); rc.destroy?.();
+    nrep.boxes=old.boxes; nrep.ocrText=coverTxt; nrep.manual=old.manual;
+    nrep.colophonMeta={page:obState.curPage, fileName:obState.fileName, ocrUsed:obState.ocrUsed};
+    nrep.colophonPreview=await buildColophonPreview(nrep);
+    rec.sets[bookIdx]=nrep;
+    rec.status=rollup(rec.sets);
+    renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
+    closeObModal();
+    if(nrep.colophonPreview) showColophonPreview(bookIdx);
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="この内容で照合する"; }
+    alert("照合中にエラーが発生しました。もう一度お試しください。");
+  }
+}
+window.applyColophon=applyColophon;
+/* 本文PDFの読込エントリポイント */
+async function loadColophonPdf(file){
+  if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
+  obState={step:'scanning', doc:null, fileName:file.name||"", numPages:0, curPage:1,
+           candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+  renderOb();
+  // 奥付け側も、読込〜展開の間は待ち時間が見えないので進捗を出す
+  showBanner(true,"奥付けPDFを読み込み中…",-1);
+  let doc;
+  try{
+    const buf=await file.arrayBuffer();
+    showBanner(true,"奥付けPDFを展開中…",-1);
+    doc=await pdfjsLib.getDocument({data:buf,
+      cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+  }catch(e){
+    showBanner(false);
+    alert("PDFを読み込めませんでした：\n"+(e&&e.message?e.message:e));
+    return;
+  }
+  showBanner(false);
+  obState.doc=doc; obState.numPages=doc.numPages;
+  if(doc.numPages<=1){
+    // 単ページPDFはページ検出をスキップしてそのまま使う
+    obState.curPage=1;
+    await obConfirmPage();
+    return;
+  }
+  obState.step='scanning'; renderOb();
+  await obScanAllPages();
+  obState.curPage=(obState.candidates[0]&&obState.candidates[0].page)||obState.numPages;
+  obState.step='choose-page';
+  renderOb();
+  obRenderPreview(obState.curPage);
+}
+/* ---------- モーダルの開閉・描画 ---------- */
+function openObModal(){
+  document.getElementById('obOpen').classList.remove('glow');
+  obState={step:'file', doc:null, fileName:'', numPages:0, curPage:1,
+           candidates:[], textCache:{}, text:'', ocrUsed:false, scanned:false, ocrWords:null};
+  document.getElementById('obModal').classList.add('show');
+  renderOb();
+}
+window.openObModal=openObModal;
+function closeObModal(){
+  document.getElementById('obModal').classList.remove('show');
+}
+window.closeObModal=closeObModal;
+function renderOb(){
+  const body=document.getElementById('obBody'); if(!body) return;
+  if(obState.step==='file'){
+    body.innerHTML=`
+      <div class="obdrop" id="obDrop">本文PDFをドラッグ＆ドロップ<br>またはクリックして選択</div>
+      <input type="file" id="obFile" accept="application/pdf" class="hidden">`;
+    const dz=document.getElementById('obDrop'), fi=document.getElementById('obFile');
+    dz.onclick=()=>fi.click();
+    fi.onchange=e=>{ if(e.target.files[0]) loadColophonPdf(e.target.files[0]); };
+    ;['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+    ;['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+    dz.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadColophonPdf(f); });
+    return;
+  }
+  if(obState.step==='scanning'){
+    body.innerHTML=`<p class="obstep-hd">「${esc(obState.fileName)}」を解析しています…（ページ数が多いPDFは少し時間がかかります）</p>`;
+    return;
+  }
+  if(obState.step==='choose-page'){
+    let cand="";
+    if(obState.candidates.length){
+      cand=`<div class="obcand">`+obState.candidates.map(c=>
+        `<button class="${c.page===obState.curPage?'sel':''}" onclick="selectObPage(${c.page})">P${c.page}<span class="sc">スコア${c.score}</span><span class="sn">${esc(c.snippet)}</span></button>`
+      ).join("")+`</div>`;
+    }else{
+      cand=`<p class="obstep-hd">自動検出できませんでした。奥付けは巻末付近にあることが多いので、下のページ送りで探してください。</p>`;
+    }
+    body.innerHTML=`
+      <p class="obstep-hd">「${esc(obState.fileName)}」（全${obState.numPages}ページ）${obState.candidates.length?"から、奥付けらしいページの候補です。クリックして選ぶか、下のページ送りで別のページも確認できます。":""}</p>
+      ${cand}
+      <div class="obnav">
+        <button onclick="selectObPage(obState.curPage-1)" ${obState.curPage<=1?'disabled':''}>◂ 前へ</button>
+        <span class="oblabel">ページ</span>
+        <input type="number" id="obPageNum" min="1" max="${obState.numPages}" value="${obState.curPage}">
+        <span class="oblabel">/ ${obState.numPages}</span>
+        <button onclick="selectObPage(obState.curPage+1)" ${obState.curPage>=obState.numPages?'disabled':''}>次へ ▸</button>
+      </div>
+      <div class="obpreview" id="obPrevWrap"><div class="obload">読み込み中…</div></div>
+      <div class="obactions2">
+        <button type="button" class="obback" onclick="obState.step='file';renderOb();">戻る</button>
+        <button type="button" class="obconfirm" onclick="obConfirmPage()">このページ(P${obState.curPage})を奥付けとして使う</button>
+      </div>`;
+    const pn=document.getElementById('obPageNum');
+    if(pn) pn.onchange=()=>{ const v=parseInt(pn.value,10); if(!isNaN(v)) selectObPage(v); };
+    return;
+  }
+  if(obState.step==='review'){
+    const sets=(pages[selected]&&pages[selected].sets)?pages[selected].sets:[];
+    const bookIdx=sets.findIndex(s=>!s.isJan);
+    const noBook=bookIdx<0?`<div class="fbnote" style="display:block">現在、照合先となる表紙PDFのISBN・日本図書コードのバーコードが選択されていません。先に表紙PDFを読み込んでから適用してください。</div>`:"";
+    body.innerHTML=`
+      <p class="obstep-hd">P${obState.curPage}${obState.ocrUsed?"（実テキストが読み取れなかったためOCRで補完しました。誤読があれば下の内容を直接修正できます）":""}から抽出した内容です。ISBN・Cコードの記載が含まれていることを確認し、必要なら修正してから照合してください。</p>
+      <div class="fbfield"><textarea id="obText" style="min-height:110px">${esc(obState.text)}</textarea></div>
+      ${noBook}
+      <div class="obactions2">
+        <button type="button" class="obback" onclick="obState.step='choose-page';renderOb();obRenderPreview(obState.curPage);">戻る</button>
+        <button type="button" class="obconfirm" id="obApply" onclick="applyColophon()" ${bookIdx<0?'disabled':''}>この内容で照合する</button>
+      </div>`;
+    return;
+  }
+}
+document.getElementById('obCancel').addEventListener('click', closeObModal);
+document.getElementById('obModal').addEventListener('click', e=>{ if(e.target.id==='obModal') closeObModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && document.getElementById('obModal').classList.contains('show')) closeObModal(); });
+document.getElementById('obPreviewModal').addEventListener('click', e=>{ if(e.target.id==='obPreviewModal') closeObPreview(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && document.getElementById('obPreviewModal').classList.contains('show')) closeObPreview(); });
+document.getElementById('obOpen').addEventListener('click', openObModal);
+
+
+/* 既刊・再販の照合用に、ISBNから外部サイトを別タブで開くリンク群 */
+function extLinks(isbn){
+  const i13=(isbn.isbn13||isbn.raw||"").replace(/[^0-9Xx]/g,"");
+  if(!/^\d{13}$/.test(i13)) return "";
+  const q=encodeURIComponent(i13);
+  const links=[
+    ["Amazon.co.jp", `https://www.amazon.co.jp/s?k=${q}&i=stripbooks`],
+    ["Google 画像（書影）", `https://www.google.com/search?tbm=isch&q=${q}`],
+    ["国会図書館サーチ", `https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${q}`],
+    ["版元ドットコム", `https://www.hanmoto.com/bd/isbn/${i13}`],
+  ];
+  return `<div class="links-hd">この本をウェブで確認（別タブ）</div><div class="links">`
+    + links.map(([n,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer">↗ ${esc(n)}</a>`).join("")
+    + `</div>`;
+}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+// ====== フィードバック（目次整合検版・下版PDF差分チェッカーと同方式） ======
+// 判定ロジック（cross_check等）は変更しない。ここは送信まわりのメタデータ収集のみ。
+(function(){
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_APP_VERSION = "v1.3";
+  const modal = $("#fbModal");
+  let fbVerdict = "";
+  let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
+
+  // 指摘の該当箇所を、すでに描画済みのプレビューcanvasから直接クロップしてbase64 PNG化する
+  // （再レンダリング不要・座標系のズレが出ない。人手のスクリーンショットは不要）
+  async function captureIssueThumb(iss){
+    try{
+      if(!iss || !iss.box) return "";
+      const cv=$("#pageCanvas"); if(!cv || !cv.width) return "";
+      const b=iss.box;
+      const padX=cv.width*0.012, padY=cv.height*0.012;
+      const x0=Math.max(0, b.x*cv.width - padX), y0=Math.max(0, b.y*cv.height - padY);
+      const x1=Math.min(cv.width, (b.x+b.w)*cv.width + padX), y1=Math.min(cv.height, (b.y+b.h)*cv.height + padY);
+      const w=Math.max(1, Math.round(x1-x0)), h=Math.max(1, Math.round(y1-y0));
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(cv, x0, y0, w, h, 0, 0, w, h);
+      return c.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  // 特定の指摘に紐づかない送信（見逃し報告・全体感想）の場合：表示中のページ全体を
+  // 既存の描画済みcanvas（#pageCanvas）からそのままキャプチャする（再描画不要）
+  function capturePageThumb(){
+    try{
+      const cv=$("#pageCanvas");
+      if(!cv || !cv.width || !cv.height) return "";
+      return cv.toDataURL("image/png");
+    }catch(e){ return ""; }
+  }
+
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
+     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
+     旧版のツール別保存名（isbn-kenpan-reporter）に名前が残っていれば引き継ぐ。 */
+  function kenpanWho(upd){
+    let r={name:"",email:""};
+    try{
+      const j=localStorage.getItem("kenpan-reporter");
+      if(j) r=Object.assign(r, JSON.parse(j)||{});
+      else r.name=localStorage.getItem("isbn-kenpan-reporter")||"";
+    }catch(e){}
+    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
+    return r;
+  }
+  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
+  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
+  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
+  function fbCurPage(){ return (selected>=0 && pages[selected]) ? ("p"+pages[selected].page) : ""; }
+
+  // フィードバック用：現在ページで検出したバーコード/ISBN/Cコード等の値をプレーンテキスト化する。
+  // 実PDFを別途もらわなくても、見逃し・誤検知報告の原因調査がスプレッドシート上でできるように
+  // するため（下版PDF差分チェッカーのaText/bText相当）。判定ロジックは変更しない。
+  // issが指定されればその検出組(setIdx)のみ、無ければページ内の全組を書き出す。失敗時は空文字。
+  function buildDetailText(iss){
+    try{
+      const rec = (selected>=0) ? pages[selected] : null;
+      if(!rec || !rec.sets || !rec.sets.length) return "";
+      const targets = (iss && iss.setIdx!=null && rec.sets[iss.setIdx]) ? [rec.sets[iss.setIdx]] : rec.sets;
+      const lines=[];
+      if(iss) lines.push("期待値: "+(iss.expected||"-")+" / 実際: "+(iss.actual||"-"));
+      targets.forEach((s,i)=>{
+        lines.push("[組"+(i+1)+"] status="+(s.status||"?"));
+        if(s.jan) lines.push("  JAN: "+(s.jan.jan13||s.jan.raw||""));
+        if(s.isbn) lines.push("  ISBN(1段目): "+(s.isbn.isbn13||s.isbn.raw||""));
+        if(s.dnc) lines.push("  日本図書コード(2段目): 192-"+s.dnc.ccode+"-"+String(s.dnc.price).padStart(5,'0')+"　C"+s.dnc.ccode);
+        if(s.colophon){
+          const ci=s.colophon.isbn, cc=s.colophon.ccode;
+          lines.push("  奥付けISBN: "+(ci&&ci.isbn13?ci.isbn13:(ci&&ci.error?"読取異常："+ci.error:"（読取不可）")));
+          lines.push("  奥付けCコード: "+(cc!=null?("C"+cc):"（読取不可）"));
+        }
+        (s.items||[]).forEach(it=>lines.push("  ["+(it.ok?"OK":it.level)+"] "+it.label+"："+it.detail));
+      });
+      return lines.join("\n");
+    }catch(e){ return ""; }
+  }
+  function setVerdict(v){
+    fbVerdict = v;
+    document.querySelectorAll("#fbVerdict button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  }
+  function showNote(msg, ok){
+    const n = $("#fbNote");
+    n.style.display = "block";
+    n.className = "fbnote" + (ok ? " ok" : "");
+    n.innerHTML = msg;
+  }
+  function markUsed(){ try{ localStorage.setItem("isbn-fb-used", "1"); }catch(e){} }
+  function guessCategory(ruleId){
+    if(!ruleId) return "";
+    if(/^ISBN-[1-4]$/.test(ruleId)) return "ISBN";
+    if(ruleId==="ISBN-5"||ruleId==="ISBN-6"||ruleId==="ISBN-11") return "日本図書コード";
+    if(ruleId==="ISBN-7"||ruleId==="ISBN-8") return "Cコード";
+    if(ruleId==="ISBN-9"||ruleId==="ISBN-10") return "価格";
+    return "その他";
+  }
+  function openModal(pre){
+    pre = pre || {};
+    fbIssueIndex = (pre.issueIndex != null) ? pre.issueIndex : null;
+    $("#fbFile").value = fbFileName || "（未読込）";
+    $("#fbFileHint").textContent = "表示ページ: " + (fbCurPage() || "—");
+    $("#fbPage").value = pre.page || fbCurPage();
+    $("#fbCategory").value = pre.category || "";
+    $("#fbComment").value = pre.comment || "";
+    $("#fbReporter").value = reporterStore(true); $("#fbEmail").value = emailStore(true);
+    $("#fbNote").style.display = "none";
+    $("#fbSend").disabled = false; $("#fbSend").textContent = "送信する";
+    setVerdict(pre.verdict || "");
+    modal.classList.add("show");
+  }
+  function closeModal(){ modal.classList.remove("show"); }
+
+  async function postFeedback(payload){
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST", mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+  }
+  // 診断情報（v1.2）。バーコードを1つも検出できていないのか、検出はしたが
+  // 照合で落ちたのかを区別できるようにする。
+  function captureDiag(){
+    try{
+      if(typeof pdfDoc === "undefined" || !pdfDoc)
+        return JSON.stringify({ ran:false, note:"PDF未読込" });
+      const ps = (typeof pages !== "undefined" && pages) ? pages : [];
+      if(!ps.length) return JSON.stringify({ ran:false,
+        inputs:{ pages: pdfDoc.numPages }, note:"解析未実行" });
+      const withBars = ps.filter(p => p.hasBars).length;
+      const st = {}; ps.forEach(p => { const k = p.status || "?"; st[k] = (st[k] || 0) + 1; });
+      let sets = 0; ps.forEach(p => { sets += (p.sets || []).length; });
+      return JSON.stringify({
+        ran: true,
+        inputs: {
+          pages: pdfDoc.numPages, analyzedPages: ps.length,
+          pagesWithBarcode: withBars, barcodeSets: sets,
+          page: (typeof selected !== "undefined" && selected >= 0 && ps[selected])
+                ? ps[selected].page : null
+        },
+        params: { detectScale: (typeof DETECT_SCALE !== "undefined") ? DETECT_SCALE : null },
+        counts: { status: st },
+        note: withBars === 0
+          ? "バーコードを1つも検出できていない（向き・解像度・つぶれを疑う）" : ""
+      });
+    }catch(e){ return JSON.stringify({ ran:null, note:"診断の収集に失敗: " + e }); }
+  }
+
+  function basePayload(extra){
+    return Object.assign({
+      tool: "isbn_kenpan", verdict: "", category: "",
+      file: fbFileName || "", page: fbCurPage(), comment: "",
+      reporter: reporterStore(true), email: emailStore(true), appVersion: FB_APP_VERSION,
+      userAgent: navigator.userAgent,
+      ruleId: "", expected: "", actual: "", bbox: "", engine: "canvas", thumb: "", detailText: "", diag: ""
+    }, extra || {});
+  }
+
+  async function send(){
+    if(!fbVerdict){ showNote("「検出結果は正しかった？」を選択してください。", false); return; }
+    const reporter = $("#fbReporter").value.trim();
+    const email = $("#fbEmail").value.trim().toLowerCase();
+    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $("#fbReporter").focus(); return; }
+    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $("#fbEmail").focus(); return; }
+    reporterStore(false, reporter); emailStore(false, email);
+    const extra = {
+      verdict: fbVerdict,
+      category: $("#fbCategory").value,
+      file: $("#fbFile").value.trim(),
+      page: $("#fbPage").value.trim(),
+      comment: $("#fbComment").value.trim(),
+      reporter, email
+    };
+    const iss = (fbIssueIndex != null && fbIssues[fbIssueIndex]) ? fbIssues[fbIssueIndex] : null;
+    const btn = $("#fbSend"); btn.disabled = true; btn.textContent = "送信中…";
+    if(iss){
+      extra.ruleId = iss.ruleId || "";
+      extra.expected = iss.expected || "";
+      extra.actual = iss.actual || "";
+      extra.bbox = JSON.stringify(iss.box ? [[iss.box.x, iss.box.y, iss.box.x+iss.box.w, iss.box.y+iss.box.h]] : []);
+      btn.textContent = "画像を準備中…";
+      extra.thumb = await captureIssueThumb(iss);
+      btn.textContent = "送信中…";
+    }else{
+      // 特定の指摘に紐づかない送信（見逃し報告・全体感想）：表示中のページ全体を添付
+      btn.textContent = "画像を準備中…";
+      extra.thumb = capturePageThumb();
+      btn.textContent = "送信中…";
+    }
+    extra.detailText = buildDetailText(iss);
+    extra.diag = captureDiag();
+    const payload = basePayload(extra);
+    try{
+      await postFeedback(payload);
+      showNote("送信しました。ありがとうございます！", true);
+      $("#fbComment").value = ""; setVerdict(""); markUsed();
+      setTimeout(closeModal, 1100);
+    }catch(err){
+      showNote("送信に失敗しました。ネットワークをご確認のうえ再度お試しください。", false);
+      btn.disabled = false; btn.textContent = "送信する";
+    }
+  }
+
+  function fbFromIssue(i){
+    const iss = fbIssues[i];
+    if(!iss){ openModal({ verdict: "false_positive" }); return; }
+    openModal({
+      verdict: "false_positive",
+      category: guessCategory(iss.ruleId),
+      page: "p"+iss.page,
+      comment: "［該当検出: " + (iss.ruleId || "") + "／" + (iss.msg || "") + "］",
+      issueIndex: i
+    });
+  }
+
+  $("#fbOpen").addEventListener("click", () => openModal());
+  $("#fbCancel").addEventListener("click", closeModal);
+  modal.addEventListener("click", e => { if(e.target === modal) closeModal(); });
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && modal.classList.contains("show")) closeModal(); });
+  document.querySelectorAll("#fbVerdict button").forEach(b => b.addEventListener("click", () => setVerdict(b.dataset.v)));
+  $("#fbSend").addEventListener("click", send);
+
+  window.fbFromIssue = fbFromIssue;
+})();
+
+/* ---------- バナー ---------- */
+/* pct に -1 を渡すと「所要時間不明」の不定進捗バーになる(ファイル読込・エンジン初期化用) */
+function showBanner(show,text,pct){
+  const b=$("#banner"); b.classList.toggle('show',show);
+  if(text!=null) $("#bannerText").textContent=text;
+  const bar=b.querySelector('.bar');
+  if(pct===-1){ bar.classList.add('indet'); }
+  else if(pct!=null){ bar.classList.remove('indet'); $("#barFill").style.width=pct+"%"; }
+  $("#bannerSpin").style.display = show ? '' : 'none';
+}
+/* 中央のドロップ面を「読み込み中」表示に切り替える。
+   ドロップ直後〜解析開始までは待ち時間が長くなりがちで、
+   何も変化がないと固まったように見えるため、必ずここを先に切り替える。 */
+function showLoading(show,title,sub){
+  const dz=$("#dropzone"), ld=$("#dzload");
+  if(!dz||!ld) return;
+  ld.classList.toggle('show',show);
+  dz.style.display = show ? 'none' : '';
+  if(show){
+    // 2回目以降の読み込みでは前のプレビューが出たままで中央が隠れているので、
+    // 読み込み表示を必ず前面に出す(解析が進んで selectPage が呼ばれると切り替わる)
+    $("#drop").classList.remove('hidden');
+    $("#viewer").classList.add('hidden');
+    $("#zoomctl").classList.add('hidden');
+  }
+  if(title!=null) $("#dzloadTitle").textContent=title;
+  if(sub!=null)   $("#dzloadSub").textContent=sub;
+}
+
+/* ---------- 読込 ---------- */
+async function loadFile(file){
+  if(!file || file.type!=="application/pdf"){ alert("PDFファイルを選択してください"); return; }
+  // 以降に await が入る前に、まず画面を「読み込み中」にする。
+  // 大きな表紙PDFでは arrayBuffer と getDocument だけで数秒かかることがあり、
+  // ここで何も出さないと操作が効いていないように見えてしまう。
+  showLoading(true,"PDFを読み込み中…", file.name||"");
+  showBanner(true,"PDFを読み込み中…",-1);
+  $("#btnReset").disabled=false;
+  $("#obOpen").disabled=false;
+  $("#obOpen").classList.add('glow');
+  fbFileName=file.name||"";
+  try{
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); // 表示を確実に描画させる
+    const buf=await file.arrayBuffer();
+    showLoading(true,"PDFを展開中…", file.name||"");
+    showBanner(true,"PDFを展開中…",-1);
+    pdfDoc=await pdfjsLib.getDocument({data:buf,
+      cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",cMapPacked:true}).promise;
+    await runAll();
+  }catch(e){
+    showLoading(false);
+    showBanner(false);
+    alert("PDFを読み込めませんでした：\n"+(e&&e.message?e.message:e));
+    return;
+  }
+  showLoading(false);
+}
+function resetAll(){
+  pdfDoc=null; pages=[]; selected=-1; cancelFlag=true; fbFileName=""; fbIssues=[]; pvDrawerOpen=false;
+  $("#viewer").classList.add('hidden'); $("#drop").classList.remove('hidden');
+  $("#zoomctl").classList.add('hidden'); var _pb=$("#previewbar"); if(_pb){_pb.classList.add('hidden'); _pb.innerHTML='';} $(".main").classList.remove('single');
+  setPvDrawer(false); $("#pvToggle").disabled=true; $("#pvDrawer").innerHTML='';
+  zoom=1;
+  $("#plist").innerHTML='<div class="empty-msg">PDF未読込</div>';
+  $("#tiles").innerHTML='<div class="empty-msg" style="padding:6px 0">—</div>';
+  $("#result").innerHTML='<div class="empty-msg">—</div>';
+  $("#file").value=""; $("#btnReset").disabled=true; $("#obOpen").disabled=true; $("#obOpen").classList.remove('glow'); showBanner(false); showLoading(false);
+}
+
+/* ---------- イベント ---------- */
+$("#btnOpen").onclick=()=>$("#file").click();
+$("#dropzone").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); };
+$("#btnReset").onclick=resetAll;
+$("#zIn").onclick=()=>zoomBy(1.25);
+$("#zOut").onclick=()=>zoomBy(1/1.25);
+$("#zFit").onclick=()=>zoomFit();
+$("#btnDbg").onclick=()=>{
+  const o=window.__lastOcr;
+  const w=window.open("","_blank");
+  if(!o){ w.document.write("<p style=font-family:sans-serif;padding:20px>まだOCRは実行されていません。OCRが走るのは、PDFの実テキストが読めず『文字はOCRで補完』が有効なときです。</p>"); return; }
+  w.document.write(`<div style="font-family:monospace;padding:16px">
+    <h3>OCRに渡した画像（バーコードは白塗り済み）</h3>
+    <img src="${o.img}" style="max-width:100%;border:1px solid #ccc">
+    <h3>OCR生テキスト</h3>
+    <pre style="white-space:pre-wrap;background:#f4f4f4;padding:12px;border-radius:6px">${esc2(o.text)}</pre>
+    ${chkBlock()}
+  </div>`);
+  function esc2(x){return (x==null?"(空)":String(x)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+  function chkBlock(){
+    const c=window.__lastChk; if(!c) return "";
+    return `<h3>照合デバッグ（最後のバーコード組）</h3>
+      <pre style="white-space:pre-wrap;background:#fff7e6;padding:12px;border-radius:6px">バーコードISBN: ${esc2(c.bcIsbn)}
+正規化前テキスト: ${esc2(c.txtIn)}
+正規化後テキスト: ${esc2(c.txtNorm)}
+コアが返したJSON:
+${esc2(c.repJson)}</pre>`;
+  }
+};
+$("#btnCancel").onclick=()=>{cancelFlag=true;};
+$("#btnTheme").onclick=()=>{
+  const r=document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  if(selected>=0) selectPage(selected);
+};
+const dz=$("#dropzone"), cen=$("#canvaswrap");
+;['dragenter','dragover'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('hot');}));
+;['dragleave','drop'].forEach(ev=>cen.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('hot');}));
+cen.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+window.addEventListener('resize',()=>{ if(selected>=0) selectPage(selected); });
+
+/* ---------- ホイールでカーソル位置を中心にズーム ---------- */
+cen.addEventListener('wheel',e=>{
+  if($("#viewer").classList.contains('hidden')) return;
+  e.preventDefault();
+  const cv=$("#pageCanvas"); if(!cv) return;
+  const old=zoom;
+  const factor=e.deltaY<0 ? 1.12 : 1/1.12;       // 上スクロールで拡大
+  zoom=Math.min(ZMAX, Math.max(ZMIN, zoom*factor));
+  if(zoom===old) return;
+  // 拡大前のカーソル→canvas左上の表示距離。拡大後その点はカーソルから ratio 倍に離れるので
+  // その差分だけスクロールを足すと、カーソル直下の点が固定される
+  const r=cv.getBoundingClientRect();
+  const dx=e.clientX-r.left, dy=e.clientY-r.top;
+  const ratio=zoom/old;
+  applyZoom();
+  cen.scrollLeft += dx*(ratio-1);
+  cen.scrollTop  += dy*(ratio-1);
+},{passive:false});
+
+/* ---------- ドラッグでプレビューを移動(パン) ---------- */
+let panning=false, panX=0, panY=0, panSL=0, panST=0;
+cen.addEventListener('mousedown',e=>{
+  if($("#viewer").classList.contains('hidden')) return;
+  if(e.button!==0) return;
+  // 入力欄やボタンの操作は妨げない(プレビュー上のみパン)
+  if(e.target.closest('input,button,a,textarea')) return;
+  panning=true; panX=e.clientX; panY=e.clientY;
+  panSL=cen.scrollLeft; panST=cen.scrollTop;
+  cen.classList.add('grabbing'); e.preventDefault();
+});
+window.addEventListener('mousemove',e=>{
+  if(!panning) return;
+  cen.scrollLeft=panSL-(e.clientX-panX);
+  cen.scrollTop =panST-(e.clientY-panY);
+});
+window.addEventListener('mouseup',()=>{ if(panning){ panning=false; cen.classList.remove('grabbing'); } });
+</script>
+<script>window.KENPAN_HAS_WORK=function(){ return !!pdfDoc; };</script>
+<script src="../assets/kenpan-nav.js"></script>
+</body>
+</html>

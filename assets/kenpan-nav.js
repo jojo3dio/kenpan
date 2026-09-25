@@ -2,8 +2,11 @@
    kenpan-nav.js — KENPAN 共通ナビゲーション
    FUJIWARA PRINTING.inc
 
+   置き場所：assets/kenpan-nav.js（ハブ index.html の1つ下の階層）
    使い方：各ツール・各マニュアルの </body> 直前に次の1行を追加する。
-     <script src="kenpan-nav.js"></script>
+     <script src="../assets/kenpan-nav.js"></script>
+   ハブの場所はこのファイル自身の場所から割り出すので、呼び出す側の
+   ページがどのフォルダ（check/ edit/ manual/ notes/ …）にあっても動く。
 
    ■ ツールのページ（「ハブに戻る」リンクが無いページ）
      画面右下に「ハブへ」ボタンを追加します。色はそのツール自身の
@@ -42,7 +45,25 @@
   if (window.__kenpanNavReady) return;
   window.__kenpanNavReady = true;
 
-  var HUB = 'index.html';
+  /* ハブのあるフォルダ（＝このファイルの1つ上）。currentScript が取れない
+     古い環境では、呼び出し元ページの1つ上とみなす。 */
+  var ROOT = (function(){
+    try {
+      var me = document.currentScript && document.currentScript.src;
+      return new URL('../', me || location.href).href;
+    } catch(e){ return '../'; }
+  })();
+  var HUB = ROOT + 'index.html';
+
+  /* ハブ（index.html）から見た相対パスに直す。ハブへ postMessage で
+     「このツールを開いて」と頼むときは、ハブ基準のパスで渡す必要がある。 */
+  function hubRelative(href){
+    try {
+      var abs = new URL(href, location.href).href;
+      if (abs.indexOf(ROOT) === 0) return abs.slice(ROOT.length);
+    } catch(e){}
+    return href;
+  }
   var K_NAVMODE = 'kenpan-hub-navmode';
   var K_WINMEM  = 'kenpan-hub-winmem';
   var K_WINTOOL = 'kenpan-win-tool';
@@ -281,7 +302,7 @@
         tool.addEventListener('click', function(e){
           try {
             e.preventDefault();
-            window.parent.postMessage({ kenpan: 'openTool', url: href }, location.origin);
+            window.parent.postMessage({ kenpan: 'openTool', url: hubRelative(href) }, location.origin);
           } catch(err){
             window.open(href, '_blank');
           }

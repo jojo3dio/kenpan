@@ -7,8 +7,8 @@
 <!-- PWA（Windows: Edge/Chrome「アプリとしてインストール」／Mac: Safari「Dockに追加」対応） -->
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#b9791a">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <meta name="application-name" content="KENPAN">
 <meta name="apple-mobile-web-app-title" content="KENPAN">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,6 +17,16 @@
 <!-- 起動時に開くツールへの転送。描画前に判定するため head 内に置く。
      ?hub= が付いていれば「ハブへ戻ってきた」ときなので転送しない（＝脱出口）。 -->
 <script>
+/* フォルダ整理（2026-09）で移動したファイルの旧→新パス。
+   各ブラウザに保存済みの並び・起動時ツール設定をこの表で読み替える。 */
+window.KENPAN_MOVED={"isbn-barcode-check.html":"check/isbn-barcode-check.html","nombre-check.html":"check/nombre-check.html","pdf-diff-check.html":"check/pdf-diff-check.html","toc_kenpan.html":"check/toc_kenpan.html","tombo-check.html":"check/tombo-check.html","pdf-bookmark-add.html":"edit/pdf-bookmark-add.html","single-to-spread.html":"edit/single-to-spread.html","pdf-unlock.html":"edit/pdf-unlock.html","nodo-shiro.html":"edit/nodo-shiro.html","nodo-dobu.html":"edit/nodo-dobu.html","manual-spread.html":"manual/manual-spread.html","manual-isbn.html":"manual/manual-isbn.html","manual-pdf-diff.html":"manual/manual-pdf-diff.html","manual-toc.html":"manual/manual-toc.html","manual-bookmark.html":"manual/manual-bookmark.html","manual-nodo.html":"manual/manual-nodo.html","manual-nodo-dobu.html":"manual/manual-nodo-dobu.html","manual-unlock.html":"manual/manual-unlock.html","manual-tombo.html":"manual/manual-tombo.html","manual-nombre.html":"manual/manual-nombre.html"};
+(function(){
+  try{
+    var st=localStorage.getItem('kenpan-hub-startup')||'';
+    var sb=st.split(/[?#]/)[0];
+    if(sb && window.KENPAN_MOVED[sb]){ st=window.KENPAN_MOVED[sb]+st.slice(sb.length); localStorage.setItem('kenpan-hub-startup',st); }
+  }catch(e){}
+})();
 (function(){
   try{
     if(new URLSearchParams(location.search).has('hub')) return;
@@ -442,10 +452,10 @@ body.compact.row .cap{display:block;font-size:11px;max-width:78px;line-height:1.
 <div class="modal-bg" id="modalBg">
   <div class="modal">
     <h2 id="modalTitle">ツールを追加</h2>
-    <p class="hint">同じフォルダにあるHTMLファイル名（相対パス）と表示情報を入力してください。マニュアルは任意です。</p>
+    <p class="hint">ハブ（index.html）から見た相対パスと表示情報を入力してください（例：点検ツールは check/、編集ツールは edit/、マニュアルは manual/ に置きます）。マニュアルは任意です。</p>
     <div class="field"><label>ツール名</label><input id="fName" placeholder="例：ノンブル検版"></div>
-    <div class="field"><label>ファイル名 / URL</label><input id="fUrl" class="mono" placeholder="例：nombre-check.html"></div>
-    <div class="field"><label>マニュアル（任意）</label><input id="fMan" class="mono" placeholder="例：manual-nombre.html"></div>
+    <div class="field"><label>ファイル名 / URL</label><input id="fUrl" class="mono" placeholder="例：check/nombre-check.html"></div>
+    <div class="field"><label>マニュアル（任意）</label><input id="fMan" class="mono" placeholder="例：manual/manual-nombre.html"></div>
     <div class="field"><label>分類（任意）</label><input id="fCat" placeholder="例：位置・体裁"></div>
     <div class="field"><label>説明（任意）</label><textarea id="fDesc" placeholder="どんな点検をするツールかを説明"></textarea></div>
     <div class="field"><label>アイコン</label><div class="iconrow" id="iconRow"></div></div>
@@ -464,7 +474,7 @@ const RENAMED='kenpan-hub-renamed-v1';
    すでに開いたブラウザの表示は変わらない。ここに書いた分だけ一度きり上書きする。
    利用者が手で付け直した名前（from と一致しないもの）は触らない。 */
 const RENAMES=[
-  {url:'nodo-shiro.html', from:'ノド糊しろ白', to:'ノド側の白'}
+  {url:'edit/nodo-shiro.html', from:'ノド糊しろ白', to:'ノド側の白'}
 ];
 
 const ICONS={
@@ -500,25 +510,25 @@ const NAME_BREAKS={
 function capHtml(name){ return NAME_BREAKS[name] || esc(name); }
 
 const DEFAULTS=[
-  {name:'ISBN検版', url:'isbn-barcode-check.html', manual:'manual-isbn.html', cat:'バーコード照合', icon:'barcode', group:'inspect',
+  {name:'ISBN検版', url:'check/isbn-barcode-check.html', manual:'manual/manual-isbn.html', cat:'バーコード照合', icon:'barcode', group:'inspect',
    desc:'表紙・カバーの2段バーコードを検出し、ISBN・Cコード・価格の印字と照合します。バーの欠け・つぶれといった品質不良も検知し、人が読む数字行を誤検出しないよう調整済みです。'},
-  {name:'ノンブル検版', url:'nombre-check.html', manual:'manual-nombre.html', cat:'位置・体裁', icon:'position', group:'inspect',
+  {name:'ノンブル検版', url:'check/nombre-check.html', manual:'manual/manual-nombre.html', cat:'位置・体裁', icon:'position', group:'inspect',
    desc:'ノンブル（ページ番号）の位置を検版します。ズーム／パン、OCRモード、表裏の見当チェックに対応します。'},
-  {name:'下版差分チェッカー', url:'pdf-diff-check.html', manual:'manual-pdf-diff.html', cat:'差分', icon:'diff', group:'inspect',
+  {name:'下版差分チェッカー', url:'check/pdf-diff-check.html', manual:'manual/manual-pdf-diff.html', cat:'差分', icon:'diff', group:'inspect',
    desc:'同一DPIでレンダリングした2つの下版PDFをピクセル単位で差分検出します。5つの表示モードと、全ページを一気に見渡す概観スキャンを備えています。'},
-  {name:'目次整合検版', url:'toc_kenpan.html', manual:'manual-toc.html', cat:'整合', icon:'toc', group:'inspect',
+  {name:'目次整合検版', url:'check/toc_kenpan.html', manual:'manual/manual-toc.html', cat:'整合', icon:'toc', group:'inspect',
    desc:'目次・見出し・柱・ノンブルの相互整合をチェックします。横組み・縦組みの両方に対応します。'},
-  {name:'トンボ計測', url:'tombo-check.html', manual:'manual-tombo.html', cat:'計測', icon:'ruler', group:'inspect',
+  {name:'トンボ計測', url:'check/tombo-check.html', manual:'manual/manual-tombo.html', cat:'計測', icon:'ruler', group:'inspect',
    desc:'表紙・カバー展開図のトンボ（トリムマーク）を自動検出し、天地・左右・折り位置などの各種寸法を計測します。ハンドルドラッグで微調整、CSV出力にも対応します。'},
-  {name:'PDF しおり追加', url:'pdf-bookmark-add.html', manual:'manual-bookmark.html', cat:'しおり付加', icon:'ribbon', group:'edit',
+  {name:'PDF しおり追加', url:'edit/pdf-bookmark-add.html', manual:'manual/manual-bookmark.html', cat:'しおり付加', icon:'ribbon', group:'edit',
    desc:'テキストの目次リストからPDFにブックマーク（アウトライン）を階層構造で書き込みます。ページラベルのズレも自動補正します。'},
-  {name:'単ページ見開き化', url:'single-to-spread.html', manual:'manual-spread.html', cat:'版面調整', icon:'spread', group:'edit',
+  {name:'単ページ見開き化', url:'edit/single-to-spread.html', manual:'manual/manual-spread.html', cat:'版面調整', icon:'spread', group:'edit',
    desc:'章扉・奥付などファイルを分けて作った単ページを、見開きサイズに自動拡張します。ノンブル・柱の位置と綴じ方向から左右を自動判定し、正しい側に白ページを追加します。判定できないページは手動で左右を選べます。'},
-  {name:'ノド側の白', url:'nodo-shiro.html', manual:'manual-nodo.html', cat:'ノド白付加', icon:'gutter', group:'edit',
+  {name:'ノド側の白', url:'edit/nodo-shiro.html', manual:'manual/manual-nodo.html', cat:'ノド白付加', icon:'gutter', group:'edit',
    desc:'製本の糊しろになる白を、下版PDFのノド側に後から追加します。製本方法・パーツから必要な白を判定し、分割入稿された複数PDFの並び順から継ぎ目を割り出して一括で入れられます。元ファイルとバイト単位で一致するところまで削除できます。'},
-  {name:'ノド断ち代', url:'nodo-dobu.html', manual:'manual-nodo-dobu.html', cat:'断ち代付加', icon:'bleed', group:'edit',
+  {name:'ノド断ち代', url:'edit/nodo-dobu.html', manual:'manual/manual-nodo-dobu.html', cat:'断ち代付加', icon:'bleed', group:'edit',
    desc:'リング綴じなど、折らずに4方断裁してペラで丁合する製本のために、ノド側の断ち代を作ります。見開きレイアウトから単ページ書き出ししたPDFのノド際を行ごとに調べ、絵柄がつながっていればそのまま、ノドまで絵柄があれば反転して足し、紙地なら隣の写り込みを白で伏せます。元ファイルとバイト単位で一致するところまで戻せます。'},
-  {name:'権限ロック解除', url:'pdf-unlock.html', manual:'manual-unlock.html', cat:'制限解除', icon:'unlock', group:'edit',
+  {name:'権限ロック解除', url:'edit/pdf-unlock.html', manual:'manual/manual-unlock.html', cat:'制限解除', icon:'unlock', group:'edit',
    desc:'入稿PDFにかかった印刷・コピー・編集などの権限制限（オーナーパスワード）を外し、面付け・下版に使える状態にします。複数ファイルをまとめて処理でき、元ファイルは変更せず別名で書き出します。開くときにパスワードを要求される閲覧制限には対応していません。'}
 ];
 
@@ -534,7 +544,13 @@ function load(){
   try{ const j=localStorage.getItem(STORE); if(j) saved=JSON.parse(j); }catch(e){}
   if(!saved){ try{ localStorage.setItem(SEEN, JSON.stringify(DEFAULTS.map(d=>d.url))); }catch(e){} return DEFAULTS.slice(); }
   let seen=[]; try{ seen=JSON.parse(localStorage.getItem(SEEN)||'[]'); }catch(e){}
-  const set=new Set(seen); let changed=false;
+  /* フォルダ整理で移動したファイルを新しいパスに読み替える（並び順・削除済みの状態は保つ） */
+  const MV=window.KENPAN_MOVED||{};
+  const mv=u=>{ if(!u) return u; const b=String(u).split(/[?#]/)[0]; return MV[b]?MV[b]+String(u).slice(b.length):u; };
+  let changed=false;
+  saved.forEach(t=>{ const nu=mv(t.url), nm=mv(t.manual); if(nu!==t.url||nm!==t.manual){ t.url=nu; t.manual=nm; changed=true; } });
+  seen=seen.map(mv);
+  const set=new Set(seen);
   DEFAULTS.forEach(d=>{ if(!set.has(d.url)){ if(!saved.some(t=>t.url===d.url)) saved.push({...d}); set.add(d.url); changed=true; } });
   /* 既定ツールの改名を一度だけ反映する */
   let done=[]; try{ done=JSON.parse(localStorage.getItem(RENAMED)||'[]'); }catch(e){}

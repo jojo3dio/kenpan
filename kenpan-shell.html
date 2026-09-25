@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KENPAN</title>
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -165,10 +165,12 @@ const STORE='kenpan-hub-tools-v1', THEME='kenpan-hub-theme';
 const WINMEM='kenpan-hub-winmem', WIN_TOOL='kenpan-win-tool';
 const SHELL_FILE='kenpan-shell.html', SHELL_NAME='kenpanShell';
 const MAX_TABS=8, WARN_TABS=5;
+/* フォルダ整理（2026-09）で移動したファイルの旧→新パス（index.html と同じ表） */
+const MOVED={"isbn-barcode-check.html":"check/isbn-barcode-check.html","nombre-check.html":"check/nombre-check.html","pdf-diff-check.html":"check/pdf-diff-check.html","toc_kenpan.html":"check/toc_kenpan.html","tombo-check.html":"check/tombo-check.html","pdf-bookmark-add.html":"edit/pdf-bookmark-add.html","single-to-spread.html":"edit/single-to-spread.html","pdf-unlock.html":"edit/pdf-unlock.html","nodo-shiro.html":"edit/nodo-shiro.html","nodo-dobu.html":"edit/nodo-dobu.html","manual-spread.html":"manual/manual-spread.html","manual-isbn.html":"manual/manual-isbn.html","manual-pdf-diff.html":"manual/manual-pdf-diff.html","manual-toc.html":"manual/manual-toc.html","manual-bookmark.html":"manual/manual-bookmark.html","manual-nodo.html":"manual/manual-nodo.html","manual-nodo-dobu.html":"manual/manual-nodo-dobu.html","manual-unlock.html":"manual/manual-unlock.html","manual-tombo.html":"manual/manual-tombo.html","manual-nombre.html":"manual/manual-nombre.html"};
 
 const ICON_COLORS={ barcode:'#2563eb',position:'#0d9488',diff:'#7c3aed',toc:'#d94f95',
   check:'#16a34a',doc:'#e11d48',ruler:'#0891b2',ribbon:'#dc2626',spread:'#6d5cd6',
-  gutter:'#00b4d8',unlock:'#0f7a56' };
+  gutter:'#00b4d8',unlock:'#0f7a56',bleed:'#c026d3' };
 
 const $=s=>document.querySelector(s);
 const tabsEl=$('#tabs'), hostEl=$('#host'), emptyEl=$('#empty'),
@@ -205,21 +207,24 @@ function frameSrc(u){
    ハブが保存した並び（STORE）を使う。ハブをまだ触っていない環境では
    保存が無いことがあるので、既定の顔ぶれを控えとして持っておく。 */
 const FALLBACK=[
-  {name:'ISBN検版',        url:'isbn-barcode-check.html', icon:'barcode',  group:'inspect'},
-  {name:'ノンブル検版',     url:'nombre-check.html',       icon:'position', group:'inspect'},
-  {name:'下版差分チェッカー', url:'pdf-diff-check.html',     icon:'diff',     group:'inspect'},
-  {name:'目次整合検版',     url:'toc_kenpan.html',         icon:'toc',      group:'inspect'},
-  {name:'トンボ計測',       url:'tombo-check.html',        icon:'ruler',    group:'inspect'},
-  {name:'PDF しおり追加',   url:'pdf-bookmark-add.html',   icon:'ribbon',   group:'edit'},
-  {name:'単ページ見開き化',  url:'single-to-spread.html',   icon:'spread',   group:'edit'},
-  {name:'ノド側の白',       url:'nodo-shiro.html',         icon:'gutter',   group:'edit'},
-  {name:'権限ロック解除',    url:'pdf-unlock.html',         icon:'unlock',   group:'edit'}
+  {name:'ISBN検版',        url:'check/isbn-barcode-check.html', icon:'barcode',  group:'inspect'},
+  {name:'ノンブル検版',     url:'check/nombre-check.html',       icon:'position', group:'inspect'},
+  {name:'下版差分チェッカー', url:'check/pdf-diff-check.html',     icon:'diff',     group:'inspect'},
+  {name:'目次整合検版',     url:'check/toc_kenpan.html',         icon:'toc',      group:'inspect'},
+  {name:'トンボ計測',       url:'check/tombo-check.html',        icon:'ruler',    group:'inspect'},
+  {name:'PDF しおり追加',   url:'edit/pdf-bookmark-add.html',   icon:'ribbon',   group:'edit'},
+  {name:'単ページ見開き化',  url:'edit/single-to-spread.html',   icon:'spread',   group:'edit'},
+  {name:'ノド側の白',       url:'edit/nodo-shiro.html',         icon:'gutter',   group:'edit'},
+  {name:'ノド断ち代',       url:'edit/nodo-dobu.html',          icon:'bleed',    group:'edit'},
+  {name:'権限ロック解除',    url:'edit/pdf-unlock.html',         icon:'unlock',   group:'edit'}
 ];
 let catalog=FALLBACK.slice();
 function loadCatalog(){
   try{
     const j=ls(STORE);
-    if(j){ const a=JSON.parse(j); if(Array.isArray(a) && a.length) catalog=a; }
+    if(j){ const a=JSON.parse(j); if(Array.isArray(a) && a.length) catalog=a.map(t=>{
+      /* ハブ側で読み替え前の保存データでも名前・色が出るように、旧パスを新パスへ */
+      const b=baseUrl(t.url); return MOVED[b]?Object.assign({},t,{url:MOVED[b]+String(t.url).slice(b.length)}):t; }); }
   }catch(e){}
 }
 function metaOf(url){

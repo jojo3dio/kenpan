@@ -1,0 +1,2960 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノド断ち代ツール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#14110e; --panel:#1d1916; --panel2:#262017; --line:#3a3128;
+    --ink:#ece5da; --ink-dim:#a99e8c; --ink-faint:#6f6557;
+    --main:#a986f5; --main-soft:#281b3d;
+    --accent:#a986f5;                     /* kenpan-nav.js が「ハブへ」ボタンの色に使う */
+    --red:#ff5a4d; --cyan:#46c8da; --ok:#7ec86b; --gray:#9aa6b4;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+    --headerGrad:linear-gradient(180deg,#1f1a15,#181410);
+    --stage1:#1a1611; --stage2:#16120e;
+    --bodyGlow:radial-gradient(1200px 600px at 80% -10%,#221836 0,transparent 60%);
+    --hudBg:rgba(20,17,14,.78); --zoomBg:rgba(29,25,22,.9); --busyBg:rgba(20,17,14,.55);
+  }
+  body.light{
+    --bg:#f3eefc; --panel:#ffffff; --panel2:#f3f0ea; --line:#d6d0c4;
+    --ink:#2b2620; --ink-dim:#6c6456; --ink-faint:#9b927f;
+    --main:#7c3aed; --main-soft:#ece5fb;
+    --accent:#7c3aed;
+    --red:#d83a2e; --cyan:#1f93a6; --ok:#3f9a37; --gray:#6c7b8c;
+    --headerGrad:linear-gradient(180deg,#ffffff,#ffffff);
+    --stage1:#f6f3fd; --stage2:#efeafb;
+    --bodyGlow:radial-gradient(1200px 600px at 80% -10%,#efe9fc 0,transparent 60%);
+    --hudBg:rgba(255,255,255,.85); --zoomBg:rgba(255,255,255,.92); --busyBg:rgba(245,243,238,.6);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:var(--ui);background:var(--bodyGlow),var(--bg);color:var(--ink);
+    overflow:hidden;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s}
+  .app{display:flex;flex-direction:column;height:100vh}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:center;gap:18px;padding:10px 18px;border-bottom:1px solid var(--line);
+    background:var(--headerGrad);flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
+  .brand .mk{width:26px;height:26px;color:var(--main);display:flex;align-items:center;justify-content:center}
+  .brandtxt{display:flex;flex-direction:column;gap:1px;line-height:1.15}
+  .brandtxt h1{font-size:16px;font-weight:700;letter-spacing:.02em;margin:0}
+  .brandtxt h1 i{font-style:normal;color:var(--main)}
+  .brandtxt .ver{color:var(--ink-faint);font-family:var(--mono);font-size:10.5px;letter-spacing:.02em}
+  .hspacer{flex:1 1 auto;min-width:8px}
+  .headrow{display:flex;gap:8px;justify-content:flex-end;flex:0 0 auto}
+  .themebtn{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-family:var(--ui);font-size:12px;
+    color:var(--ink-dim);background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:8px 12px;cursor:pointer;transition:.12s;white-space:nowrap}
+  .themebtn:hover{border-color:var(--main);color:var(--ink)}
+  .themebtn svg{width:16px;height:16px}
+  .fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:12.5px;
+    font-weight:700;color:var(--main);background:var(--main-soft);border:1px solid var(--main);
+    border-radius:8px;padding:8px 13px;cursor:pointer;transition:.12s;white-space:nowrap}
+  .fbbtn:hover{filter:brightness(1.1)}
+  .fbbtn svg{width:15px;height:15px}
+
+  /* ---------- 画面1：設定 ---------- */
+  .setup{flex:1;min-height:0;overflow-y:auto;padding:22px 20px 40px}
+  .setupin{max-width:920px;margin:0 auto}
+  .setup h2.sechd{font-size:13px;margin:0 0 10px;color:var(--ink-dim);font-weight:700;letter-spacing:.05em;
+    display:flex;align-items:center;gap:8px}
+  .setup h2.sechd .num{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;
+    border-radius:50%;background:var(--main);color:#fff;font-size:11px;font-family:var(--mono)}
+  .scard{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:16px;margin-bottom:16px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.cols{grid-template-columns:1fr}}
+
+  .setup.center{display:flex;align-items:center;justify-content:center;padding:24px 20px 40px}
+  .dropwrap{max-width:640px;width:100%}
+  .droplead{text-align:center;margin-bottom:22px}
+  .droplead h2{font-size:19px;margin:0 0 10px;font-weight:700}
+  .droplead p{font-size:12.5px;color:var(--ink-dim);line-height:1.9;margin:0}
+  .drop.big{padding:54px 24px;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .drop.big svg{color:var(--main);opacity:.85;margin-bottom:8px}
+  .dropnote{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:15px;line-height:1.7}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:26px 16px;text-align:center;cursor:pointer;
+    transition:.15s;background:var(--panel2)}
+  .drop:hover,.drop.over{border-color:var(--main);background:var(--main-soft);border-style:solid}
+  .drop .big{font-size:14px;font-weight:700}
+  .drop .sub{font-size:11.5px;color:var(--ink-faint);margin-top:5px}
+  .flist{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+  .fitem{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:var(--panel2);
+    border:1px solid var(--line);font-size:12.5px}
+  .fitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fitem .mt{font-family:var(--mono);font-size:11px;color:var(--ink-faint);white-space:nowrap}
+  .fitem .x{color:var(--ink-faint);font-size:15px;line-height:1;padding:2px 5px;border-radius:5px;cursor:pointer}
+  .fitem .x:hover{background:var(--main-soft);color:var(--main)}
+
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .field > label{display:block;font-size:12px;color:var(--ink-dim);margin-bottom:6px;font-weight:500}
+  .seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel2)}
+  .seg button{flex:1;background:transparent;border:0;border-right:1px solid var(--line);color:var(--ink-dim);
+    font-family:var(--ui);font-size:12.5px;padding:10px 5px;cursor:pointer;transition:.12s;line-height:1.35}
+  .seg button:last-child{border-right:0}
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{background:var(--main);color:#fff;font-weight:700}
+  .seg button small{display:block;font-size:10px;opacity:.82;font-weight:400}
+  .lnk{background:transparent;border:0;color:var(--main);font-family:var(--ui);font-size:11px;
+    cursor:pointer;padding:0 0 0 8px;text-decoration:underline}
+  .lnk:hover{filter:brightness(1.15)}
+  .seg button:disabled{opacity:.3;cursor:not-allowed}
+  .hint{font-size:11.5px;color:var(--ink-faint);line-height:1.75;margin-top:7px}
+  .hint b{color:var(--ink-dim);font-weight:600}
+  .modehelp{margin-top:10px;display:flex;flex-direction:column;gap:7px}
+  .mh{display:flex;gap:9px;align-items:flex-start;font-size:11.5px;line-height:1.65;color:var(--ink-dim)}
+  .mh i{width:10px;height:10px;border-radius:3px;flex:0 0 auto;margin-top:5px}
+  .mh b{color:var(--ink)}
+
+  input[type=text],input[type=number],select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12.5px;outline:none}
+  input:focus,select:focus{border-color:var(--main)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chk{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-dim);cursor:pointer;padding:4px 0}
+  .chk input{accent-color:var(--main);width:15px;height:15px}
+  details.adv{border:1px solid var(--line);border-radius:13px;background:var(--panel);margin-bottom:16px}
+  details.adv > summary{cursor:pointer;padding:13px 16px;font-size:12.5px;color:var(--ink-dim);font-weight:700;
+    list-style:none;display:flex;align-items:center;gap:8px}
+  details.adv > summary::-webkit-details-marker{display:none}
+  details.adv > summary::before{content:'▸';color:var(--main);transition:.15s;display:inline-block}
+  details.adv[open] > summary::before{transform:rotate(90deg)}
+  details.adv .advbody{padding:0 16px 16px;display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+  @media(max-width:820px){details.adv .advbody{grid-template-columns:1fr}}
+
+  .runrow{display:flex;gap:10px;align-items:center;margin-top:4px}
+  .run{background:var(--main);color:#fff;border:0;border-radius:10px;padding:14px 26px;
+    font-family:var(--ui);font-size:15px;font-weight:700;cursor:pointer;transition:.12s}
+  .run:hover{filter:brightness(1.1)}
+  .run:disabled{opacity:.38;cursor:default;filter:none}
+  .run.ghost{background:var(--panel2);color:var(--ink-dim);border:1px solid var(--line);font-size:13px;padding:12px 18px}
+  .run.ghost:hover{color:var(--ink);border-color:var(--main);filter:none}
+
+  .infobox{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:11px 13px;
+    font-size:12px;line-height:1.8;color:var(--ink-dim)}
+  .infobox b{color:var(--ink)}
+  .infobox .warn{color:var(--red)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px;margin:0}
+  .kv dt{color:var(--ink-faint)}
+  .kv dd{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--ink)}
+
+  /* ---------- 画面2：綴じと処理 ---------- */
+  .setbar{position:relative;flex:0 0 auto;z-index:60}
+  .settoggle{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+  .settoggle svg{width:15px;height:15px;opacity:.85}
+  .settoggle .caret{font-size:10px;color:var(--ink-faint);transition:transform .15s}
+  .settoggle[aria-expanded="false"] .caret{transform:rotate(-90deg)}
+  .settoggle.act{border-color:var(--main);color:var(--ink)}
+  button.btn.xl{font-size:14px;font-weight:700;padding:10px 20px}
+  .settings{position:absolute;left:0;right:0;top:100%;z-index:60;display:flex;flex-wrap:wrap;gap:8px;
+    padding:10px 14px;align-items:stretch;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+    background:var(--panel2);box-shadow:0 14px 30px rgba(0,0,0,.32);max-height:74vh;overflow:auto}
+  body.light .settings{box-shadow:0 14px 30px rgba(0,0,0,.14)}
+  .settings.collapsed{display:none}
+  .toolsec{border:1px solid var(--line);border-radius:8px;padding:5px 11px 7px;background:var(--panel);
+    display:flex;flex-direction:column;gap:4px}
+  .secttl{font-size:9px;color:var(--main);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-family:var(--mono)}
+  .secbody{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .secbody .glabel{font-size:10.5px;color:var(--ink-faint);letter-spacing:.03em;font-family:var(--ui)}
+  .sechint{font-size:10px;color:var(--ink-faint);line-height:1.5;max-width:420px}
+  .vline{width:1px;height:18px;background:var(--line);margin:0 2px}
+  input.numin{width:64px;padding:4px 6px;font-size:11.5px;text-align:right}
+  input.txtin{width:150px;padding:4px 7px;font-size:11.5px;font-family:var(--ui)}
+  .modes.sm button{font-size:11px;padding:4px 8px}
+
+  .cfgbody{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 18px;overflow:auto}
+  @media(max-width:860px){.cfgbody{grid-template-columns:1fr}}
+  .cfgcol{display:flex;flex-direction:column;min-height:0}
+  .scard.grow{flex:1;min-height:0;overflow:auto;margin-bottom:0}
+  .run.ghost.sm{font-size:12px;padding:8px 14px}
+  .revertbtn{margin-top:9px;font-family:var(--ui);font-size:11.5px;color:var(--ink-dim);background:var(--panel);
+    border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+  .revertbtn:hover{border-color:var(--main);color:var(--ink)}
+
+  /* ---------- 画面3：プレビュー ---------- */
+  .work{flex:1;display:flex;flex-direction:column;min-height:0}
+  .toolbar{display:flex;align-items:center;gap:9px;padding:8px 14px;flex-wrap:wrap;
+    border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+  .grp{display:flex;align-items:center;gap:6px}
+  .grp .glabel{font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
+  .sep{width:1px;height:24px;background:var(--line)}
+  button.btn,select.sel{font-family:var(--ui);font-size:12px;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:6px 9px;cursor:pointer;transition:.12s}
+  button.btn:hover{border-color:var(--main)}
+  button.btn:active{transform:translateY(1px)}
+  button.btn:disabled{opacity:.4;cursor:not-allowed}
+  button.btn.icon{padding:6px 9px;font-family:var(--mono);min-width:32px}
+  button.btn.pri{background:var(--main);color:#fff;border-color:var(--main);font-weight:700}
+  .modes{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .modes button{background:transparent;border:0;color:var(--ink-dim);font-size:12px;padding:6px 10px;cursor:pointer;
+    border-right:1px solid var(--line);transition:.12s;font-family:var(--ui)}
+  .modes button:last-child{border-right:0}
+  .modes button:hover{color:var(--ink)}
+  .modes button.on{background:var(--main);color:#fff;font-weight:700}
+  .pginput{width:52px;font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:5px 6px;text-align:center}
+  .tspacer{flex:1 1 auto;min-width:8px}
+
+  .body{display:flex;flex:1;min-height:0}
+  .viewercol{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .stage{flex:1;position:relative;min-width:0;min-height:0;background:var(--stage1);overflow:hidden}
+  #canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+  #canvas.grabbing{cursor:grabbing}
+  .stagehud{position:absolute;left:12px;bottom:12px;font-family:var(--mono);font-size:11px;color:var(--ink-dim);
+    background:var(--hudBg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;
+    pointer-events:none;line-height:1.6;backdrop-filter:blur(3px)}
+  .stagehud b{color:var(--ink)}
+  .zoombar{position:absolute;right:12px;bottom:12px;display:flex;gap:6px}
+  .zoombar button{background:var(--zoomBg);border:1px solid var(--line);color:var(--ink);border-radius:6px;
+    height:30px;min-width:34px;padding:0 9px;cursor:pointer;font-family:var(--mono);font-size:12.5px}
+  .zoombar button:hover{border-color:var(--main)}
+  .vbar{display:flex;align-items:center;gap:14px;color:var(--ink-dim);font-size:12px;flex-wrap:wrap;
+    justify-content:center;flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:9px 12px}
+  .vbar .hint{color:var(--ink-faint)}
+  .vbar kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);border-radius:3px;
+    padding:0 4px;color:var(--ink-dim)}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim);cursor:pointer}
+  .toggle:hover{color:var(--ink)}
+  .toggle input{accent-color:var(--main);width:14px;height:14px;margin:0;cursor:pointer}
+  .legend{display:flex;align-items:center;gap:13px;font-size:10.5px;color:var(--ink-dim);padding:6px 14px;
+    flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend i{width:11px;height:11px;border-radius:2px;display:inline-block}
+
+  aside{width:268px;flex:0 0 auto;border-left:1px solid var(--line);background:var(--panel);
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .pan-head{flex:0 0 auto;padding:10px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .pan-head h2{font-size:12.5px;margin:0;font-weight:700;flex:1}
+  .pan-head .count{font-family:var(--mono);font-size:11.5px;padding:2px 9px;border-radius:11px;
+    background:var(--main-soft);color:var(--main)}
+  .thumbs{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:8px}
+  .thumbs::-webkit-scrollbar{width:9px}
+  .thumbs::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+  .pgrow{display:flex;align-items:center;gap:9px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;
+    margin-bottom:6px;cursor:pointer;background:var(--panel2);transition:.12s}
+  .pgrow:hover{border-color:var(--main)}
+  .pgrow.cur{border-color:var(--main);box-shadow:0 0 0 1px var(--main) inset}
+  .pgrow .th{position:relative;width:46px;flex:0 0 auto;background:#fff;border-radius:3px;overflow:hidden;
+    min-height:24px;display:flex;align-items:center;justify-content:center}
+  .pgrow .th canvas{display:block;width:100%;height:auto}
+  .pgrow .th .gb{position:absolute;top:0;bottom:0;width:5px}
+  .pgrow .th .gb.l{left:0} .pgrow .th .gb.r{right:0}
+  .pgrow .mt2{flex:1;min-width:0;line-height:1.5}
+  .pgrow .pgno{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink)}
+  .pgrow .md{font-size:10.5px}
+  .pgrow .sd{font-size:10px;color:var(--ink-faint)}
+  .pgrow .bang{color:var(--red);font-weight:700;font-size:12px}
+  .m-white{color:var(--gray)} .m-mirror{color:var(--cyan)}
+  .m-keep{color:var(--ok)} .m-skip{color:var(--ink-faint)} .m-mixed{color:var(--main)}
+  .bg-white{background:var(--gray)} .bg-mirror{background:var(--cyan)}
+  .bg-keep{background:var(--ok)} .bg-skip{background:var(--ink-faint)} .bg-mixed{background:var(--main)}
+
+  .pgacts{flex:0 0 auto;padding:9px 11px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px}
+  .pgacts button{flex:1 1 auto;font-family:var(--ui);font-size:11.5px;color:var(--ink-dim);background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:7px 6px;cursor:pointer;white-space:nowrap}
+  .pgacts button:hover{border-color:var(--main);color:var(--ink)}
+  .help{flex:0 0 auto;padding:9px 13px;border-top:1px solid var(--line);font-size:10.5px;color:var(--ink-faint);line-height:1.7}
+  .help kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);border-radius:3px;
+    padding:0 4px;color:var(--ink-dim)}
+
+  .kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;
+    border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
+
+  .busy{position:fixed;inset:0;display:none;flex-direction:column;gap:14px;align-items:center;justify-content:center;
+    background:var(--busyBg);z-index:70;backdrop-filter:blur(2px)}
+  .busy.show{display:flex}
+  .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--main);border-radius:50%;
+    animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .busytxt{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--hudBg);border:1px solid var(--line);
+    border-radius:7px;padding:7px 14px;min-width:260px;text-align:center}
+  .busybar{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:8px}
+  .busybar i{display:block;height:100%;background:var(--main);width:0;transition:width .15s}
+
+  .toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:80;background:var(--panel);
+    border:1px solid var(--line);color:var(--ink);padding:9px 18px;border-radius:8px;font-size:12.5px;
+    opacity:0;transition:.25s;pointer-events:none;max-width:80vw;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+  .toast.show{opacity:1}
+  .toast.ok{border-color:var(--ok)} .toast.err{border-color:var(--red)}
+
+  /* feedback */
+  .fbmodal{position:fixed;inset:0;background:rgba(10,8,14,.62);display:none;align-items:center;justify-content:center;
+    z-index:90;backdrop-filter:blur(3px);padding:20px}
+  .fbmodal.show{display:flex}
+  .fbcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(560px,100%);
+    max-height:86vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+  .fbcard h3{margin:0 0 6px;font-size:15px}
+  .fbsub{font-size:11.5px;color:var(--ink-faint);line-height:1.7;margin:0 0 14px}
+  .fbfield{margin-bottom:11px}
+  .fbfield label{display:block;font-size:11.5px;color:var(--ink-dim);margin-bottom:5px}
+  .fbfield .req{color:var(--red);margin-left:3px}
+  .fbfield textarea{width:100%;min-height:76px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:8px;font-family:var(--ui);font-size:12px;outline:none;resize:vertical}
+  .fbverdict{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+  .fbverdict button{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim);border-radius:9px;
+    padding:9px 6px;font-family:var(--ui);font-size:12px;cursor:pointer;line-height:1.4}
+  .fbverdict button.on{border-color:var(--main);background:var(--main-soft);color:var(--ink);font-weight:700}
+  .fbverdict .vm{display:block;font-size:9.5px;opacity:.75;font-weight:400}
+  .fbrow2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .fbactions{display:flex;gap:9px;justify-content:flex-end;margin-top:14px}
+  .fbcancel,.fbsend{border-radius:9px;padding:9px 18px;font-family:var(--ui);font-size:12.5px;cursor:pointer}
+  .fbcancel{background:transparent;border:1px solid var(--line);color:var(--ink-dim)}
+  .fbsend{background:var(--main);border:0;color:#fff;font-weight:700}
+  .fbnote{margin-top:10px;font-size:11.5px;padding:8px 10px;border-radius:8px;border:1px solid var(--red)}
+  .fbnote.ok{border-color:var(--ok)}
+  .fbpeek{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-top:6px}
+  .fbpeek summary{cursor:pointer;font-size:11.5px;color:var(--ink-dim)}
+  .fbpeek pre{white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:10.5px;
+    color:var(--ink-faint);max-height:190px;overflow:auto;margin:8px 0 0}
+  .fbinline{position:fixed;right:18px;bottom:18px;z-index:61;background:var(--panel);border:1px solid var(--main);
+    border-radius:11px;padding:10px 13px;display:none;align-items:center;gap:9px;font-size:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,.3)}
+  .fbinline.show{display:flex}
+  .fbinline button{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim);border-radius:8px;
+    padding:6px 11px;font-family:var(--ui);font-size:11.5px;cursor:pointer}
+  .fbinline button:hover{border-color:var(--main);color:var(--ink)}
+  .fbinline .done{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="app">
+
+<header>
+  <div class="brand">
+    <span class="mk"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="2.5" y="4" width="19" height="16" rx="1.5"/>
+      <path d="M12 4v16" stroke-width="2.2"/>
+      <path d="M8.6 4v16M15.4 4v16" stroke-dasharray="2 2.4" opacity=".75"/>
+    </svg></span>
+    <span class="brandtxt">
+      <h1>ノド<i>断ち代</i>ツール</h1>
+      <span class="ver">v1.0　·　local · no-upload</span>
+    </span>
+  </div>
+  <div class="hspacer"></div>
+  <div class="headrow">
+    <button class="themebtn" id="backBtn" style="display:none" title="設定画面に戻る">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+      <span>設定</span>
+    </button>
+    <button class="themebtn" id="resetBtn" title="読み込んだPDFと結果をすべてクリアする">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      <span>リセット</span>
+    </button>
+    <button class="themebtn" id="themeBtn" title="ライト／ダークテーマを切り替え">
+      <span id="themeIco"></span><span id="themeLbl">ダーク</span>
+    </button>
+    <button class="fbbtn" id="fbOpen" title="この結果についてのフィードバックを送信">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>フィードバック</span>
+    </button>
+  </div>
+</header>
+
+<!-- ============ 画面1：PDFを読み込む ============ -->
+<div class="setup center" id="scDrop">
+  <div class="dropwrap">
+    <div class="droplead">
+      <h2>ノド側に断ち代を作ります</h2>
+      <p>リング綴じなど、折らずに4方断裁してペラで丁合する製本のためのツールです。<br>
+        見開きでレイアウトしたPDFのノド側を、ページごとに「そのまま／ミラー／白」で仕上げます。</p>
+    </div>
+    <div class="drop big" id="drop">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-5 5M12 4l5 5"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>
+      <div class="big">PDFをドロップ</div>
+      <div class="sub">またはクリックして選択（複数可）</div>
+    </div>
+    <input type="file" id="file" accept="application/pdf,.pdf" multiple hidden>
+    <div class="dropnote">ファイルはブラウザの中だけで処理されます。どこにもアップロードされません。</div>
+  </div>
+</div>
+
+<!-- ============ 画面2：綴じと処理 ============ -->
+<div class="work" id="scConfig" style="display:none">
+  <div class="setbar">
+    <div class="toolbar">
+      <button class="btn settoggle" id="setToggle" aria-expanded="false" title="断ち代の寸法や判定のしきい値など">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>詳細設定</span><span class="caret">▾</span>
+      </button>
+      <span class="glabel" id="setSummary"></span>
+      <div class="tspacer"></div>
+      <button class="btn" id="btnGoWork" style="display:none">プレビューへ戻る</button>
+      <button class="btn pri xl" id="btnRun" disabled>ノド断ち代を作る　→</button>
+    </div>
+
+    <div class="settings collapsed" id="setPanel">
+      <div class="toolsec">
+        <div class="secttl">寸法（mm）</div>
+        <div class="secbody">
+          <span class="glabel">断ち代</span><input class="numin" type="number" id="inBleed" value="3" step="0.5" min="0.5" max="20">
+          <span class="vline"></span>
+          <span class="glabel">天地へ延長</span><input class="numin" type="number" id="inExt" value="3" step="0.5" min="0" max="20">
+          <span class="vline"></span>
+          <span class="glabel">なじませ</span><input class="numin" type="number" id="inSeam" value="0.05" step="0.01" min="0" max="0.5">
+        </div>
+        <div class="sechint">天地への延長は角の断ち代用。トンボのオフセットと同じ値なら掛かりません。なじませはミラーの継ぎ目対策です。</div>
+      </div>
+
+      <div class="toolsec">
+        <div class="secttl">自動判定</div>
+        <div class="secbody">
+          <span class="glabel">紙地とみなす明るさ</span><input class="numin" type="number" id="inPaper" value="253" step="1" min="230" max="255">
+          <span class="vline"></span>
+          <span class="glabel">そのままにする紙地率</span><input class="numin" type="number" id="inPfrac" value="50" step="5" min="0" max="100"><span class="glabel">%未満</span>
+          <span class="vline"></span>
+          <span class="glabel">そのままにする最小の高さ</span><input class="numin" type="number" id="inKeepMin" value="20" step="5" min="0" max="100"><span class="glabel">%以上</span>
+          <span class="vline"></span>
+          <label class="toggle"><input type="checkbox" id="ckStrict" checked>断ち代の絵柄が続きかどうかを色でも確かめる</label>
+        </div>
+        <div class="sechint">仕上がり線の内外を行ごとに見て、断ち代の奥まで絵柄が続いていれば「そのまま」、内側だけ絵柄なら「ミラー」、外側だけなら「白」にします。「そのまま」はページ高さの一定割合以上まとまっている範囲にだけ使います。短い範囲はミラーに倒すので、細い帯だけが残るような不安定な結果になりません。</div>
+      </div>
+
+      <div class="toolsec">
+        <div class="secttl">ページ</div>
+        <div class="secbody">
+          <span class="glabel">1ページ目</span>
+          <div class="modes sm" id="segFirst">
+            <button data-v="auto" class="on">綴じから</button><button data-v="R">右ページ</button><button data-v="L">左ページ</button>
+          </div>
+          <span class="vline"></span>
+          <span class="glabel">対象</span><input class="txtin" type="text" id="inRange" placeholder="全ページ　例 1-8,10">
+        </div>
+      </div>
+
+      <div class="toolsec">
+        <div class="secttl">出力</div>
+        <div class="secbody">
+          <span class="glabel">白の色</span>
+          <div class="modes sm" id="segWhite">
+            <button data-v="cmyk" class="on">CMYK 0</button><button data-v="gray">グレー白</button>
+          </div>
+          <span class="vline"></span>
+          <span class="glabel">白の内側重ね</span><input class="numin" type="number" id="inInner" value="0" step="0.05" min="0" max="1">
+          <span class="vline"></span>
+          <span class="glabel">レイヤー名</span><input class="txtin" type="text" id="inLayer" value="ノド断ち代">
+          <label class="toggle"><input type="checkbox" id="ckOcg" checked>OCGにする</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cfgbody">
+    <div class="cfgcol">
+      <h2 class="sechd"><span class="num">1</span>読み込んだPDF</h2>
+      <div class="scard grow">
+        <div class="flist" id="flist"></div>
+        <div id="fileInfo" style="margin-top:12px"></div>
+        <button class="run ghost sm" id="btnAddFile" style="margin-top:12px">ファイルを追加</button>
+      </div>
+    </div>
+
+    <div class="cfgcol">
+      <h2 class="sechd"><span class="num">2</span>綴じと処理</h2>
+      <div class="scard grow">
+        <div class="field">
+          <label>綴じ方向</label>
+          <div class="seg" id="segBind">
+            <button data-v="right" class="on">右綴じ<small>縦組み・右開き</small></button>
+            <button data-v="left">左綴じ<small>横組み・左開き</small></button>
+          </div>
+          <div class="hint" id="bindHint"></div>
+        </div>
+        <div class="field">
+          <label>ノド側の断ち代の作り方</label>
+          <div class="seg" id="segMode">
+            <button data-v="auto" class="on">自動<small>ページごとに判定</small></button>
+            <button data-v="white">白にする<small>全ページ</small></button>
+            <button data-v="mirror">ミラー<small>全ページ</small></button>
+          </div>
+          <div class="modehelp">
+            <div class="mh"><i class="bg-keep"></i><span><b>そのまま</b>　見開きで絵柄がつながっているページ。隣ページの絵柄がそのまま断ち代になるので、何もしません。</span></div>
+            <div class="mh"><i class="bg-mirror"></i><span><b>ミラー</b>　ノドまで絵柄があり、隣は別の絵柄／白のページ。隣を消して、自分の絵柄を仕上がり線で反転して足します。</span></div>
+            <div class="mh"><i class="bg-white"></i><span><b>白にする</b>　ノド側が紙地のページ。隣の絵柄の写り込みを白で伏せます。</span></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>絵柄を残す幅
+            <button class="lnk" id="btnArtDefault" title="次回からこの幅で開きます">この幅を既定にする</button>
+          </label>
+          <div class="seg" id="segArt">
+            <button data-v="1">1mm</button><button data-v="2">2mm</button><button data-v="3" class="on">3mm</button>
+          </div>
+          <div class="hint" id="artHint"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 画面2：プレビュー ============ -->
+<div class="work" id="scWork" style="display:none">
+  <div class="toolbar">
+    <div class="grp">
+      <div class="modes" id="modes">
+        <button data-m="side" class="on">並べて</button>
+        <button data-m="after">処理後</button>
+        <button data-m="before">処理前</button>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <span class="glabel">ファイル</span>
+      <select class="sel" id="selFile"></select>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <span class="glabel">ページ</span>
+      <button class="btn icon" id="pgFirst" title="最初のページ">«</button>
+      <button class="btn icon" id="pgPrev" title="前のページ">‹</button>
+      <input class="pginput" id="pgInput" type="number" min="1" value="1">
+      <span class="glabel" id="pgTotal">/ 1</span>
+      <button class="btn icon" id="pgNext" title="次のページ">›</button>
+      <button class="btn icon" id="pgLast" title="最後のページ">»</button>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <button class="btn" id="zGutter" title="ノド側を拡大">ノドを見る</button>
+      <button class="btn" id="zFitTop" title="ページ全体">全体</button>
+    </div>
+    <div class="tspacer"></div>
+    <div class="grp">
+      <button class="btn" id="btnRerun" title="設定を変えずにもう一度処理する">再処理</button>
+      <button class="btn pri" id="btnSave">PDFを保存</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="bg-keep"></i>そのまま（またぎ）</span>
+    <span><i class="bg-mirror"></i>ミラー</span>
+    <span><i class="bg-white"></i>白にする</span>
+    <span><i class="bg-skip"></i>対象外</span>
+    <span style="color:var(--red)">赤実線＝仕上がり線　赤破線＝断ち代の端</span>
+    <span>行ごとの判定：</span><span><i class="bg-keep"></i>そのまま</span><span><i class="bg-mirror"></i>ミラー</span><span><i class="bg-white"></i>白</span>
+  </div>
+
+  <div class="body">
+    <div class="viewercol">
+      <div class="stage" id="stage">
+        <canvas id="canvas"></canvas>
+        <div class="stagehud" id="hud"></div>
+        <div class="zoombar">
+          <button id="zOut">−</button><button id="zFit">全体</button><button id="zIn">＋</button>
+        </div>
+      </div>
+      <div class="vbar">
+        <label class="toggle"><input type="checkbox" id="showGuide" checked> 仕上がり・断ち代の線</label>
+        <label class="toggle"><input type="checkbox" id="showSeam" checked> 行ごとの判定</label>
+        <span class="hint">ホイール＝ズーム／ドラッグ＝移動／<kbd>←</kbd><kbd>→</kbd>＝ページ送り　<kbd>g</kbd>＝ノドを見る　<kbd>f</kbd>＝全体</span>
+      </div>
+    </div>
+
+    <aside>
+      <div class="pan-head">
+        <h2>ページ一覧</h2>
+        <span class="count" id="pgCount">0</span>
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+      <div class="pgacts">
+        <button data-act="side">ノドを左右入替</button>
+        <button data-act="cycle">処理を切り替え</button>
+        <button data-act="skip">対象外にする</button>
+        <button data-act="reset">このページを自動に戻す</button>
+        <button data-act="resetall">すべて自動に戻す</button>
+      </div>
+      <div class="help">ボタンは<b>表示中のページ</b>に効きます。変更後は「再処理」。</div>
+    </aside>
+  </div>
+</div>
+
+<div class="kp-strip">© FUJIWARA PRINTING.inc</div>
+</div>
+
+<div class="busy" id="busy">
+  <div class="spin"></div>
+  <div class="busytxt"><span id="busyMsg">処理中…</span><div class="busybar"><i id="busyBar"></i></div></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">実際の案件でどう使えたかを送ってください。判定や既定値の改良に使います。<br>
+      ※送られるのは<b>設定と判定結果のテキスト</b>と、表示中の1面の画像だけです。<b>PDFファイルそのものはアップロードされません。</b></p>
+    <div class="fbfield">
+      <label>結果はどうでしたか？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">問題なし<span class="vm">このまま下版できる</span></button>
+        <button type="button" data-v="wrong">結果が違う<span class="vm">位置・面・絵柄</span></button>
+        <button type="button" data-v="unsure">迷った<span class="vm">判断がつかない</span></button>
+      </div>
+    </div>
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="ノド側の判定">ノド側の判定（左右の取り違え）</option>
+          <option value="またぎ判定">またぎ判定（そのままにすべき／すべきでない）</option>
+          <option value="白/ミラーの自動判定">白／ミラーの自動判定</option>
+          <option value="ミラーの見え方">ミラーの見え方・継ぎ目</option>
+          <option value="トンボ・ボックス">トンボ・ボックス（TrimBox）の扱い</option>
+          <option value="RIP・面付">RIP・面付での不具合</option>
+          <option value="書き出し・取り消し">書き出し・取り消し</option>
+          <option value="要望">要望・使い勝手</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>該当ページ</label>
+        <input id="fbPage" type="text" placeholder="例: p12 / 巻頭4p">
+      </div>
+    </div>
+    <div class="fbfield">
+      <label>設定</label>
+      <input id="fbCond" type="text" readonly>
+      <div class="hint" id="fbFileHint"></div>
+    </div>
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：見開きの写真をそのままにしてほしかったのにミラーになった／リング製本で実際に断裁したら◯◯だった など"></textarea>
+    </div>
+    <div class="fbfield">
+      <label>お名前・担当（任意）</label>
+      <input id="fbReporter" type="text" placeholder="例：製版部 中田">
+    </div>
+    <details class="fbpeek" id="fbPeek">
+      <summary>一緒に送られる内容を確認する</summary>
+      <pre id="fbPeekBody"></pre>
+    </details>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
+  </div>
+</div>
+
+<div class="fbinline" id="fbInline"></div>
+<script>
+/* =====================================================================
+   nodo_dobu_core.js — ノド断ち代エンジン（PDF増分更新）
+   元PDFのバイト列を一切書き換えず、末尾に追記するだけで
+   ノド側の断ち代（白 / ミラー）を作る。
+   取り消しは追記部分の切り捨てで、元ファイルとバイト単位で一致する。
+   依存なし。ブラウザ / Node 18+ で動作。
+   ===================================================================== */
+const NodoDobu = (() => {
+"use strict";
+
+const MM = 72 / 25.4;
+const MARK = "NODO_DOBU_V1";
+const MARK_BEGIN = "% >>>" + MARK + "_BEGIN";
+const MARK_END = "% <<<" + MARK + "_END";
+const MARK_GUARD = "% " + MARK + "_GUARD";
+const RES_GS = "/GsNodoDobu";
+const RES_OC = "/OcNodoDobu";
+const RES_FM = "/FmNodoDobu";
+const BASEKEY = "/NodoDobuBase";
+const DEFAULT_LAYER = "ノド断ち代";
+/* ---------- バイト操作 ---------- */
+const enc = new TextEncoder();
+function bytes(s) { return enc.encode(s); }
+function latin(u8, s, e) { let r = ""; for (let i = s; i < e; i++) r += String.fromCharCode(u8[i]); return r; }
+function concat(list) {
+  let n = 0; for (const a of list) n += a.length;
+  const out = new Uint8Array(n); let o = 0;
+  for (const a of list) { out.set(a, o); o += a.length; }
+  return out;
+}
+function indexOfBytes(hay, needle, from) {
+  const n0 = needle[0];
+  for (let i = from; i <= hay.length - needle.length; i++) {
+    if (hay[i] !== n0) continue;
+    let ok = true;
+    for (let j = 1; j < needle.length; j++) if (hay[i + j] !== needle[j]) { ok = false; break; }
+    if (ok) return i;
+  }
+  return -1;
+}
+function lastIndexOfBytes(hay, needle, from) {
+  for (let i = Math.min(from, hay.length - needle.length); i >= 0; i--) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) { ok = false; break; }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+/* PDF文字列リテラル用のエスケープ（レイヤー名などに使用） */
+function pdfTextString(s) {
+  const u = [0xFE, 0xFF];
+  for (const ch of s) {
+    let c = ch.codePointAt(0);
+    if (c > 0xFFFF) {
+      c -= 0x10000;
+      const hi = 0xD800 + (c >> 10), lo = 0xDC00 + (c & 0x3FF);
+      u.push(hi >> 8, hi & 255, lo >> 8, lo & 255);
+    } else u.push(c >> 8, c & 255);
+  }
+  return "<" + u.map(b => b.toString(16).padStart(2, "0")).join("") + ">";
+}
+
+/* PDF文字列を読む（レイヤー名の照合に使う） */
+function readPdfString(u8, st, en) {
+  const raw = u8.subarray(st, en);
+  let out = [];
+  if (raw[0] === 0x3C) {                       // <hex>
+    let hex = "";
+    for (let i = 1; i < raw.length && raw[i] !== 0x3E; i++) {
+      const c = String.fromCharCode(raw[i]);
+      if (/[0-9a-fA-F]/.test(c)) hex += c;
+    }
+    if (hex.length % 2) hex += "0";
+    for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16));
+  } else if (raw[0] === 0x28) {                // (literal)
+    for (let i = 1; i < raw.length - 1; i++) {
+      if (raw[i] === 0x5C) {
+        const n = raw[i + 1];
+        const map = { 0x6E: 10, 0x72: 13, 0x74: 9, 0x62: 8, 0x66: 12 };
+        if (map[n] !== undefined) { out.push(map[n]); i++; }
+        else if (n >= 0x30 && n <= 0x37) {
+          let oct = "";
+          let j = i + 1;
+          while (j < raw.length && oct.length < 3 && raw[j] >= 0x30 && raw[j] <= 0x37) { oct += String.fromCharCode(raw[j]); j++; }
+          out.push(parseInt(oct, 8) & 255); i = j - 1;
+        } else { out.push(n); i++; }
+      } else out.push(raw[i]);
+    }
+  } else return "";
+  if (out[0] === 0xFE && out[1] === 0xFF) {
+    let s2 = "";
+    for (let i = 2; i + 1 < out.length; i += 2) s2 += String.fromCharCode((out[i] << 8) | out[i + 1]);
+    return s2;
+  }
+  return out.map(b => String.fromCharCode(b)).join("");
+}
+
+/* ---------- 展開（FlateDecode） ---------- */
+async function inflate(u8) {
+  for (const fmt of ["deflate", "deflate-raw"]) {
+    try {
+      const ds = new DecompressionStream(fmt);
+      const w = ds.writable.getWriter(); w.write(u8); w.close();
+      const chunks = []; const r = ds.readable.getReader();
+      for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
+      return concat(chunks);
+    } catch (e) { /* 次の形式を試す */ }
+  }
+  throw new Error("FlateDecode の展開に失敗しました");
+}
+
+/* PNGプレディクタの復元（xrefストリームで使用） */
+function unpredict(data, pred, colors, bpc, columns) {
+  if (pred < 10) return data;
+  const bpp = Math.ceil(colors * bpc / 8);
+  const rowLen = Math.ceil(colors * bpc * columns / 8);
+  const rows = Math.floor(data.length / (rowLen + 1));
+  const out = new Uint8Array(rows * rowLen);
+  let prev = new Uint8Array(rowLen);
+  for (let r = 0; r < rows; r++) {
+    const ft = data[r * (rowLen + 1)];
+    const row = data.subarray(r * (rowLen + 1) + 1, (r + 1) * (rowLen + 1));
+    const cur = new Uint8Array(rowLen);
+    for (let i = 0; i < rowLen; i++) {
+      const a = i >= bpp ? cur[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      let x = row[i];
+      switch (ft) {
+        case 0: break;
+        case 1: x += a; break;
+        case 2: x += b; break;
+        case 3: x += (a + b) >> 1; break;
+        case 4: {
+          const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          x += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c); break;
+        }
+        default: throw new Error("未対応のPNGフィルタ: " + ft);
+      }
+      cur[i] = x & 255;
+    }
+    out.set(cur, r * rowLen); prev = cur;
+  }
+  return out;
+}
+
+/* ---------- 字句・構文解析 ---------- */
+const WS = new Set([0x00, 0x09, 0x0A, 0x0C, 0x0D, 0x20]);
+const DELIM = new Set([0x28, 0x29, 0x3C, 0x3E, 0x5B, 0x5D, 0x7B, 0x7D, 0x2F, 0x25]);
+const isWS = c => WS.has(c), isDelim = c => DELIM.has(c);
+const isReg = c => !WS.has(c) && !DELIM.has(c);
+
+class Parser {
+  constructor(buf) { this.b = buf; }
+  skip(p) {
+    const b = this.b;
+    for (;;) {
+      while (p < b.length && isWS(b[p])) p++;
+      if (b[p] === 0x25) { while (p < b.length && b[p] !== 0x0A && b[p] !== 0x0D) p++; }
+      else return p;
+    }
+  }
+  /* 位置 p のオブジェクトを解析。{v, end} を返す */
+  parse(p) {
+    const b = this.b;
+    p = this.skip(p);
+    const c = b[p];
+    if (c === 0x2F) {                                   // 名前
+      let e = p + 1; while (e < b.length && isReg(b[e])) e++;
+      return { v: { t: "name", v: latin(b, p, e) }, end: e };
+    }
+    if (c === 0x28) return this.parseLiteral(p);        // 文字列
+    if (c === 0x3C && b[p + 1] === 0x3C) return this.parseDict(p);
+    if (c === 0x3C) {                                   // 16進文字列
+      let e = p + 1; while (e < b.length && b[e] !== 0x3E) e++;
+      return { v: { t: "str", s: p, e: e + 1 }, end: e + 1 };
+    }
+    if (c === 0x5B) {                                   // 配列
+      let q = p + 1; const items = [];
+      for (;;) {
+        q = this.skip(q);
+        if (b[q] === 0x5D) { q++; break; }
+        const r = this.parse(q); items.push(r.v); q = r.end;
+      }
+      return { v: { t: "arr", items, s: p, e: q }, end: q };
+    }
+    // 数値 / 参照 / キーワード
+    let e = p; while (e < b.length && isReg(b[e])) e++;
+    const tok = latin(b, p, e);
+    if (/^[+-]?[\d.]+$/.test(tok)) {
+      // "num gen R" の形か先読み
+      let q = this.skip(e);
+      const s2 = q; while (q < b.length && isReg(b[q])) q++;
+      const t2 = latin(b, s2, q);
+      if (/^\d+$/.test(t2)) {
+        let q2 = this.skip(q); const s3 = q2;
+        while (q2 < b.length && isReg(b[q2])) q2++;
+        const t3 = latin(b, s3, q2);
+        if (t3 === "R") return { v: { t: "ref", num: parseInt(tok, 10), gen: parseInt(t2, 10) }, end: q2 };
+      }
+      return { v: { t: "num", v: parseFloat(tok) }, end: e };
+    }
+    if (tok === "true" || tok === "false") return { v: { t: "bool", v: tok === "true" }, end: e };
+    if (tok === "null") return { v: { t: "null" }, end: e };
+    return { v: { t: "kw", v: tok }, end: e === p ? p + 1 : e };
+  }
+  parseLiteral(p) {
+    const b = this.b; let q = p + 1, depth = 1;
+    while (q < b.length && depth > 0) {
+      if (b[q] === 0x5C) { q += 2; continue; }
+      if (b[q] === 0x28) depth++;
+      else if (b[q] === 0x29) depth--;
+      q++;
+    }
+    return { v: { t: "str", s: p, e: q }, end: q };
+  }
+  parseDict(p) {
+    const b = this.b; let q = p + 2; const map = new Map();
+    for (;;) {
+      q = this.skip(q);
+      if (b[q] === 0x3E && b[q + 1] === 0x3E) { q += 2; break; }
+      if (q >= b.length) throw new Error("辞書の終端が見つかりません");
+      const k = this.parse(q); q = k.end;
+      const vs = this.skip(q);
+      const v = this.parse(vs); q = v.end;
+      if (k.v.t === "name") map.set(k.v.v, { v: v.v, s: vs, e: q });
+    }
+    const dict = { t: "dict", map, s: p, e: q };
+    // ストリームか判定
+    let r = this.skip(q);
+    if (latin(b, r, r + 6) === "stream") {
+      r += 6;
+      if (b[r] === 0x0D) r++;
+      if (b[r] === 0x0A) r++;
+      return { v: { t: "stream", dict, dataStart: r }, end: r };
+    }
+    return { v: dict, end: q };
+  }
+}
+
+/* ---------- ドキュメント ---------- */
+class Doc {
+  constructor(buf) { this.buf = buf; this.parser = new Parser(buf); this.cache = new Map(); }
+
+  static async load(buf) { const d = new Doc(buf); await d.readXref(); return d; }
+
+  async readXref() {
+    const b = this.buf;
+    const i = lastIndexOfBytes(b, bytes("startxref"), b.length - 1);
+    if (i < 0) throw new Error("startxref が見つかりません（PDFではない可能性があります）");
+    const m = /startxref\s+(\d+)/.exec(latin(b, i, Math.min(b.length, i + 60)));
+    if (!m) throw new Error("startxref を解釈できません");
+    this.entries = new Map();
+    this.trailer = null;
+    this.xrefStyle = null;
+    const seen = new Set();
+    let off = parseInt(m[1], 10);
+    while (off !== undefined && off !== null && !seen.has(off) && off >= 0 && off < b.length) {
+      seen.add(off);
+      const t = await this.readXrefSection(off);
+      if (!this.trailer) this.trailer = t.dict;
+      if (this.xrefStyle === null) this.xrefStyle = t.style;
+      const xs = t.dict.map.get("/XRefStm");
+      if (xs && xs.v.t === "num" && !seen.has(xs.v.v)) {
+        seen.add(xs.v.v);
+        try { await this.readXrefSection(xs.v.v); } catch (e) {}
+      }
+      const prev = t.dict.map.get("/Prev");
+      off = prev && prev.v.t === "num" ? prev.v.v : null;
+    }
+    if (!this.trailer) throw new Error("trailer が見つかりません");
+    if (this.trailer.map.has("/Encrypt")) throw new Error("暗号化されたPDFには対応していません");
+  }
+
+  async readXrefSection(off) {
+    const b = this.buf;
+    let p = this.parser.skip(off);
+    if (latin(b, p, p + 4) === "xref") {                 // 旧来の相互参照表
+      p += 4;
+      for (;;) {
+        p = this.parser.skip(p);
+        if (latin(b, p, p + 7) === "trailer") { p += 7; break; }
+        const h = /^(\d+)\s+(\d+)/.exec(latin(b, p, Math.min(b.length, p + 40)));
+        if (!h) throw new Error("xref表を解釈できません");
+        let start = parseInt(h[1], 10), count = parseInt(h[2], 10);
+        p = this.parser.skip(p + h[0].length);
+        for (let k = 0; k < count; k++) {
+          const line = latin(b, p, p + 20);
+          const mm2 = /^(\d{10})\s(\d{5})\s([nf])/.exec(line);
+          if (mm2) {
+            const num = start + k;
+            if (!this.entries.has(num) && mm2[3] === "n")
+              this.entries.set(num, { type: 1, offset: parseInt(mm2[1], 10) });
+            p += 20;
+            if (!/[\r\n]/.test(line[18] + line[19])) { // 区切りが18バイトの実装への保険
+              p -= 20; const nl = /\r\n|\r|\n/.exec(latin(b, p, p + 32));
+              p += (nl ? nl.index + nl[0].length : 20);
+            }
+          } else { p = this.parser.skip(p); k--; if (p >= b.length) throw new Error("xref表が壊れています"); }
+        }
+      }
+      const d = this.parser.parse(p).v;
+      return { dict: d.t === "stream" ? d.dict : d, style: "table" };
+    }
+    // 相互参照ストリーム
+    const o = this.parseIndirectAt(off);
+    if (!o || o.v.t !== "stream") throw new Error("相互参照ストリームが見つかりません");
+    const dict = o.v.dict;
+    const data = await this.streamData(o.v);
+    const W = dict.map.get("/W").v.items.map(x => x.v);
+    const size = dict.map.get("/Size").v.v;
+    let index = [0, size];
+    if (dict.map.has("/Index")) index = dict.map.get("/Index").v.items.map(x => x.v);
+    let pos = 0;
+    const rd = n => { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + data[pos++]; return v; };
+    for (let s = 0; s < index.length; s += 2) {
+      const start = index[s], count = index[s + 1];
+      for (let k = 0; k < count; k++) {
+        if (pos >= data.length) break;
+        const f1 = W[0] === 0 ? 1 : rd(W[0]), f2 = rd(W[1]), f3 = rd(W[2]);
+        const num = start + k;
+        if (!this.entries.has(num)) {
+          if (f1 === 1) this.entries.set(num, { type: 1, offset: f2 });
+          else if (f1 === 2) this.entries.set(num, { type: 2, stm: f2, idx: f3 });
+        }
+      }
+    }
+    return { dict, style: "stream" };
+  }
+
+  parseIndirectAt(off) {
+    const b = this.buf;
+    let p = this.parser.skip(off);
+    const h = /^(\d+)\s+(\d+)\s+obj/.exec(latin(b, p, Math.min(b.length, p + 40)));
+    if (!h) return null;
+    p += h[0].length;
+    const r = this.parser.parse(p);
+    return { num: parseInt(h[1], 10), v: r.v, end: r.end };
+  }
+
+  async streamData(st) {
+    const dict = st.dict;
+    let len = dict.map.get("/Length");
+    let L;
+    if (len && len.v.t === "num") L = len.v.v;
+    else if (len && len.v.t === "ref") L = (await this.get(len.v.num)).v.v;
+    else {
+      const e = indexOfBytes(this.buf, bytes("endstream"), st.dataStart);
+      L = e - st.dataStart;
+    }
+    let raw = this.buf.subarray(st.dataStart, st.dataStart + L);
+    const f = dict.map.get("/Filter");
+    const filters = !f ? [] : (f.v.t === "name" ? [f.v.v] : f.v.items.map(x => x.v));
+    for (const flt of filters) {
+      if (flt === "/FlateDecode") raw = await inflate(raw);
+      else if (flt === "/ASCIIHexDecode" || flt === "/ASCII85Decode" || flt === "/LZWDecode")
+        throw new Error("未対応のフィルタ: " + flt);
+      else return raw; // 画像系フィルタなどはそのまま
+    }
+    const dp = dict.map.get("/DecodeParms");
+    if (dp && dp.v.t === "dict") {
+      const g = k => dp.v.map.has(k) ? dp.v.map.get(k).v.v : null;
+      const pred = g("/Predictor");
+      if (pred && pred >= 10)
+        raw = unpredict(raw, pred, g("/Colors") || 1, g("/BitsPerComponent") || 8, g("/Columns") || 1);
+    }
+    return raw;
+  }
+
+  /* オブジェクト取得。{v, src} を返す（src は値が載っているバッファ） */
+  async get(num) {
+    if (this.cache.has(num)) return this.cache.get(num);
+    const e = this.entries.get(num);
+    let res = { v: { t: "null" }, src: this.buf };
+    if (e && e.type === 1) {
+      const o = this.parseIndirectAt(e.offset);
+      if (o && o.num === num) res = { v: o.v, src: this.buf };
+    } else if (e && e.type === 2) {
+      const stmObj = await this.get(e.stm);
+      if (stmObj.v.t === "stream") {
+        if (!stmObj.data) {
+          stmObj.data = await this.streamData(stmObj.v);
+          stmObj.parser = new Parser(stmObj.data);
+          const n = stmObj.v.dict.map.get("/N").v.v;
+          const first = stmObj.v.dict.map.get("/First").v.v;
+          const head = latin(stmObj.data, 0, first).trim().split(/\s+/).map(Number);
+          stmObj.offsets = new Map();
+          for (let i = 0; i < n; i++) stmObj.offsets.set(head[i * 2], first + head[i * 2 + 1]);
+        }
+        const off = stmObj.offsets.get(num);
+        if (off !== undefined) res = { v: stmObj.parser.parse(off).v, src: stmObj.data };
+      }
+    }
+    this.cache.set(num, res);
+    return res;
+  }
+
+  async resolve(v, src) {
+    if (v && v.t === "ref") { const o = await this.get(v.num); return { v: o.v, src: o.src }; }
+    return { v, src: src || this.buf };
+  }
+
+  async catalog() {
+    const r = this.trailer.map.get("/Root");
+    const o = await this.resolve(r.v);
+    return { num: r.v.t === "ref" ? r.v.num : null, dict: o.v, src: o.src };
+  }
+
+  /* ページ一覧（継承属性を解決） */
+  async pages() {
+    const cat = await this.catalog();
+    const pagesRef = cat.dict.map.get("/Pages").v;
+    const out = [];
+    const INHERIT = ["/Resources", "/MediaBox", "/CropBox", "/Rotate"];
+    const walk = async (ref, inh, depth) => {
+      if (depth > 64 || out.length > 20000) return;
+      const num = ref.t === "ref" ? ref.num : null;
+      const o = await this.resolve(ref);
+      const d = o.v.t === "stream" ? o.v.dict : o.v;
+      if (d.t !== "dict") return;
+      const inh2 = Object.assign({}, inh);
+      for (const k of INHERIT) if (d.map.has(k)) inh2[k] = { e: d.map.get(k), src: o.src };
+      const type = d.map.get("/Type");
+      const kids = d.map.get("/Kids");
+      if (kids && (!type || type.v.v === "/Pages")) {
+        const ka = (await this.resolve(kids.v, o.src)).v;
+        if (ka.t === "arr") for (const k of ka.items) await walk(k, inh2, depth + 1);
+      } else {
+        out.push({ num, dict: d, src: o.src, inh: inh2 });
+      }
+    };
+    await walk(pagesRef, {}, 0);
+    return out;
+  }
+}
+
+/* ---------- ページの箱 ---------- */
+async function boxOf(doc, page, key) {
+  let e = page.dict.map.get(key), src = page.src;
+  if (!e && page.inh[key]) { e = page.inh[key].e; src = page.inh[key].src; }
+  if (!e) return null;
+  const a = (await doc.resolve(e.v, src)).v;
+  if (a.t !== "arr") return null;
+  const v = [];
+  for (const it of a.items) {
+    const r = (await doc.resolve(it, src)).v;
+    v.push(r.t === "num" ? r.v : 0);
+  }
+  return [Math.min(v[0], v[2]), Math.min(v[1], v[3]), Math.max(v[0], v[2]), Math.max(v[1], v[3])];
+}
+
+async function pageGeom(doc, page) {
+  const media = (await boxOf(doc, page, "/MediaBox")) || [0, 0, 595.276, 841.89];
+  const crop = (await boxOf(doc, page, "/CropBox")) || media.slice();
+  let trim = await boxOf(doc, page, "/TrimBox"), src = "TrimBox";
+  if (!trim) { trim = await boxOf(doc, page, "/ArtBox"); src = "ArtBox"; }
+  if (!trim) { trim = (await boxOf(doc, page, "/CropBox")); src = "CropBox(代用)"; }
+  if (!trim) { trim = media.slice(); src = "MediaBox(代用)"; }
+  let rot = 0;
+  let e = page.dict.map.get("/Rotate") || (page.inh["/Rotate"] && page.inh["/Rotate"].e);
+  if (e) { const r = (await doc.resolve(e.v, page.src)).v; if (r.t === "num") rot = ((r.v % 360) + 360) % 360; }
+  return { media, crop, trim, trimSrc: src, rot };
+}
+
+const EDGE_LEFT = { 0: "xmin", 90: "ymin", 180: "xmax", 270: "ymax" };
+const OPP = { xmin: "xmax", xmax: "xmin", ymin: "ymax", ymax: "ymin" };
+function edgeFor(side, rot) {
+  const l = EDGE_LEFT[rot] || "xmin";
+  return side === "left" ? l : OPP[l];
+}
+/* offset: 指定した辺から糊付け線までの距離（pt）。折スジに白を引くときに使う */
+function bandRect(g, edge, inner, outer, ext, offset) {
+  const o = offset || 0;
+  const t = o ? (edge === "xmin" ? [g.trim[0] + o, g.trim[1], g.trim[2], g.trim[3]]
+              : edge === "xmax" ? [g.trim[0], g.trim[1], g.trim[2] - o, g.trim[3]]
+              : edge === "ymin" ? [g.trim[0], g.trim[1] + o, g.trim[2], g.trim[3]]
+              : [g.trim[0], g.trim[1], g.trim[2], g.trim[3] - o]) : g.trim;
+  let r;
+  if (edge === "xmin") r = [t[0] - outer, t[1] - ext, t[0] + inner, t[3] + ext];
+  else if (edge === "xmax") r = [t[2] - inner, t[1] - ext, t[2] + outer, t[3] + ext];
+  else if (edge === "ymin") r = [t[0] - ext, t[1] - outer, t[2] + ext, t[1] + inner];
+  else r = [t[0] - ext, t[3] - inner, t[2] + ext, t[3] + outer];
+  const m = g.media;
+  return [Math.max(r[0], m[0]), Math.max(r[1], m[1]), Math.min(r[2], m[2]), Math.min(r[3], m[3])];
+}
+
+/* ---------- 書き出し ---------- */
+class Writer {
+  constructor(doc) {
+    this.doc = doc;
+    this.parts = [];
+    this.offsets = new Map();
+    this.base = doc.buf.length;
+    this.pos = doc.buf.length;
+    const sz = doc.trailer.map.get("/Size");
+    this.next = sz && sz.v.t === "num" ? sz.v.v : 1;
+    let maxNum = 0; for (const k of doc.entries.keys()) maxNum = Math.max(maxNum, k);
+    this.next = Math.max(this.next, maxNum + 1);
+    if (doc.buf.length && doc.buf[doc.buf.length - 1] !== 0x0A) this.push(bytes("\n"));
+  }
+  push(u8) { this.parts.push(u8); this.pos += u8.length; }
+  alloc() { return this.next++; }
+  obj(num, body) {
+    this.offsets.set(num, this.pos);
+    this.push(bytes(num + " 0 obj\n"));
+    this.push(typeof body === "string" ? bytes(body) : body);
+    this.push(bytes("\nendobj\n"));
+  }
+  streamKeep(num, dict, src, data) {
+    this.offsets.set(num, this.pos);
+    const body = rebuildDict(dict, src,
+      { "/Length": String(data.length), "/Filter": null, "/DecodeParms": null });
+    this.push(bytes(num + " 0 obj\n"));
+    this.push(body);
+    this.push(bytes("\nstream\n"));
+    this.push(data);
+    this.push(bytes("\nendstream\nendobj\n"));
+  }
+  stream(num, dictStr, data) {
+    this.offsets.set(num, this.pos);
+    this.push(bytes(num + " 0 obj\n<< " + dictStr + " /Length " + data.length + " >>\nstream\n"));
+    this.push(data);
+    this.push(bytes("\nendstream\nendobj\n"));
+  }
+  finish() {
+    const doc = this.doc, tr = doc.trailer.map;
+    const rootRef = tr.get("/Root");
+    const rootStr = rootRef.v.t === "ref" ? rootRef.v.num + " 0 R" : "1 0 R";
+    const idEntry = tr.get("/ID");
+    const idStr = idEntry ? latin(this.overrideId || doc.buf, idEntry.s, idEntry.e) : null;
+    const nums = [...this.offsets.keys()].sort((a, b) => a - b);
+    const size = Math.max(...nums) + 1;
+    const startxref = this.pos;
+
+    if (doc.xrefStyle === "table") {
+      const groups = [];
+      for (const n of nums) {
+        const g = groups[groups.length - 1];
+        if (g && n === g.start + g.list.length) g.list.push(n);
+        else groups.push({ start: n, list: [n] });
+      }
+      let s = "xref\n";
+      for (const g of groups) {
+        s += g.start + " " + g.list.length + "\n";
+        for (const n of g.list)
+          s += String(this.offsets.get(n)).padStart(10, "0") + " 00000 n \n";
+      }
+      s += "trailer\n<< /Size " + size + " /Root " + rootStr + " /Prev " + this.prevOffset() +
+        (idStr ? " /ID " + idStr : "") + " >>\nstartxref\n" + startxref + "\n%%EOF\n";
+      this.push(bytes(s));
+    } else {
+      const num = this.alloc();
+      nums.push(num);
+      this.offsets.set(num, startxref);
+      nums.sort((a, b) => a - b);
+      const size2 = Math.max(...nums) + 1;
+      const groups = [];
+      for (const n of nums) {
+        const g = groups[groups.length - 1];
+        if (g && n === g.start + g.list.length) g.list.push(n);
+        else groups.push({ start: n, list: [n] });
+      }
+      const data = new Uint8Array(nums.length * 7);
+      let p = 0;
+      for (const g of groups) for (const n of g.list) {
+        const off = this.offsets.get(n);
+        data[p++] = 1;
+        data[p++] = (off >>> 24) & 255; data[p++] = (off >>> 16) & 255;
+        data[p++] = (off >>> 8) & 255; data[p++] = off & 255;
+        data[p++] = 0; data[p++] = 0;
+      }
+      const index = groups.map(g => g.start + " " + g.list.length).join(" ");
+      const dict = "/Type /XRef /Size " + size2 + " /Index [" + index + "] /W [1 4 2] /Root " +
+        rootStr + " /Prev " + this.prevOffset() + (idStr ? " /ID " + idStr : "");
+      this.push(bytes(num + " 0 obj\n<< " + dict + " /Length " + data.length + " >>\nstream\n"));
+      this.push(data);
+      this.push(bytes("\nendstream\nendobj\nstartxref\n" + startxref + "\n%%EOF\n"));
+    }
+    return concat([this.doc.buf, ...this.parts]);
+  }
+  prevOffset() {
+    const b = this.doc.buf;
+    const i = lastIndexOfBytes(b, bytes("startxref"), b.length - 1);
+    const m = /startxref\s+(\d+)/.exec(latin(b, i, Math.min(b.length, i + 60)));
+    return parseInt(m[1], 10);
+  }
+}
+
+/* 辞書を「指定キーだけ差し替えて」再構築（他のキーは元のバイト列をそのまま複製） */
+function rebuildDict(dict, src, replace, extra) {
+  const out = [bytes("<<")];
+  for (const [k, ent] of dict.map) {
+    if (Object.prototype.hasOwnProperty.call(replace, k)) continue;
+    out.push(bytes(" " + k + " "));
+    out.push(src.subarray(ent.s, ent.e));
+  }
+  for (const k in replace) if (replace[k] !== null) out.push(bytes(" " + k + " " + replace[k]));
+  if (extra) out.push(bytes(" " + extra));
+  out.push(bytes(" >>"));
+  return concat(out);
+}
+
+/* ---------- 削除 ---------- */
+/* レイヤー名から OCG のオブジェクト番号を集める */
+async function findOcgNums(doc, layerName) {
+  const out = new Set();
+  const cat = await doc.catalog();
+  const ocpEnt = cat.dict.map.get("/OCProperties");
+  if (!ocpEnt) return out;
+  const ocp = (await doc.resolve(ocpEnt.v, cat.src));
+  if (ocp.v.t !== "dict") return out;
+  const gEnt = ocp.v.map.get("/OCGs");
+  if (!gEnt) return out;
+  const arr = (await doc.resolve(gEnt.v, ocp.src)).v;
+  if (arr.t !== "arr") return out;
+  for (const it of arr.items) {
+    if (it.t !== "ref") continue;
+    const o = await doc.get(it.num);
+    const d = o.v.t === "stream" ? o.v.dict : o.v;
+    if (d.t !== "dict") continue;
+    const n = d.map.get("/Name");
+    if (n && readPdfString(o.src, n.s, n.e) === layerName) out.add(it.num);
+  }
+  return out;
+}
+
+/* あるリソース辞書の /Properties で、対象OCGを指している名前を返す */
+async function ocNamesIn(doc, resEnt, src, ocgNums) {
+  const names = [];
+  if (!resEnt) return names;
+  const res = await doc.resolve(resEnt.v !== undefined ? resEnt.v : resEnt, src);
+  if (res.v.t !== "dict") return names;
+  const pEnt = res.v.map.get("/Properties");
+  if (!pEnt) return names;
+  const props = await doc.resolve(pEnt.v, res.src);
+  if (props.v.t !== "dict") return names;
+  for (const [k, ent] of props.v.map) {
+    if (ent.v.t === "ref" && ocgNums.has(ent.v.num)) names.push(k);
+  }
+  return names;
+}
+
+/* ページから辿れるコンテンツ／フォームXObjectを列挙 */
+async function contentStreams(doc, page) {
+  const out = [];
+  const cEnt = page.dict.map.get("/Contents");
+  let resEnt = page.dict.map.get("/Resources"), resSrc = page.src;
+  if (!resEnt && page.inh["/Resources"]) { resEnt = page.inh["/Resources"].e; resSrc = page.inh["/Resources"].src; }
+  if (cEnt) {
+    const refs = cEnt.v.t === "ref" ? [cEnt.v] : (cEnt.v.t === "arr" ? cEnt.v.items.filter(x => x.t === "ref") : []);
+    for (const r of refs) out.push({ num: r.num, resEnt, resSrc });
+  }
+  const seen = new Set();
+  const walk = async (rEnt, rSrc, depth) => {
+    if (depth > 3 || !rEnt) return;
+    const res = await doc.resolve(rEnt.v, rSrc);
+    if (res.v.t !== "dict") return;
+    const xEnt = res.v.map.get("/XObject");
+    if (!xEnt) return;
+    const xo = await doc.resolve(xEnt.v, res.src);
+    if (xo.v.t !== "dict") return;
+    for (const [, ent] of xo.v.map) {
+      if (ent.v.t !== "ref" || seen.has(ent.v.num)) continue;
+      seen.add(ent.v.num);
+      const o = await doc.get(ent.v.num);
+      if (o.v.t !== "stream") continue;
+      const sub = o.v.dict.map.get("/Subtype");
+      if (!sub || sub.v.v !== "/Form") continue;
+      const own = o.v.dict.map.get("/Resources");
+      out.push({ num: ent.v.num, resEnt: own, resSrc: o.src });
+      if (own) await walk(own, o.src, depth + 1);
+    }
+  };
+  await walk(resEnt, resSrc, 0);
+  return out;
+}
+
+/* ---------- 圧縮（フォームXObjectの再埋め込みに使用） ---------- */
+async function deflate(u8) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter(); w.write(u8); w.close();
+    const chunks = []; const r = cs.readable.getReader();
+    for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
+    return concat(chunks);
+  } catch (e) { return null; }
+}
+
+/* ストリームのフィルタ名を配列で返す */
+function filtersOf(dict) {
+  const f = dict.map.get("/Filter");
+  if (!f) return [];
+  if (f.v.t === "name") return [f.v.v];
+  if (f.v.t === "arr") return f.v.items.map(x => x.v);
+  return ["?"];
+}
+
+/* ページの内容ストリームを連結して取り出す（ミラー用の複製元） */
+async function pageContentBytes(doc, page) {
+  const cEnt = page.dict.map.get("/Contents");
+  if (!cEnt) return { data: new Uint8Array(0), ok: true };
+  const refs = cEnt.v.t === "ref" ? [cEnt.v]
+    : (cEnt.v.t === "arr" ? cEnt.v.items.filter(x => x.t === "ref") : []);
+  if (!refs.length) return { data: new Uint8Array(0), ok: false, why: "内容が直接埋め込まれています" };
+  const parts = [];
+  for (const r of refs) {
+    const o = await doc.get(r.num);
+    if (o.v.t !== "stream") continue;
+    for (const flt of filtersOf(o.v.dict))
+      if (flt !== "/FlateDecode") return { data: null, ok: false, why: "未対応の圧縮形式 " + flt };
+    let d;
+    try { d = await doc.streamData(o.v); }
+    catch (e) { return { data: null, ok: false, why: "内容ストリームを展開できません" }; }
+    parts.push(d); parts.push(bytes("\n"));
+  }
+  return { data: concat(parts), ok: true };
+}
+
+/* ---------- 情報取得 ---------- */
+async function info(buf) {
+  const doc = await Doc.load(buf);
+  const pages = await doc.pages();
+  const cat = await doc.catalog();
+  const out = { pageCount: pages.length, pages: [], hasLayer: false, baseLength: null };
+  const bk = cat.dict.map.get(BASEKEY);
+  if (bk && bk.v.t === "num") { out.baseLength = bk.v.v; out.hasLayer = true; }
+  if (!out.hasLayer) {
+    const nums = await findOcgNums(doc, DEFAULT_LAYER);
+    if (nums.size) out.hasLayer = true;
+  }
+  for (const p of pages) {
+    const g = await pageGeom(doc, p);
+    const bleedBox = await boxOf(doc, p, "/BleedBox");
+    const dobu = {
+      L: (g.trim[0] - g.media[0]) / MM, R: (g.media[2] - g.trim[2]) / MM,
+      B: (g.trim[1] - g.media[1]) / MM, T: (g.media[3] - g.trim[3]) / MM
+    };
+    let bleed = null;
+    if (bleedBox) {
+      const v = [g.trim[0] - bleedBox[0], bleedBox[2] - g.trim[2],
+                 g.trim[1] - bleedBox[1], bleedBox[3] - g.trim[3]].map(x => x / MM);
+      bleed = Math.max(0, Math.min(...v));
+    }
+    out.pages.push({
+      media: g.media, crop: g.crop, trim: g.trim, trimSrc: g.trimSrc, rot: g.rot,
+      bleedBox, bleed,
+      trimW: (g.trim[2] - g.trim[0]) / MM, trimH: (g.trim[3] - g.trim[1]) / MM,
+      dobu
+    });
+  }
+  return out;
+}
+
+/* ---------- 適用 ----------
+   bands: [{ page:1起点, side:'left'|'right',
+             bleed:mm,            ノド側に作る断ち代の幅
+             ext:mm,              天地方向の延長（既定は bleed と同じ）
+             inner:mm,            仕上がりの内側へ食い込ませる量（白のみ・既定0）
+             mode:'white'|'mirror' }]                                   */
+async function apply(buf, opts) {
+  const o = Object.assign({
+    layerName: DEFAULT_LAYER, white: "cmyk", useOcg: true, mode: "white", bands: []
+  }, opts);
+
+  /* 二重適用の防止。適用済みなら一度戻す */
+  const pre = await info(buf);
+  if (pre.baseLength) { try { buf = await revert(buf); } catch (e) {} }
+
+  const doc = await Doc.load(buf);
+  const pages = await doc.pages();
+  const cat = await doc.catalog();
+  const w = new Writer(doc);
+  const warnings = [];
+  const applied = [];
+
+  const byPage = new Map();
+  for (const b of o.bands) {
+    if (!(b.bleed > 0)) continue;
+    if (!byPage.has(b.page)) byPage.set(b.page, []);
+    byPage.get(b.page).push(b);
+  }
+  if (byPage.size === 0) throw new Error("処理対象のページがありません");
+
+  let ocgNum = null;
+  if (o.useOcg) {
+    ocgNum = w.alloc();
+    w.obj(ocgNum, "<< /Type /OCG /Name " + pdfTextString(o.layerName) +
+      " /Intent [/View /Design] /Usage << /View << /ViewState /ON >> /Print << /PrintState /ON /Subtype /Print >> >> >>");
+  }
+  const gsNum = w.alloc();
+  w.obj(gsNum, "<< /Type /ExtGState /OP false /op false /OPM 0 /BM /Normal /CA 1 /ca 1 /SMask /None >>");
+
+  for (const [pno, list] of [...byPage.entries()].sort((a, b) => a[0] - b[0])) {
+    const page = pages[pno - 1];
+    if (!page) { warnings.push("p." + pno + "：ページが存在しません"); continue; }
+    if (page.num === null) { warnings.push("p." + pno + "：直接埋め込みページのため処理できません"); continue; }
+    const g = await pageGeom(doc, page);
+
+    /* ---- 帯の矩形を決める ---- */
+    const items = [];
+    for (const b of list) {
+      const mode = b.mode || o.mode;
+      const edge = edgeFor(b.side, g.rot);
+      const ext = (b.ext !== undefined ? b.ext : b.bleed) * MM;
+      /* ミラーは「なじませ」分だけ仕上がりの内側まで重ねる。
+         反転軸も同じだけ内側へずらすので、隣ページの絵柄は決して拾わない。 */
+      const seam = mode === "mirror" ? Math.max(0, b.seam || 0) * MM : 0;
+      const inner = mode === "mirror" ? seam : (b.inner || 0) * MM;
+      const off = (b.offset || 0) * MM;    /* 負なら仕上がり線より外側に帯をずらす */
+      const want = bandRect({ trim: g.trim, media: [-1e7, -1e7, 1e7, 1e7] }, edge, inner, b.bleed * MM, ext, off);
+      const rect = bandRect(g, edge, inner, b.bleed * MM, ext, off);
+      /* from/to が来たら、辺に沿った方向をその範囲に切る（行ごとの分割処理用） */
+      if (b.from != null && b.to != null) {
+        if (edge === "xmin" || edge === "xmax") {
+          rect[1] = Math.max(rect[1], b.from); rect[3] = Math.min(rect[3], b.to);
+        } else {
+          rect[0] = Math.max(rect[0], b.from); rect[2] = Math.min(rect[2], b.to);
+        }
+      }
+      if (rect[2] - rect[0] <= 0 || rect[3] - rect[1] <= 0) {
+        warnings.push("p." + pno + "：帯が用紙の外側になるためスキップしました"); continue;
+      }
+      const lost = (edge === "xmin" || edge === "xmax")
+        ? (want[2] - want[0]) - (rect[2] - rect[0])
+        : (want[3] - want[1]) - (rect[3] - rect[1]);
+      if (lost > 0.5) warnings.push("p." + pno + "：" + (b.side === "left" ? "左" : "右") +
+        "（ノド）側の余白が " + (lost / MM).toFixed(2) + "mm 不足しています");
+      /* ミラーの反転軸（辺の座標。なじませ分だけ内側へ） */
+      const axis = edge === "xmin" ? g.trim[0] + seam : edge === "xmax" ? g.trim[2] - seam
+                 : edge === "ymin" ? g.trim[1] + seam : g.trim[3] - seam;
+      items.push({ rect, edge, axis, mode, side: b.side, bleed: b.bleed });
+    }
+    if (!items.length) continue;
+
+    /* ---- ミラー用フォームXObject ---- */
+    let formNum = null, formResNum = null;
+    const wantMirror = items.some(it => it.mode === "mirror");
+    if (wantMirror) {
+      const got = await pageContentBytes(doc, page);
+      if (!got.ok || !got.data || !got.data.length) {
+        warnings.push("p." + pno + "：" + (got.why || "内容が空です") + "。白で処理しました");
+        for (const it of items) it.mode = "white";
+      } else {
+        /* フォームの資源は「元のページ資源」を使う（自己参照を避ける） */
+        let resEnt0 = page.dict.map.get("/Resources"), resSrc0 = page.src;
+        if (!resEnt0 && page.inh["/Resources"]) { resEnt0 = page.inh["/Resources"].e; resSrc0 = page.inh["/Resources"].src; }
+        let formResStr = "<< >>";
+        if (resEnt0) {
+          if (resEnt0.v.t === "ref") formResStr = resEnt0.v.num + " 0 R";
+          else {
+            const rr = await doc.resolve(resEnt0.v, resSrc0);
+            if (rr.v.t === "dict") {
+              formResNum = w.alloc();
+              w.obj(formResNum, rebuildDict(rr.v, rr.src, {}));
+              formResStr = formResNum + " 0 R";
+            }
+          }
+        }
+        /* 透明グループを持つページはフォームにも引き継ぐ */
+        let groupStr = "";
+        const grp = page.dict.map.get("/Group");
+        if (grp) groupStr = " /Group " + latin(page.src, grp.s, grp.e);
+
+        const body = concat([bytes("q\n"), got.data, bytes("\nQ\n")]);
+        const packed = await deflate(body);
+        const mb = g.media;
+        const dictStr = "/Type /XObject /Subtype /Form /FormType 1 /BBox [" +
+          mb.map(v => v.toFixed(4)).join(" ") + "] /Matrix [1 0 0 1 0 0] /Resources " +
+          formResStr + groupStr + (packed ? " /Filter /FlateDecode" : "");
+        formNum = w.alloc();
+        w.stream(formNum, dictStr, packed || body);
+      }
+    }
+
+    /* ---- 描画ストリーム ---- */
+    const guardNum = w.alloc();
+    w.stream(guardNum, "", bytes("q\n" + MARK_GUARD + "\n"));
+
+    const fmt = r => r[0].toFixed(4) + " " + r[1].toFixed(4) + " " +
+      (r[2] - r[0]).toFixed(4) + " " + (r[3] - r[1]).toFixed(4) + " re";
+
+    let s = "Q\n" + MARK_BEGIN + "\n";
+    if (o.useOcg) s += "/OC " + RES_OC + " BDC\n";
+    /* (1) ノド側の断ち代をいったん白で伏せる（隣ページの絵柄を消す） */
+    s += "q\n" + RES_GS + " gs\n" + (o.white === "gray" ? "1 g\n" : "0 0 0 0 k\n");
+    for (const it of items) s += fmt(it.rect) + "\n";
+    s += "f\nQ\n";
+    /* (2) ミラー指定の帯に、自ページの絵柄を反転して敷く */
+    if (formNum !== null) {
+      for (const it of items) {
+        if (it.mode !== "mirror") continue;
+        const m = (it.edge === "xmin" || it.edge === "xmax")
+          ? "-1 0 0 1 " + (2 * it.axis).toFixed(4) + " 0"
+          : "1 0 0 -1 0 " + (2 * it.axis).toFixed(4);
+        s += "q\n" + fmt(it.rect) + " W n\n" + m + " cm\n" + RES_FM + " Do\nQ\n";
+      }
+    }
+    s += (o.useOcg ? "EMC\n" : "") + MARK_END + "\n";
+    const drawNum = w.alloc();
+    w.stream(drawNum, "", bytes(s));
+
+    /* ---- ページ資源（このページ専用の辞書を作る） ---- */
+    let resEnt = page.dict.map.get("/Resources"), resSrc = page.src;
+    if (!resEnt && page.inh["/Resources"]) { resEnt = page.inh["/Resources"].e; resSrc = page.inh["/Resources"].src; }
+    let resDict = null, resDictSrc = resSrc;
+    if (resEnt) {
+      const rr = await doc.resolve(resEnt.v, resSrc);
+      if (rr.v.t === "dict") { resDict = rr.v; resDictSrc = rr.src; }
+    }
+    const mergeSub = async (key, addStr) => {
+      let inner = "";
+      if (resDict && resDict.map.has(key)) {
+        const sub = await doc.resolve(resDict.map.get(key).v, resDictSrc);
+        if (sub.v.t === "dict") {
+          const parts = [];
+          for (const [k, ent] of sub.v.map) parts.push(k + " " + latin(sub.src, ent.s, ent.e));
+          inner = parts.join(" ") + " ";
+        }
+      }
+      return "<< " + inner + addStr + " >>";
+    };
+    const repl = { "/ExtGState": await mergeSub("/ExtGState", RES_GS + " " + gsNum + " 0 R") };
+    if (o.useOcg) repl["/Properties"] = await mergeSub("/Properties", RES_OC + " " + ocgNum + " 0 R");
+    if (formNum !== null) repl["/XObject"] = await mergeSub("/XObject", RES_FM + " " + formNum + " 0 R");
+    const resNum = w.alloc();
+    w.obj(resNum, resDict
+      ? rebuildDict(resDict, resDictSrc, repl)
+      : rebuildDict({ t: "dict", map: new Map() }, doc.buf, repl));
+
+    /* ---- /Contents を組み直す ---- */
+    let contents = "[" + guardNum + " 0 R ";
+    const cEnt = page.dict.map.get("/Contents");
+    if (cEnt) {
+      if (cEnt.v.t === "ref") contents += cEnt.v.num + " 0 R ";
+      else if (cEnt.v.t === "arr")
+        for (const it of cEnt.v.items) if (it.t === "ref") contents += it.num + " 0 R ";
+    }
+    contents += drawNum + " 0 R]";
+
+    w.obj(page.num, rebuildDict(page.dict, page.src,
+      { "/Contents": contents, "/Resources": resNum + " 0 R" }));
+
+    for (const it of items)
+      applied.push({ page: pno, side: it.side, mode: it.mode, bleed: it.bleed });
+  }
+
+  if (!applied.length) throw new Error("処理できたページがありません");
+
+  /* ---- カタログ（レイヤー定義と復元用の基準長） ---- */
+  const ocp = o.useOcg
+    ? "<< /OCGs [" + ocgNum + " 0 R] /D << /Order [" + ocgNum + " 0 R] /ON [" + ocgNum +
+      " 0 R] /AS [<< /Event /Print /Category [/Print] /OCGs [" + ocgNum + " 0 R] >>] >> >>"
+    : null;
+  const catRepl = { [BASEKEY]: String(buf.length) };
+  catRepl["/OCProperties"] = ocp;
+  w.obj(cat.num, rebuildDict(cat.dict, cat.src, catRepl));
+
+  return { data: w.finish(), warnings, applied };
+}
+
+/* ---------- 取り消し ---------- */
+async function revert(buf, opts) {
+  const layerName = (opts && opts.layerName) || DEFAULT_LAYER;
+  const doc = await Doc.load(buf);
+  const cat = await doc.catalog();
+  const bk = cat.dict.map.get(BASEKEY);
+
+  /* (1) 追記部分の切り捨て。元ファイルとバイト単位で一致する */
+  if (bk && bk.v.t === "num") {
+    const L = bk.v.v;
+    if (L > 0 && L < buf.length) {
+      const cut = buf.subarray(0, L);
+      const tail = latin(cut, Math.max(0, cut.length - 40), cut.length);
+      if (/%%EOF\s*$/.test(tail)) {
+        try { await Doc.load(cut); return cut.slice(); } catch (e) { /* (2) へ */ }
+      }
+    }
+  }
+
+  /* (2) 再保存・RIP通過後 → 該当区間だけを消す増分更新 */
+  const ocgNums = await findOcgNums(doc, layerName);
+  const pages = await doc.pages();
+  const w = new Writer(doc);
+  let hit = false;
+  const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const reBlock = new RegExp(esc(MARK_BEGIN) + "[\\s\\S]*?" + esc(MARK_END), "g");
+  const done = new Set();
+
+  for (const page of pages) {
+    for (const st of await contentStreams(doc, page)) {
+      if (done.has(st.num)) continue;
+      done.add(st.num);
+      const o = await doc.get(st.num);
+      if (o.v.t !== "stream") continue;
+      let data;
+      try { data = await doc.streamData(o.v); } catch (e) { continue; }
+      const txt = latin(data, 0, data.length);
+      const names = await ocNamesIn(doc, st.resEnt, st.resSrc, ocgNums);
+      const hasMark = txt.indexOf(MARK) >= 0 || txt.indexOf(RES_OC) >= 0;
+      if (!hasMark && !names.length) continue;
+      let cleaned = txt.replace(reBlock, "").split(MARK_GUARD).join("");
+      for (const nm of [RES_OC].concat(names))
+        cleaned = cleaned.replace(new RegExp("/OC\\s+" + esc(nm) + "\\s+BDC[\\s\\S]*?EMC", "g"), "");
+      if (cleaned === txt) continue;
+      hit = true;
+      const core = cleaned.replace(/%[^\r\n]*/g, "").replace(/\s+/g, "");
+      if (core === "") cleaned = "";
+      else if (core === "q") cleaned = "q\n";
+      else if (core === "Q") cleaned = "Q\n";
+      w.streamKeep(st.num, o.v.dict, o.src, bytes(cleaned));
+    }
+  }
+  if (!hit) throw new Error("このツールで付けたノド断ち代が見つかりません");
+
+  const catRepl = { [BASEKEY]: null };
+  let others = 0;
+  const ocpEnt = cat.dict.map.get("/OCProperties");
+  if (ocpEnt) {
+    const ocp = await doc.resolve(ocpEnt.v, cat.src);
+    const gEnt = ocp.v.t === "dict" ? ocp.v.map.get("/OCGs") : null;
+    if (gEnt) {
+      const arr = (await doc.resolve(gEnt.v, ocp.src)).v;
+      if (arr.t === "arr") for (const it of arr.items)
+        if (!(it.t === "ref" && ocgNums.has(it.num))) others++;
+    }
+  }
+  if (!others) catRepl["/OCProperties"] = null;
+  w.obj(cat.num, rebuildDict(cat.dict, cat.src, catRepl));
+  return w.finish();
+}
+
+return { info, apply, revert, MM, DEFAULT_LAYER, edgeFor, bandRect, pageGeom, Doc };
+})();
+</script>
+<script>
+/* =====================================================================
+   ノド断ち代ツール — 画面
+   ===================================================================== */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const $ = id => document.getElementById(id);
+const MMPT = 72 / 25.4;
+const SIDE_DIV = 3;
+
+/* ---------- 状態 ---------- */
+let FILES = [];      /* {name, buf, info, pdoc, rdoc, pages[], result, noop, rev} */
+let CUR = -1;
+let SEL = 1;
+let SCREEN = 'drop';
+
+const CFG = {
+  bind: 'right', mode: 'auto', first: 'auto',
+  bleed: 3, artW: 3, ext: 3, seam: 0.05, paper: 253, pfrac: 50, keepMin: 20, strict: true,
+  white: 'cmyk', inner: 0, layer: 'ノド断ち代', ocg: true, range: ''
+};
+
+const V = { mode: 'side', zoom: 1, panX: 0, panY: 0, guide: true, seam: true };
+let CACHE = { key: '', A: null, B: null, vp: null, w: 0, h: 0 };
+
+const canvas = $('canvas');
+const cctx = canvas.getContext('2d');
+
+/* ---------- 小物 ---------- */
+function toast(msg, kind) {
+  const t = $('toast'); t.textContent = msg;
+  t.className = 'toast show ' + (kind || '');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.className = 'toast', 2800);
+}
+function busy(msg, pct) {
+  $('busy').classList.add('show');
+  $('busyMsg').textContent = msg;
+  $('busyBar').style.width = Math.max(0, Math.min(100, pct || 0)) + '%';
+}
+function busyEnd() { $('busy').classList.remove('show'); }
+
+const MOON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>';
+function applyTheme(light) {
+  document.body.classList.toggle('light', light);
+  $('themeIco').innerHTML = MOON;
+  $('themeLbl').textContent = light ? 'ダーク' : 'ライト';
+  try { localStorage.setItem('nodo-dobu-theme', light ? 'light' : 'dark'); } catch (e) {}
+  if (SCREEN === 'work') draw();
+}
+
+/* ---------- 綴じ → ノド側 ---------- */
+/* 左綴じ：奇数＝右ページ／右綴じ：奇数＝左ページ。右ページのノドは左辺。 */
+function firstIsRight() {
+  if (CFG.first === 'R') return true;
+  if (CFG.first === 'L') return false;
+  return CFG.bind === 'left';
+}
+function sideOf(n) { return ((n % 2 === 1) === firstIsRight()) ? 'left' : 'right'; }
+function bindHint() {
+  $('bindHint').innerHTML = '1ページ目は<b>' + (firstIsRight() ? '右ページ' : '左ページ') +
+    '</b>。奇数ページのノドは<b>' + (sideOf(1) === 'left' ? '左' : '右') +
+    '</b>側、偶数ページは<b>' + (sideOf(2) === 'left' ? '左' : '右') + '</b>側になります。';
+}
+
+function parseRange(s, max) {
+  s = (s || '').trim(); if (!s) return null;
+  const set = new Set();
+  for (const part of s.split(/[,、\s]+/)) {
+    if (!part) continue;
+    const m = /^(\d+)?\s*-\s*(\d+)?$/.exec(part);
+    if (m) {
+      const a = m[1] ? +m[1] : 1, b = m[2] ? +m[2] : max;
+      for (let i = Math.max(1, a); i <= Math.min(max, b); i++) set.add(i);
+    } else if (/^\d+$/.test(part)) { const n = +part; if (n >= 1 && n <= max) set.add(n); }
+  }
+  return set;
+}
+function recalcSides() {
+  for (const f of FILES) {
+    const rng = parseRange(CFG.range, f.info.pageCount);
+    f.pages.forEach((p, i) => {
+      if (!p.manualSide) p.side = sideOf(i + 1);
+      p.skip = p.manualSkip || (rng ? !rng.has(i + 1) : false);
+    });
+  }
+}
+
+/* ---------- 判定 ---------- */
+/* バケット列を連続した区間にまとめる */
+function runsOf(cls) {
+  const segs = []; let k0 = 0;
+  for (let k = 1; k <= cls.length; k++)
+    if (k === cls.length || cls[k] !== cls[k0]) { segs.push({ cls: cls[k0], k0, k1: k - 1 }); k0 = k; }
+  return segs;
+}
+/* 細切れを隣の長い区間に吸収する（櫛のような帯を作らない） */
+function mergeShort(cls, minLen) {
+  let segs = runsOf(cls);
+  for (let guard = 0; guard < 200 && segs.length > 1; guard++) {
+    let i = segs.findIndex(sg => sg.k1 - sg.k0 + 1 < minLen);
+    if (i < 0) break;
+    const prev = segs[i - 1], next = segs[i + 1];
+    const tgt = !prev ? next : !next ? prev
+      : ((prev.k1 - prev.k0) >= (next.k1 - next.k0) ? prev : next);
+    if (!tgt) break;
+    for (let k = segs[i].k0; k <= segs[i].k1; k++) cls[k] = tgt.cls;
+    segs = runsOf(cls);
+  }
+  return segs;
+}
+/* 多数決フィルタで1バケットだけの飛びを均す */
+function majority(cls, r) {
+  const out = cls.slice();
+  for (let i = 0; i < cls.length; i++) {
+    const c = {};
+    for (let j = Math.max(0, i - r); j <= Math.min(cls.length - 1, i + r); j++)
+      c[cls[j]] = (c[cls[j]] || 0) + 1;
+    let best = cls[i], bv = -1;
+    for (const k in c) if (c[k] > bv) { bv = c[k]; best = k; }
+    out[i] = best;
+  }
+  return out;
+}
+/* このページをどう処理するか。segs があれば行の範囲ごとに分けて処理する */
+function pagePlan(st) {
+  if (st.skip) return { mode: 'skip', segs: null };
+  if (st.manualMode) return { mode: st.manualMode, segs: null };
+  if (CFG.mode === 'white') return { mode: 'white', segs: null };
+  if (CFG.mode === 'mirror') return { mode: 'mirror', segs: null };
+  if (!st.ink || !st.ink.seam || !st.ink.seam.cls) return { mode: 'white', segs: null };
+
+  const src = st.ink.seam.cls, NB = src.length;
+  let cls = src.slice();
+  const dec = [];
+  for (let k = 0; k < NB; k++) if (cls[k]) dec.push(k);
+  if (!dec.length) return { mode: 'keep', segs: null };
+  /* まず判定済みの行だけで多数決を取り、単独の飛びを落とす */
+  const R = 3;                                  /* 単独の飛びだけ落とす。細い帯を消さない幅 */
+  const dv = majority(dec.map(k => cls[k]), R);
+  dec.forEach((k, i) => cls[k] = dv[i]);
+  /* 紙地の行はどちらでも構わないので、いちばん近い判定で埋める */
+  for (let k = 0; k < NB; k++) {
+    if (cls[k]) continue;
+    let best = dec[0], bd = Infinity;
+    for (const j of dec) { const d2 = Math.abs(k - j); if (d2 < bd) { bd = d2; best = j; } }
+    cls[k] = cls[best];
+  }
+  cls = majority(cls, R);
+
+  let ml = Math.max(2, Math.round(NB * 0.01));          /* 最小区間 ≒ 1% */
+  let segs = mergeShort(cls, ml);
+  while (segs.length > 16 && ml < NB / 4) { ml = Math.round(ml * 1.8); segs = mergeShort(cls, ml); }
+
+  /* 「そのまま」はある程度まとまった範囲にだけ使う。
+     短い「そのまま」はミラーに倒す（絵柄はあるので白にはしない）。 */
+  const kmin = Math.max(2, Math.round(NB * CFG.keepMin / 100));
+  let changed = false;
+  for (const sg of segs)
+    if (sg.cls === 'keep' && sg.k1 - sg.k0 + 1 < kmin) {
+      for (let k = sg.k0; k <= sg.k1; k++) cls[k] = 'mirror';
+      changed = true;
+    }
+  if (changed) segs = mergeShort(cls, ml);
+
+  /* 「そのまま」に囲まれた短いミラーは、そのままに吸収する。
+     写真の飛んだ白などで、そのままの面が細切れになるのを防ぐ。
+     白に隣接するミラー（紙地の面に入った帯など）はそのまま残す。 */
+  const mmax = Math.max(2, Math.round(NB * 0.25));
+  changed = false;
+  for (let i = 0; i < segs.length; i++) {
+    const sg = segs[i];
+    if (sg.cls !== 'mirror' || sg.k1 - sg.k0 + 1 >= mmax) continue;
+    const prev = segs[i - 1], next = segs[i + 1];
+    const ok = (prev ? prev.cls === 'keep' : true) && (next ? next.cls === 'keep' : true)
+               && (prev || next);
+    if (!ok) continue;
+    for (let k = sg.k0; k <= sg.k1; k++) cls[k] = 'keep';
+    changed = true;
+  }
+  if (changed) segs = mergeShort(cls, ml);
+  const kinds = new Set(segs.map(x => x.cls));
+  if (kinds.size === 1) return { mode: segs[0].cls, segs: null };
+  return { mode: 'mixed', segs, nb: NB };
+}
+function decideMode(st) { return pagePlan(st).mode; }
+/* 絵柄として残す幅と、その外側を白で伏せる幅 */
+function artWidths() {
+  const art = Math.max(0, Math.min(CFG.artW, CFG.bleed));
+  return { art, rest: Math.max(0, CFG.bleed - art) };
+}
+/* ひとつの処理区分を、エンジンに渡す帯の列にする */
+function bandsFor(cls, base, span) {
+  const { art, rest } = artWidths();
+  const out = [];
+  if (cls === 'white') {
+    out.push(Object.assign({}, base, { mode: 'white', bleed: CFG.bleed }));
+  } else {
+    if (cls === 'mirror' && art > 0.01)
+      out.push(Object.assign({}, base, { mode: 'mirror', bleed: art }));
+    /* そのまま／ミラーのどちらでも、絵柄の外側は白で伏せる */
+    if (rest > 0.01)
+      out.push(Object.assign({}, base, { mode: 'white', bleed: rest, offset: -art }));
+  }
+  if (span) out.forEach(b => { b.from = span[0]; b.to = span[1]; });
+  return out;
+}
+/* バケット範囲 → 辺に沿った方向のPDF座標 [from,to]。端は天地へ延長する */
+function edgeSpan(g, edge, k0, k1, NB, extPt) {
+  const t = g.trim, horiz = (edge === 'xmin' || edge === 'xmax');
+  const lo = horiz ? t[1] : t[0], hi = horiz ? t[3] : t[2];
+  let a, b;
+  if (horiz) { a = lo + (hi - lo) * (1 - (k1 + 1) / NB); b = lo + (hi - lo) * (1 - k0 / NB); }
+  else { a = lo + (hi - lo) * (k0 / NB); b = lo + (hi - lo) * ((k1 + 1) / NB); }
+  const first = horiz ? (k1 === NB - 1) : (k0 === 0);
+  const last  = horiz ? (k0 === 0) : (k1 === NB - 1);
+  if (first) a = lo - extPt;
+  if (last) b = hi + extPt;
+  return [a, b];
+}
+const MODELBL = { white: '白にする', mirror: 'ミラー', keep: 'そのまま', skip: '対象外', mixed: '分割' };
+
+/* ---------- 読み込み ---------- */
+async function addFiles(list) {
+  const arr = [...list].filter(f => /\.pdf$/i.test(f.name));
+  if (!arr.length) { toast('PDFを選んでください', 'err'); return; }
+  for (let i = 0; i < arr.length; i++) {
+    busy('読み込み中… ' + arr[i].name, (i / arr.length) * 100);
+    try {
+      const buf = new Uint8Array(await arr[i].arrayBuffer());
+      const info = await NodoDobu.info(buf);
+      const pdoc = await pdfjsLib.getDocument({ data: buf.slice() }).promise;
+      const pages = [];
+      for (let p = 1; p <= info.pageCount; p++)
+        pages.push({ side: sideOf(p), manualSide: false, manualMode: null, manualSkip: false, skip: false, ink: null });
+      FILES.push({ name: arr[i].name, buf, info, pdoc, rdoc: null, pages, result: null, noop: false, rev: 0 });
+    } catch (e) { toast(arr[i].name + '：' + (e.message || e), 'err'); }
+  }
+  busyEnd();
+  if (FILES.length && CUR < 0) CUR = 0;
+  SEL = 1; recalcSides();
+  if (FILES.length) goSetup(); else goDrop();
+}
+
+function renderFiles() {
+  const el = $('flist'); el.innerHTML = '';
+  FILES.forEach((f, i) => {
+    const d = document.createElement('div');
+    d.className = 'fitem';
+    const mark = f.result ? '✓ ' : (f.info.hasLayer ? '⟲ ' : '');
+    d.innerHTML = '<span class="nm">' + mark + f.name + '</span>' +
+      '<span class="mt">' + f.info.pageCount + 'p</span><span class="x" title="外す">✕</span>';
+    d.querySelector('.x').onclick = () => {
+      const g = FILES[i];
+      try { g.pdoc.destroy(); if (g.rdoc) g.rdoc.destroy(); } catch (e) {}
+      FILES.splice(i, 1);
+      if (CUR >= FILES.length) CUR = FILES.length - 1;
+      if (!FILES.length) { goDrop(); return; }
+      renderFiles(); syncSetup();
+    };
+    el.appendChild(d);
+  });
+  const info = $('fileInfo');
+  const f = FILES[CUR];
+  info.innerHTML = f ? fileSummary(f) : '';
+  const rb = $('btnRevert');
+  if (rb) rb.onclick = () => removeLayer(f);
+}
+
+function fileSummary(f) {
+  const p0 = f.info.pages[0], d = p0.dobu;
+  const mn = Math.min(d.L, d.R, d.T, d.B);
+  const kind = mn > 6 ? 'トンボ付き' : 'ドブまで';
+  let h = '<div class="infobox"><dl class="kv">' +
+    '<dt>ページ数</dt><dd>' + f.info.pageCount + ' ページ</dd>' +
+    '<dt>仕上がり</dt><dd>' + p0.trimW.toFixed(1) + ' × ' + p0.trimH.toFixed(1) + ' mm（' + p0.trimSrc + '）</dd>' +
+    '<dt>外周の余白</dt><dd>L' + d.L.toFixed(1) + ' / R' + d.R.toFixed(1) + ' / T' + d.T.toFixed(1) + ' / B' + d.B.toFixed(1) + ' mm</dd>' +
+    '<dt>書き出し</dt><dd>' + kind + (p0.bleed != null ? '（BleedBox ' + p0.bleed.toFixed(1) + 'mm）' : '') + '</dd></dl>';
+  if (p0.trimSrc.indexOf('代用') >= 0)
+    h += '<div class="warn" style="margin-top:7px">TrimBoxがありません。' + p0.trimSrc +
+         'を仕上がりとみなしています。断ち代の位置を必ずプレビューで確認してください。</div>';
+  if (f.info.hasLayer && !f.result)
+    h += '<div style="margin-top:8px;color:var(--cyan)">このPDFには、以前このツールで付けたノド断ち代が入っています。' +
+         'このまま実行すると、いったん取り除いてから今の設定で付け直します。</div>' +
+         '<button class="revertbtn" id="btnRevert">断ち代を付ける前のPDFに戻して保存</button>' +
+         '<div class="hint" style="margin-top:5px">付けた分だけを取り除き、元のファイルとバイト単位で同じPDFを書き出します。' +
+         '設定を変えて付け直したいだけなら、この操作は不要です。</div>';
+  return h + '</div>';
+}
+
+function syncArt() {
+  const d = CFG.bleed;
+  document.querySelectorAll('#segArt button').forEach(b => {
+    const v = +b.dataset.v, rest = Math.max(0, d - v);
+    b.innerHTML = v + 'mm<small>' + (rest > 0.01 ? '白' + (+rest.toFixed(2)) + 'mm' : '白なし') + '</small>';
+    b.classList.toggle('on', v === CFG.artW);
+    b.disabled = v > d + 0.001;
+  });
+  const { art, rest } = artWidths();
+  $('artHint').innerHTML = rest > 0.01
+    ? '断ち代' + d + 'mm のうち、仕上がり線から<b>' + art + 'mm</b>だけ絵柄（そのまま／ミラー）にして、' +
+      '外側の<b>' + (+rest.toFixed(2)) + 'mm</b>は白で伏せます。断裁位置のばらつきが小さいときに、隣ページの絵柄を残す量を減らせます。'
+    : '断ち代' + d + 'mm すべてを絵柄にします。白で伏せる部分はありません。';
+}
+function syncSetup() {
+  $('btnRun').disabled = !FILES.length;
+  $('btnGoWork').style.display = FILES.some(f => f.result || f.noop) ? '' : 'none';
+  const d = [];
+  if (CFG.bleed !== 3) d.push('断ち代' + CFG.bleed + 'mm');
+  if (CFG.artW !== CFG.bleed) d.push('絵柄' + CFG.artW + 'mm');
+  if (CFG.ext !== CFG.bleed) d.push('延長' + CFG.ext + 'mm');
+  if (CFG.seam !== 0.05) d.push('なじませ' + CFG.seam + 'mm');
+  if (CFG.paper !== 253) d.push('紙地' + CFG.paper);
+  if (CFG.pfrac !== 50) d.push('紙地率' + CFG.pfrac + '%');
+  if (CFG.keepMin !== 20) d.push('そのまま最小' + CFG.keepMin + '%');
+  if (!CFG.strict) d.push('色の食い違いを見ない');
+  if (CFG.first !== 'auto') d.push('1p目' + (CFG.first === 'R' ? '右' : '左'));
+  if (CFG.range) d.push('対象' + CFG.range);
+  if (CFG.white !== 'cmyk') d.push('グレー白');
+  if (CFG.inner) d.push('内側重ね' + CFG.inner + 'mm');
+  if (!CFG.ocg) d.push('OCGなし');
+  $('setSummary').textContent = d.length ? '（' + d.join(' / ') + '）' : '';
+  $('setToggle').classList.toggle('act', d.length > 0);
+  syncArt();
+}
+
+/* ---------- 走査（絵柄量・またぎ連続性） ---------- */
+/* 仕上がり線からの符号付きオフセット（外側が正）で、辺に沿った帯の矩形を作る */
+function edgeBand(g, edge, a, b) {
+  const t = g.trim, lo = Math.min(a, b), hi = Math.max(a, b);
+  if (edge === 'xmin') return [t[0] - hi, t[1], t[0] - lo, t[3]];
+  if (edge === 'xmax') return [t[2] + lo, t[1], t[2] + hi, t[3]];
+  if (edge === 'ymin') return [t[0], t[1] - hi, t[2], t[1] - lo];
+  return [t[0], t[3] + lo, t[2], t[3] + hi];
+}
+function stripRects(g, side, bleedMm) {
+  const edge = NodoDobu.edgeFor(side, g.rot);
+  const IN = 1.5 * MMPT, OUT = bleedMm * MMPT;
+  const D = 0.15 * MMPT;             /* 細帯1本の厚み */
+  const IS = 0.25 * MMPT;            /* 仕上がり線のアンチエイリアスを避ける逃げ */
+  const out = [], inn = [];
+  for (let k = 0; k < 3; k++) {
+    out.push(edgeBand(g, edge, IS + k * D, IS + (k + 1) * D));
+    inn.push(edgeBand(g, edge, -(IS + (k + 1) * D), -(IS + k * D)));
+  }
+  return {
+    edge, len: (edge === 'xmin' || edge === 'xmax') ? g.trim[3] - g.trim[1] : g.trim[2] - g.trim[0],
+    all: edgeBand(g, edge, -IN, OUT),
+    in:  edgeBand(g, edge, -IN, -IS),
+    out: edgeBand(g, edge, IS, OUT),
+    outFull: edgeBand(g, edge, IS, OUT),
+    inn, outb: out
+  };
+}
+function vpRect(vp, r) {
+  const a = vp.convertToViewportPoint(r[0], r[1]), b = vp.convertToViewportPoint(r[2], r[3]);
+  return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]),
+           w: Math.abs(b[0] - a[0]), h: Math.abs(b[1] - a[1]) };
+}
+function clampBox(ctx, x, y, w, h) {
+  x = Math.max(0, Math.round(x)); y = Math.max(0, Math.round(y));
+  w = Math.max(1, Math.min(Math.round(w), ctx.canvas.width - x));
+  h = Math.max(1, Math.min(Math.round(h), ctx.canvas.height - y));
+  return { x, y, w, h };
+}
+function inkRatio(ctx, bx) {
+  const b = clampBox(ctx, bx.x, bx.y, bx.w, bx.h);
+  const d = ctx.getImageData(b.x, b.y, b.w, b.h).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4)
+    if (255 - Math.min(d[i], d[i + 1], d[i + 2]) > 12) n++;
+  return n / (b.w * b.h);
+}
+/* 細い帯を長手方向に平均して色の並びにする */
+function profile(ctx, bx) {
+  const b = clampBox(ctx, bx.x, bx.y, bx.w, bx.h);
+  const d = ctx.getImageData(b.x, b.y, b.w, b.h).data;
+  const vertical = b.w <= b.h;
+  const n = vertical ? b.h : b.w, m = vertical ? b.w : b.h;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let r = 0, g = 0, bl = 0;
+    for (let j = 0; j < m; j++) {
+      const k = ((vertical ? i * b.w + j : j * b.w + i)) * 4;
+      r += d[k]; g += d[k + 1]; bl += d[k + 2];
+    }
+    out[i] = [r / m, g / m, bl / m];
+  }
+  return out;
+}
+/* 帯を長手方向に見て、行ごとの「いちばん濃い画素」を返す。
+   真っ白（紙地）か、絵柄が載っているかの判定に使う。 */
+function profileMin(ctx, bx) {
+  const b = clampBox(ctx, bx.x, bx.y, bx.w, bx.h);
+  const d = ctx.getImageData(b.x, b.y, b.w, b.h).data;
+  const vertical = b.w <= b.h;
+  const n = vertical ? b.h : b.w, m = vertical ? b.w : b.h;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let mn = 255;
+    for (let j = 0; j < m; j++) {
+      const k = ((vertical ? i * b.w + j : j * b.w + i)) * 4;
+      const v = Math.min(d[k], d[k + 1], d[k + 2]);
+      if (v < mn) mn = v;
+    }
+    out[i] = mn;
+  }
+  return out;
+}
+/* 帯を行ごとに見て、紙地（真っ白）の画素がどれだけ占めるかを返す。
+   断ち代の奥まで絵柄が続いているかの判定に使う。 */
+function profilePaper(ctx, bx, paper) {
+  const b = clampBox(ctx, bx.x, bx.y, bx.w, bx.h);
+  const d = ctx.getImageData(b.x, b.y, b.w, b.h).data;
+  const vertical = b.w <= b.h;
+  const n = vertical ? b.h : b.w, m = vertical ? b.w : b.h;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let c = 0;
+    for (let j = 0; j < m; j++) {
+      const k = ((vertical ? i * b.w + j : j * b.w + i)) * 4;
+      if (Math.min(d[k], d[k + 1], d[k + 2]) >= paper) c++;
+    }
+    out[i] = c / m;
+  }
+  return out;
+}
+/* 長手方向の移動平均。写真の粒状感を均し、大きな色の流れだけを残す */
+function smooth(p, w) {
+  const n = p.length, out = new Array(n);
+  const pr = new Float64Array((n + 1) * 3);
+  for (let i = 0; i < n; i++)
+    for (let c = 0; c < 3; c++) pr[(i + 1) * 3 + c] = pr[i * 3 + c] + p[i][c];
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - w), b = Math.min(n - 1, i + w), c = b - a + 1;
+    out[i] = [(pr[(b + 1) * 3] - pr[a * 3]) / c,
+              (pr[(b + 1) * 3 + 1] - pr[a * 3 + 1]) / c,
+              (pr[(b + 1) * 3 + 2] - pr[a * 3 + 2]) / c];
+  }
+  return out;
+}
+/* 仕上がり線の内外を行ごとに見て、処理の種類を決める。
+     両側に絵柄あり → そのまま（隣の絵柄がそのまま断ち代になる）
+     内側だけ絵柄   → ミラー（自分の絵柄を反転して足す）
+     外側だけ絵柄   → 白（隣の絵柄を伏せる）
+   絵柄かどうかは色の濃さではなく「真っ白かどうか」で見る。
+   写真は淡くても真っ白にはならないので、薄い写真も取りこぼさない。 */
+const SEAM_NB = 400;
+function seamAnalyse(o) {
+  const NB = SEAM_NB, PAPER = CFG.paper;
+  const sI = o.inn.map(p => smooth(p, o.w)), sO = o.outb.map(p => smooth(p, o.w));
+  const n = Math.min(sI[0].length, sO[0].length, o.innMin.length, o.outPaper.length);
+  const cls = new Array(NB).fill(null);
+  if (!n) return { cls, cont: 1, info: 0 };
+  const dm = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+  const tally = [];
+  for (let k = 0; k < NB; k++) tally.push({ keep: 0, mirror: 0, white: 0 });
+  let info = 0, ok = 0;
+  const PF = Math.max(0, Math.min(1, CFG.pfrac / 100));
+  for (let i = 0; i < n; i++) {
+    const hi = o.innMin[i] < PAPER;          /* 仕上がりの内側に絵柄があるか */
+    const pf = o.outPaper[i];                /* 断ち代のうち紙地が占める割合 */
+    const oAny = pf < 0.999;                 /* 断ち代に少しでも絵柄があるか */
+    let c;
+    if (hi) {
+      /* 断ち代の奥まで絵柄が続いているときだけ「そのまま」。
+         斜めの帯のように途中で切れる行は、白が残らないようミラーにする。 */
+      c = (oAny && pf < PF) ? 'keep' : 'mirror';
+      /* 断ち代の絵柄が自分の絵柄の続きかどうかを色で確かめる。
+         平坦な面で色だけが段差になっている（別の写真が隣り合っている）ときは
+         cross が大きく local が小さいので、ミラーに倒れる。
+         写真が続いている場合は局所の変化も大きいので、しきい値が自動で緩む。 */
+      if (c === 'keep' && CFG.strict) {
+        const cross = dm(sI[0][i], sO[0][i]);
+        const local = (dm(sI[0][i], sI[1][i]) + dm(sI[1][i], sI[2][i]) +
+                       dm(sO[0][i], sO[1][i]) + dm(sO[1][i], sO[2][i])) / 4;
+        if (cross > Math.max(25, local * 14 + 10)) c = 'mirror';
+      }
+    } else if (oAny) c = 'white';
+    else continue;
+    tally[Math.min(NB - 1, Math.floor(i / n * NB))][c]++;
+    info++; if (c === 'keep') ok++;
+  }
+  for (let k = 0; k < NB; k++) {
+    const t = tally[k];
+    if (!(t.keep + t.mirror + t.white)) continue;
+    cls[k] = (t.keep >= t.mirror && t.keep >= t.white) ? 'keep'
+           : (t.mirror >= t.white ? 'mirror' : 'white');
+  }
+  return { cls, cont: info ? ok / info : 1, info: info / n };
+}
+
+async function scanOne(f, p, ctx) {
+  const st = f.pages[p - 1];
+  const g = f.info.pages[p - 1];
+  const r = stripRects(g, st.side, CFG.bleed);
+  try {
+    const page = await f.pdoc.getPage(p);
+    const sc = Math.max(5, Math.min(10, 3400 / Math.max(1, r.len)));
+    const vp = page.getViewport({ scale: sc });
+    const box = vpRect(vp, r.all);
+    const cv = ctx.canvas;
+    cv.width = Math.max(2, Math.round(box.w)); cv.height = Math.max(2, Math.round(box.h));
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -box.x, -box.y] }).promise;
+    const shift = b => ({ x: b.x - box.x, y: b.y - box.y, w: b.w, h: b.h });
+    const prof = rect => profile(ctx, shift(vpRect(vp, rect)));
+    const w = Math.max(1, Math.round(MMPT * sc));        /* 移動平均の半幅＝1mm */
+    const seam = seamAnalyse({
+      inn: r.inn.map(prof), outb: r.outb.map(prof),
+      innMin: profileMin(ctx, shift(vpRect(vp, r.inn[0]))),
+      outPaper: profilePaper(ctx, shift(vpRect(vp, r.outFull)), CFG.paper), w });
+    st.ink = {
+      in: inkRatio(ctx, shift(vpRect(vp, r.in))),
+      out: inkRatio(ctx, shift(vpRect(vp, r.out))),
+      cont: seam.cont, seam
+    };
+  } catch (e) { st.ink = { in: null, out: null, cont: 0, seam: null }; }
+}
+function scanCtx() {
+  return document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+}
+async function scanFile(f, onStep) {
+  const ctx = scanCtx();
+  for (let p = 1; p <= f.info.pageCount; p++) {
+    const st = f.pages[p - 1];
+    if (!st.skip && !st.ink) await scanOne(f, p, ctx);
+    if (onStep) onStep();
+  }
+}
+/* ノド側を変えたページだけ、その場で測り直す */
+async function rescan(f, list) {
+  if (CFG.mode !== 'auto' || !list.length) return;
+  const ctx = scanCtx();
+  for (const p of list) await scanOne(f, p, ctx);
+}
+
+/* ---------- 実行 ---------- */
+async function run() {
+  if (!FILES.length) return;
+  recalcSides();
+  try {
+    if (CFG.mode === 'auto') {
+      const total = FILES.reduce((s, f) => s + f.info.pageCount, 0);
+      let done = 0;
+      for (const f of FILES)
+        await scanFile(f, () => { done++; busy('ノド際を調べています… ' + done + '/' + total, done / total * 100); });
+    }
+    for (let i = 0; i < FILES.length; i++) {
+      const f = FILES[i];
+      busy('断ち代を作っています… ' + f.name, (i / FILES.length) * 100);
+      const bands = [];
+      f.pages.forEach((st, k) => {
+        const plan = pagePlan(st);
+        if (plan.mode === 'skip') return;
+        const base = { page: k + 1, side: st.side, ext: CFG.ext, seam: CFG.seam, inner: CFG.inner };
+        if (plan.segs) {
+          const g = f.info.pages[k];
+          const edge = NodoDobu.edgeFor(st.side, g.rot);
+          const horiz = (edge === 'xmin' || edge === 'xmax');
+          const lo0 = (horiz ? g.trim[1] : g.trim[0]) - CFG.ext * MMPT;
+          const hi0 = (horiz ? g.trim[3] : g.trim[2]) + CFG.ext * MMPT;
+          plan.segs.forEach((sg, i) => {
+            const sp = edgeSpan(g, edge, sg.k0, sg.k1, plan.nb, CFG.ext * MMPT);
+            /* ミラーの帯は、斜めの絵柄が断ち代の奥でずれる分だけ上下に広げる。
+               紙地の面を反転しても紙地のままなので、白の区間に食い込んでも害はない。
+               「そのまま」の区間に隣接するときは広げない。 */
+            if (sg.cls === 'mirror') {
+              const near = [plan.segs[i - 1], plan.segs[i + 1]].filter(Boolean);
+              if (!near.some(x => x.cls === 'keep')) {
+                const grow = CFG.bleed * 3 * MMPT;
+                sp[0] = Math.max(lo0, sp[0] - grow);
+                sp[1] = Math.min(hi0, sp[1] + grow);
+              }
+            }
+            bands.push.apply(bands, bandsFor(sg.cls, base, sp));
+          });
+        } else {
+          bands.push.apply(bands, bandsFor(plan.mode, base, null));
+        }
+      });
+      if (f.rdoc) { try { f.rdoc.destroy(); } catch (e) {} f.rdoc = null; }
+      if (!bands.length) {
+        f.result = null; f.noop = true;
+        f.rdoc = await pdfjsLib.getDocument({ data: f.buf.slice() }).promise;
+      } else {
+        f.noop = false;
+        f.result = await NodoDobu.apply(f.buf, {
+          layerName: CFG.layer, white: CFG.white, useOcg: CFG.ocg, bands });
+        f.rdoc = await pdfjsLib.getDocument({ data: f.result.data.slice() }).promise;
+      }
+      f.rev++;
+    }
+    busyEnd();
+    CACHE.key = '';
+    goWork(true);
+    const n = FILES.filter(f => f.result).length;
+    const noop = FILES.filter(f => f.noop).length;
+    toast(n ? n + ' ファイルに断ち代を作りました' + (noop ? '（' + noop + ' ファイルは処理不要）' : '') : '全ページ「そのまま」判定でした。処理は不要です', n ? 'ok' : '');
+    if (window.fbAfterApply) window.fbAfterApply();
+  } catch (e) { busyEnd(); toast(e.message || String(e), 'err'); }
+}
+
+function dl(data, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+const outName = (n, s) => n.replace(/\.pdf$/i, '') + s + '.pdf';
+
+async function save() {
+  const list = FILES.filter(f => f.result);
+  if (!list.length) { toast('保存できる処理結果がありません', 'err'); return; }
+  for (let i = 0; i < list.length; i++) {
+    dl(list[i].result.data, outName(list[i].name, '_ノド断ち代'));
+    if (i < list.length - 1) await new Promise(r => setTimeout(r, 400));
+  }
+  toast(list.length + ' ファイルを保存しました', 'ok');
+}
+
+async function removeLayer(f) {
+  if (!f) return;
+  try {
+    busy('ノド断ち代を取り除いています… ' + f.name, 40);
+    const back = await NodoDobu.revert(f.buf, { layerName: CFG.layer });
+    busyEnd();
+    dl(back, outName(f.name, '_断ち代なし'));
+    toast('付ける前のPDFを保存しました', 'ok');
+  } catch (e) { busyEnd(); toast(f.name + '：' + (e.message || e), 'err'); }
+}
+
+function resetAll() {
+  for (const f of FILES) { try { f.pdoc.destroy(); if (f.rdoc) f.rdoc.destroy(); } catch (e) {} }
+  FILES = []; CUR = -1; SEL = 1; CACHE = { key: '', A: null, B: null, vp: null, w: 0, h: 0 };
+  const th = $('thumbs'); th.innerHTML = ''; th.dataset.key = '';
+  if (thumbObs) { thumbObs.disconnect(); thumbObs = null; }
+  renderFiles(); syncSetup(); goDrop();
+  toast('クリアしました');
+}
+
+/* ---------- 画面切替 ---------- */
+function showScreen(name) {
+  SCREEN = name;
+  $('scDrop').style.display = name === 'drop' ? '' : 'none';
+  $('scConfig').style.display = name === 'config' ? '' : 'none';
+  $('scWork').style.display = name === 'work' ? '' : 'none';
+  $('backBtn').style.display = name === 'work' ? '' : 'none';
+}
+function goDrop() { showScreen('drop'); }
+function goSetup() {
+  if (!FILES.length) { goDrop(); return; }
+  showScreen('config'); renderFiles(); syncSetup();
+}
+function goWork(fit) {
+  if (!FILES.length) return;
+  if (CUR < 0 || CUR >= FILES.length) CUR = 0;
+  showScreen('work');
+  const sel = $('selFile'); sel.innerHTML = '';
+  FILES.forEach((f, i) => {
+    const o = document.createElement('option'); o.value = i; o.textContent = f.name; sel.appendChild(o);
+  });
+  sel.value = Math.max(0, CUR);
+  $('pgTotal').textContent = '/ ' + FILES[CUR].info.pageCount;
+  $('pgInput').max = FILES[CUR].info.pageCount;
+  $('pgInput').value = SEL;
+  renderThumbs();
+  resizeCanvas();
+  refresh(fit !== false);
+}
+
+/* ---------- ページ描画 ---------- */
+async function renderPage(doc, pno, scale) {
+  const page = await doc.getPage(pno);
+  const vp = page.getViewport({ scale });
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(vp.width)); cv.height = Math.max(1, Math.round(vp.height));
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  return { cv, vp };
+}
+async function ensureRender() {
+  const f = FILES[CUR]; if (!f) return false;
+  const key = CUR + '#' + SEL + '#' + f.rev;
+  if (CACHE.key === key) return true;
+  const g = f.info.pages[SEL - 1];
+  const wpt = g.media[2] - g.media[0], hpt = g.media[3] - g.media[1];
+  const scale = Math.max(0.5, Math.min(6, Math.sqrt(3.6e6 / Math.max(1, wpt * hpt))));
+  busy('ページを描画しています…', 50);
+  try {
+    const A = await renderPage(f.pdoc, SEL, scale);
+    const B = f.rdoc ? await renderPage(f.rdoc, SEL, scale) : null;
+    CACHE = { key, A: A.cv, B: B ? B.cv : null, vp: A.vp, w: A.cv.width, h: A.cv.height };
+  } catch (e) { busyEnd(); toast('描画に失敗しました：' + (e.message || e), 'err'); return false; }
+  busyEnd();
+  return true;
+}
+async function refresh(fit) {
+  if (!(await ensureRender())) return;
+  if (fit) fitView();
+  draw(); renderThumbs();
+}
+
+/* ---------- ステージ ---------- */
+function viewSize() { const r = $('stage').getBoundingClientRect(); return { w: r.width, h: r.height }; }
+function paneW(v) { return V.mode === 'side' ? (v.w - SIDE_DIV) / 2 : v.w; }
+function resizeCanvas() {
+  const v = viewSize(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.max(1, Math.round(v.w * dpr));
+  canvas.height = Math.max(1, Math.round(v.h * dpr));
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function fitView() {
+  if (!CACHE.w) return;
+  const v = viewSize(), pw = paneW(v);
+  const z = Math.min(pw / CACHE.w, v.h / CACHE.h) * 0.94;
+  V.zoom = z; V.panX = (pw - CACHE.w * z) / 2; V.panY = (v.h - CACHE.h * z) / 2;
+}
+function gutterView() {
+  const f = FILES[CUR]; if (!f || !CACHE.vp) return;
+  const g = f.info.pages[SEL - 1], st = f.pages[SEL - 1];
+  const edge = NodoDobu.edgeFor(st.side, g.rot);
+  const OUT = (CFG.bleed + 3) * MMPT, IN = 20 * MMPT, LEN = 95 * MMPT;
+  const t = g.trim;
+  let r;
+  if (edge === 'xmin') r = [t[0] - OUT, (t[1] + t[3]) / 2 - LEN / 2, t[0] + IN, (t[1] + t[3]) / 2 + LEN / 2];
+  else if (edge === 'xmax') r = [t[2] - IN, (t[1] + t[3]) / 2 - LEN / 2, t[2] + OUT, (t[1] + t[3]) / 2 + LEN / 2];
+  else if (edge === 'ymin') r = [(t[0] + t[2]) / 2 - LEN / 2, t[1] - OUT, (t[0] + t[2]) / 2 + LEN / 2, t[1] + IN];
+  else r = [(t[0] + t[2]) / 2 - LEN / 2, t[3] - IN, (t[0] + t[2]) / 2 + LEN / 2, t[3] + OUT];
+  const b = vpRect(CACHE.vp, r);
+  const v = viewSize(), pw = paneW(v);
+  const z = Math.min(pw / Math.max(1, b.w), v.h / Math.max(1, b.h)) * 0.92;
+  V.zoom = z;
+  V.panX = pw / 2 - (b.x + b.w / 2) * z;
+  V.panY = v.h / 2 - (b.y + b.h / 2) * z;
+  draw();
+}
+function zoomAt(fk, cx, cy) {
+  if (!CACHE.w) return;
+  const nz = Math.max(0.03, Math.min(24, V.zoom * fk));
+  V.panX = cx - (cx - V.panX) * (nz / V.zoom);
+  V.panY = cy - (cy - V.panY) * (nz / V.zoom);
+  V.zoom = nz; draw();
+}
+
+function cssVar(n, fb) {
+  const v = getComputedStyle(document.body).getPropertyValue(n);
+  return (v && v.trim()) || fb;
+}
+function drawOverlay(originX, pw, v) {
+  const f = FILES[CUR]; if (!f || !CACHE.vp) return;
+  const g = f.info.pages[SEL - 1], st = f.pages[SEL - 1];
+  const plan = pagePlan(st), mode = plan.mode;
+  const edge = NodoDobu.edgeFor(st.side, g.rot);
+  const z = V.zoom;
+  const P = (x, y) => { const p = CACHE.vp.convertToViewportPoint(x, y); return [V.panX + p[0] * z, V.panY + p[1] * z]; };
+  const t = g.trim;
+  const horiz = (edge === 'xmin' || edge === 'xmax');
+  const trimPos = edge === 'xmin' ? t[0] : edge === 'xmax' ? t[2] : edge === 'ymin' ? t[1] : t[3];
+  const sgn = (edge === 'xmin' || edge === 'ymin') ? -1 : 1;
+  const outPos = trimPos + sgn * CFG.bleed * MMPT;
+
+  /* 仕上がり線に沿って、行ごとの判定を帯で出す */
+  if (V.seam && st.ink && st.ink.seam && st.ink.seam.cls) {
+    const rows = st.ink.seam.cls, NB = rows.length;
+    const gap = 1.2 * MMPT, thick = 1.6 * MMPT;
+    const o1 = CFG.bleed * MMPT + gap, o2 = o1 + thick;
+    const a0 = edgeBand(g, edge, o1, o2);
+    const lo = horiz ? a0[1] : a0[0], hi = horiz ? a0[3] : a0[2];
+    const C = { keep: 'rgba(126,200,107,.9)', mirror: 'rgba(70,200,218,.9)',
+                white: 'rgba(154,166,180,.9)' };
+    cctx.save();
+    for (let k = 0; k < NB; k++) {
+      cctx.fillStyle = C[rows[k]] || 'rgba(150,150,160,.3)';
+      const f0 = lo + (hi - lo) * (horiz ? (1 - (k + 1) / NB) : k / NB);
+      const f1 = lo + (hi - lo) * (horiz ? (1 - k / NB) : (k + 1) / NB);
+      const p1 = horiz ? P(a0[0], f0) : P(f0, a0[1]);
+      const p2 = horiz ? P(a0[2], f1) : P(f1, a0[3]);
+      cctx.fillRect(Math.min(p1[0], p2[0]), Math.min(p1[1], p2[1]),
+        Math.max(1, Math.abs(p2[0] - p1[0])), Math.max(1, Math.abs(p2[1] - p1[1])));
+    }
+    cctx.restore();
+  }
+  if (V.guide) {
+    const line = (pos, dash) => {
+      const a = horiz ? P(pos, t[1]) : P(t[0], pos);
+      const b = horiz ? P(pos, t[3]) : P(t[2], pos);
+      cctx.save(); cctx.strokeStyle = 'rgba(232,50,70,.9)'; cctx.lineWidth = 1.2;
+      cctx.setLineDash(dash || []);
+      cctx.beginPath(); cctx.moveTo(a[0], a[1]); cctx.lineTo(b[0], b[1]); cctx.stroke(); cctx.restore();
+    };
+    line(trimPos); line(outPos, [5, 4]);
+  }
+}
+function draw() {
+  if (SCREEN !== 'work') return;
+  const v = viewSize();
+  cctx.clearRect(0, 0, v.w, v.h);
+  if (!CACHE.A) return;
+  cctx.imageSmoothingEnabled = V.zoom < 1.5;
+  const stage2 = cssVar('--stage2', '#16120e');
+  const pane = (originX, img, label) => {
+    const pw = paneW(v);
+    cctx.save();
+    cctx.beginPath(); cctx.rect(originX, 0, pw, v.h); cctx.clip();
+    cctx.fillStyle = stage2; cctx.fillRect(originX, 0, pw, v.h);
+    cctx.translate(originX, 0);
+    if (img) cctx.drawImage(img, V.panX, V.panY, CACHE.w * V.zoom, CACHE.h * V.zoom);
+    drawOverlay(originX, pw, v);
+    if (label) {
+      cctx.font = '700 11px ' + cssVar('--mono', 'monospace');
+      cctx.textBaseline = 'top';
+      const tw = cctx.measureText(label).width + 14;
+      cctx.fillStyle = cssVar('--hudBg', 'rgba(0,0,0,.6)');
+      cctx.fillRect(8, 8, tw, 20);
+      cctx.fillStyle = cssVar('--ink', '#fff');
+      cctx.fillText(label, 15, 13);
+    }
+    cctx.restore();
+  };
+  if (V.mode === 'side') {
+    const pw = paneW(v);
+    pane(0, CACHE.A, '処理前');
+    pane(pw + SIDE_DIV, CACHE.B || CACHE.A, CACHE.B ? '処理後' : '処理後（未実行）');
+    cctx.fillStyle = cssVar('--line', '#333'); cctx.fillRect(pw, 0, SIDE_DIV, v.h);
+  } else if (V.mode === 'after') {
+    pane(0, CACHE.B || CACHE.A, CACHE.B ? '処理後' : '処理後（未実行）');
+  } else {
+    pane(0, CACHE.A, '処理前');
+  }
+  updateHud();
+}
+function updateHud() {
+  const f = FILES[CUR]; if (!f) return;
+  const st = f.pages[SEL - 1], plan = pagePlan(st), m = plan.mode;
+  const aw = artWidths();
+  const wtxt = aw.rest > 0.01 ? '（絵柄' + aw.art + 'mm＋白' + (+aw.rest.toFixed(2)) + 'mm）' : '';
+  const detail = plan.segs
+    ? '（' + plan.segs.map(sg => MODELBL[sg.cls] +
+        Math.round((sg.k1 - sg.k0 + 1) / plan.nb * 100) + '%').join(' + ') + '）'
+    : '';
+  const ink = st.ink && st.ink.in !== null
+    ? '　ノド際の絵柄 <b>' + (st.ink.in * 100).toFixed(1) + '%</b>' +
+      '　そのまま率 <b>' + (st.ink.cont * 100).toFixed(0) + '%</b>' +
+      (st.ink.seam ? '（絵柄のある行 ' + (st.ink.seam.info * 100).toFixed(0) + '%）' : '')
+    : '';
+  $('hud').innerHTML = 'p.<b>' + SEL + '</b> / ' + f.info.pageCount +
+    '　ノド <b>' + (st.side === 'left' ? '左' : '右') + '</b>' +
+    '　処理 <b>' + MODELBL[m] + '</b>' + detail + wtxt + ink +
+    '　倍率 <b>' + Math.round(V.zoom * 100) + '%</b>';
+}
+
+/* ---------- サムネイル一覧 ---------- */
+let thumbObs = null;
+function renderThumbs() {
+  const f = FILES[CUR]; if (!f) return;
+  const el = $('thumbs');
+  $('pgCount').textContent = SEL + ' / ' + f.info.pageCount;
+  const key = CUR + '#' + f.name + '#' + f.info.pageCount + '#' + f.rev;
+  if (el.dataset.key !== key) {
+    el.dataset.key = key;
+    el.innerHTML = '';
+    if (thumbObs) thumbObs.disconnect();
+    thumbObs = new IntersectionObserver(es => {
+      es.forEach(e => { if (e.isIntersecting) { drawThumb(f, +e.target.dataset.p, e.target.querySelector('.th')); thumbObs.unobserve(e.target); } });
+    }, { root: el, rootMargin: '200px' });
+    f.pages.forEach((st, i) => {
+      const p = i + 1;
+      const row = document.createElement('div');
+      row.className = 'pgrow'; row.dataset.p = p;
+      row.innerHTML = '<div class="th"></div><div class="mt2">' +
+        '<div class="pgno">p.' + p + '</div>' +
+        '<div class="md"></div><div class="sd"></div></div>';
+      row.onclick = () => { SEL = p; $('pgInput').value = p; refresh(true); };
+      el.appendChild(row);
+      thumbObs.observe(row);
+    });
+  }
+  [...el.children].forEach(row => {
+    const p = +row.dataset.p, st = f.pages[p - 1], plan = pagePlan(st), m = plan.mode;
+    row.classList.toggle('cur', p === SEL);
+    const md = row.querySelector('.md'), sd = row.querySelector('.sd');
+    md.className = 'md m-' + m;
+    md.textContent = plan.segs
+      ? plan.segs.map(sg => MODELBL[sg.cls]).filter((v, i, a) => a.indexOf(v) === i).join('＋')
+      : MODELBL[m];
+    sd.innerHTML = 'ノド' + (st.side === 'left' ? '左' : '右') +
+      (needWarn(f, p) ? ' <span class="bang">ドブ不足</span>' : '');
+    const th = row.querySelector('.th');
+    let gb = th.querySelector('.gb');
+    if (!gb) { gb = document.createElement('div'); gb.className = 'gb'; th.appendChild(gb); }
+    gb.className = 'gb ' + (st.side === 'left' ? 'l ' : 'r ') + 'bg-' + m;
+  });
+  const cur = el.querySelector('.pgrow.cur');
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+}
+async function drawThumb(f, p, host) {
+  try {
+    const doc = f.rdoc || f.pdoc;
+    const page = await doc.getPage(p);
+    const v1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: 46 / v1.width });
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(vp.width)); cv.height = Math.max(1, Math.round(vp.height));
+    const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: c, viewport: vp }).promise;
+    host.insertBefore(cv, host.firstChild);
+  } catch (e) {}
+}
+function needWarn(f, pno) {
+  const g = f.info.pages[pno - 1], st = f.pages[pno - 1];
+  const edge = NodoDobu.edgeFor(st.side, g.rot);
+  const avail = edge === 'xmin' ? (g.trim[0] - g.media[0]) : edge === 'xmax' ? (g.media[2] - g.trim[2])
+              : edge === 'ymin' ? (g.trim[1] - g.media[1]) : (g.media[3] - g.trim[3]);
+  return avail / MMPT < CFG.bleed - 0.05;
+}
+
+/* ---------- ページごとの操作 ---------- */
+const CYCLE = ['keep', 'mirror', 'white'];   /* 自動（分割含む）→ keep → mirror → white → 自動 */
+function pageAct(act) {
+  const f = FILES[CUR]; if (!f) return;
+  const st = f.pages[SEL - 1];
+  const need = [];
+  if (act === 'side') {
+    st.side = st.side === 'left' ? 'right' : 'left'; st.manualSide = true; st.ink = null; need.push(SEL);
+  }
+  if (act === 'cycle') {
+    if (!st.manualMode) st.manualMode = CYCLE[0];
+    else {
+      const i = CYCLE.indexOf(st.manualMode);
+      st.manualMode = (i < 0 || i === CYCLE.length - 1) ? null : CYCLE[i + 1];
+    }
+    st.manualSkip = false; st.skip = false;
+  }
+  if (act === 'skip') st.manualSkip = !st.manualSkip;
+  if (act === 'reset') {
+    if (st.manualSide) { st.ink = null; need.push(SEL); }
+    st.manualSide = false; st.manualMode = null; st.manualSkip = false;
+  }
+  if (act === 'resetall') f.pages.forEach((s2, i) => {
+    if (s2.manualSide) { s2.ink = null; need.push(i + 1); }
+    s2.manualSide = false; s2.manualMode = null; s2.manualSkip = false;
+  });
+  recalcSides();
+  const after = () => { renderThumbs(); draw(); };
+  after();
+  if (need.length) {
+    if (need.length > 6) busy('ノド際を測り直しています…', 50);
+    rescan(f, need).then(() => { busyEnd(); after(); });
+  }
+  toast('変更しました。「再処理」でPDFに反映されます');
+}
+
+/* ---------- 配線 ---------- */
+(function init() {
+  let pref = null;
+  try { pref = localStorage.getItem('nodo-dobu-theme'); } catch (e) {}
+  if (pref === null && window.matchMedia) pref = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  applyTheme(pref === 'light');
+  $('themeBtn').onclick = () => applyTheme(!document.body.classList.contains('light'));
+  $('resetBtn').onclick = resetAll;
+  $('backBtn').onclick = goSetup;
+  $('btnGoWork').onclick = () => goWork(true);
+
+  const drop = $('drop'), file = $('file');
+  drop.onclick = () => file.click();
+  $('btnAddFile').onclick = () => file.click();
+  file.onchange = e => { addFiles(e.target.files); file.value = ''; };
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => { e.stopPropagation(); addFiles(e.dataTransfer.files); });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    if (SCREEN === 'work') return;                       /* プレビュー中は受け取らない */
+    if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+
+  const seg = (el, key, cb) => $(el).querySelectorAll('button').forEach(b => b.onclick = () => {
+    $(el).querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); CFG[key] = b.dataset.v; if (cb) cb();
+  });
+  seg('segBind', 'bind', () => { bindHint(); recalcSides(); });
+  seg('segMode', 'mode');
+  seg('segFirst', 'first', () => { bindHint(); recalcSides(); syncSetup(); });
+  seg('segWhite', 'white', syncSetup);
+  document.querySelectorAll('#segArt button').forEach(b => b.onclick = () => {
+    CFG.artW = +b.dataset.v; syncSetup();
+  });
+  $('btnArtDefault').onclick = () => {
+    try { localStorage.setItem('nodo-dobu-artw', String(CFG.artW)); } catch (e) {}
+    toast('絵柄を残す幅 ' + CFG.artW + 'mm を既定にしました', 'ok');
+  };
+
+  const num = (id, key, reset) => $(id).oninput = e => {
+    const v = parseFloat(e.target.value);
+    if (!isNaN(v)) { CFG[key] = v; if (reset) FILES.forEach(f => f.pages.forEach(p => p.ink = null)); syncSetup(); }
+  };
+  num('inBleed', 'bleed', true); num('inExt', 'ext'); num('inSeam', 'seam');
+  try {
+    const a = parseFloat(localStorage.getItem('nodo-dobu-artw'));
+    if (a >= 1 && a <= 3) CFG.artW = a;
+  } catch (e) {}
+  num('inPaper', 'paper', true); num('inPfrac', 'pfrac', true);
+  num('inKeepMin', 'keepMin'); num('inInner', 'inner');
+  $('ckStrict').checked = true;
+  $('ckStrict').onchange = e => { CFG.strict = e.target.checked;
+    FILES.forEach(f => f.pages.forEach(x => x.ink = null)); syncSetup(); };
+  $('inBleed').addEventListener('change', () => {
+    if ($('inExt').dataset.touched !== '1') { $('inExt').value = CFG.bleed; CFG.ext = CFG.bleed; }
+    syncSetup();
+  });
+  $('inExt').addEventListener('input', () => $('inExt').dataset.touched = '1');
+  $('inLayer').oninput = e => CFG.layer = e.target.value || 'ノド断ち代';
+  $('ckOcg').onchange = e => { CFG.ocg = e.target.checked; syncSetup(); };
+  $('inRange').oninput = e => { CFG.range = e.target.value; recalcSides(); syncSetup(); };
+
+  const setPanel = $('setPanel'), setToggle = $('setToggle');
+  setToggle.onclick = () => {
+    const open = setPanel.classList.contains('collapsed');
+    setPanel.classList.toggle('collapsed', !open);
+    setToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  document.addEventListener('click', e => {
+    if (setPanel.classList.contains('collapsed')) return;
+    if (setPanel.contains(e.target) || setToggle.contains(e.target)) return;
+    setPanel.classList.add('collapsed'); setToggle.setAttribute('aria-expanded', 'false');
+  });
+
+  $('btnRun').onclick = run;
+  $('btnRerun').onclick = run;
+  $('btnSave').onclick = save;
+
+  /* toolbar */
+  $('modes').querySelectorAll('button').forEach(b => b.onclick = () => {
+    $('modes').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); V.mode = b.dataset.m; fitView(); draw();
+  });
+  $('selFile').onchange = e => { CUR = +e.target.value; SEL = 1; $('pgInput').value = 1; goWork(true); };
+  const goPage = n => {
+    const f = FILES[CUR]; if (!f) return;
+    SEL = Math.max(1, Math.min(f.info.pageCount, n));
+    $('pgInput').value = SEL; refresh(true);
+  };
+  $('pgFirst').onclick = () => goPage(1);
+  $('pgPrev').onclick = () => goPage(SEL - 1);
+  $('pgNext').onclick = () => goPage(SEL + 1);
+  $('pgLast').onclick = () => goPage(FILES[CUR] ? FILES[CUR].info.pageCount : 1);
+  $('pgInput').onchange = e => goPage(+e.target.value);
+  $('zGutter').onclick = gutterView;
+  $('zFitTop').onclick = () => { fitView(); draw(); };
+  $('zFit').onclick = () => { fitView(); draw(); };
+  $('zIn').onclick = () => { const v = viewSize(); zoomAt(1.25, paneW(v) / 2, v.h / 2); };
+  $('zOut').onclick = () => { const v = viewSize(); zoomAt(0.8, paneW(v) / 2, v.h / 2); };
+  $('showGuide').onchange = e => { V.guide = e.target.checked; draw(); };
+  $('showSeam').onchange = e => { V.seam = e.target.checked; draw(); };
+  document.querySelectorAll('.pgacts button').forEach(b => b.onclick = () => pageAct(b.dataset.act));
+
+  /* ズーム・パン */
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    let cx = e.clientX - r.left, cy = e.clientY - r.top;
+    if (V.mode === 'side') { const pw = paneW(viewSize()); if (cx > pw) cx -= (pw + SIDE_DIV); }
+    zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, cx, cy);
+  }, { passive: false });
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('mousedown', e => {
+    const r = canvas.getBoundingClientRect();
+    dragging = true; lastX = e.clientX - r.left; lastY = e.clientY - r.top;
+    canvas.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    V.panX += mx - lastX; V.panY += my - lastY; lastX = mx; lastY = my; draw();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; canvas.classList.remove('grabbing'); });
+
+  document.addEventListener('keydown', e => {
+    if (SCREEN !== 'work') return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) return;
+    if (e.key === 'ArrowLeft') { goPage(SEL - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { goPage(SEL + 1); e.preventDefault(); }
+    else if (e.key === 'g') gutterView();
+    else if (e.key === 'f') { fitView(); draw(); }
+    else if (e.key === '+' || e.key === '=') { const v = viewSize(); zoomAt(1.25, paneW(v) / 2, v.h / 2); }
+    else if (e.key === '-') { const v = viewSize(); zoomAt(0.8, paneW(v) / 2, v.h / 2); }
+  });
+
+  new ResizeObserver(() => { if (SCREEN === 'work') { resizeCanvas(); draw(); } }).observe($('stage'));
+
+  bindHint(); syncSetup(); syncArt(); showScreen('drop');
+})();
+</script>
+<script>
+/* ================= フィードバック =================
+   KENPAN共通のGASウェブアプリへ送る。保存先シートは payload.tool で振り分け。 */
+(function () {
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_TOOL = "nodo_dobu";
+  const FB_APP_VERSION = "v1";
+  const FB_TEXT_MAX = 20000;
+
+  const modal = $('fbModal');
+  let fbVerdict = "";
+  const trunc = s => (s && s.length > FB_TEXT_MAX) ? s.slice(0, FB_TEXT_MAX) + "…(省略)" : (s || "");
+
+  function condText() {
+    const M = { auto: '自動', white: '白', mirror: 'ミラー' };
+    return ['綴じ:' + (CFG.bind === 'right' ? '右' : '左'), '処理:' + M[CFG.mode],
+            '断ち代:' + CFG.bleed + 'mm', '絵柄幅:' + CFG.artW + 'mm', '延長:' + CFG.ext + 'mm', 'なじませ:' + CFG.seam + 'mm',
+            '紙地:' + CFG.paper, '色違いミラー:' + (CFG.strict ? '有' : '無'),
+            '1p目:' + (firstIsRight() ? '右' : '左'), 'OCG:' + (CFG.ocg ? '有' : '無')].join(' / ');
+  }
+
+  function rowsText() {
+    try {
+      const L = [];
+      for (const f of FILES) {
+        const c = { white: 0, mirror: 0, keep: 0, skip: 0, left: 0, right: 0, manual: 0 };
+        f.pages.forEach(st => {
+          const m = decideMode(st); c[m]++;
+          if (m !== 'skip') c[st.side]++;
+          if (st.manualSide || st.manualMode || st.manualSkip) c.manual++;
+        });
+        L.push([f.name, f.info.pageCount + 'p',
+          'そのまま' + c.keep, 'ミラー' + c.mirror, '白' + c.white, '対象外' + c.skip,
+          'ノド左' + c.left, 'ノド右' + c.right, '手動' + c.manual,
+          f.result ? '実行済' : (f.noop ? '処理不要' : '未実行'),
+          f.result && f.result.warnings.length ? '警告' + f.result.warnings.length : ''
+        ].join('\t'));
+        if (f.result && f.result.warnings.length)
+          f.result.warnings.slice(0, 30).forEach(w => L.push('  ! ' + w));
+      }
+      return trunc(L.join('\n'));
+    } catch (e) { return '収集に失敗: ' + e; }
+  }
+
+  function captureDiag() {
+    try {
+      const f = FILES[CUR], p0 = f && f.info.pages[0];
+      const inks = f ? f.pages.slice(0, 40).map((s, i) => s.ink
+        ? [i + 1, +(s.ink.in * 100).toFixed(1), +(s.ink.out * 100).toFixed(1), +(s.ink.cont * 100).toFixed(0)] : null)
+        .filter(Boolean) : [];
+      return JSON.stringify({
+        ran: FILES.some(x => !!x.result), files: FILES.length,
+        cfg: Object.assign({}, CFG, { firstIsRight: firstIsRight() }),
+        page1: p0 ? {
+          trimW: +p0.trimW.toFixed(2), trimH: +p0.trimH.toFixed(2), trimSrc: p0.trimSrc,
+          rot: p0.rot, bleedBox: p0.bleed,
+          dobu: { L: +p0.dobu.L.toFixed(2), R: +p0.dobu.R.toFixed(2), T: +p0.dobu.T.toFixed(2), B: +p0.dobu.B.toFixed(2) }
+        } : null,
+        inkSample: inks,
+        sizes: FILES.map(x => ({ in: x.buf.length, out: x.result ? x.result.data.length : null }))
+      });
+    } catch (e) { return JSON.stringify({ ran: null, note: '診断の収集に失敗: ' + e }); }
+  }
+
+  function captureThumb() {
+    try {
+      const cv = $('canvas');
+      if (!cv || !cv.width) return '';
+      const s = document.createElement('canvas');
+      const k = Math.min(1, 560 / Math.max(cv.width, cv.height));
+      s.width = Math.max(1, Math.round(cv.width * k)); s.height = Math.max(1, Math.round(cv.height * k));
+      s.getContext('2d').drawImage(cv, 0, 0, s.width, s.height);
+      return s.toDataURL('image/jpeg', 0.7);
+    } catch (e) { return ''; }
+  }
+
+  function reporterStore(get, val) {
+    try { if (get) return localStorage.getItem('nodo-reporter') || ''; localStorage.setItem('nodo-reporter', val); }
+    catch (e) {}
+    return '';
+  }
+  function setVerdict(v) {
+    fbVerdict = v;
+    document.querySelectorAll('#fbVerdict button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  }
+  function showNote(msg, ok) {
+    const n = $('fbNote'); n.style.display = 'block';
+    n.className = 'fbnote' + (ok ? ' ok' : ''); n.innerHTML = msg;
+  }
+  function markUsed() { try { localStorage.setItem('nodo-dobu-fb-used', '1'); } catch (e) {} }
+
+  function openModal(pre) {
+    pre = pre || {};
+    $('fbCond').value = condText();
+    $('fbFileHint').textContent = FILES.length
+      ? 'ファイル ' + FILES.length + ' 件／実行済 ' + FILES.filter(f => f.result).length + ' 件'
+      : 'PDF未読込（設定だけの報告として送れます）';
+    $('fbPage').value = pre.page || (FILES[CUR] ? 'p' + SEL : '');
+    $('fbCategory').value = pre.category || '';
+    $('fbComment').value = pre.comment || '';
+    $('fbReporter').value = reporterStore(true);
+    $('fbPeekBody').textContent = [condText(), '', '［ファイルと判定］', rowsText()].join('\n');
+    $('fbPeek').open = false;
+    $('fbNote').style.display = 'none';
+    $('fbSend').disabled = false; $('fbSend').textContent = '送信する';
+    setVerdict(pre.verdict || '');
+    modal.classList.add('show');
+  }
+  function closeModal() { modal.classList.remove('show'); }
+
+  async function postFeedback(payload) {
+    await fetch(FEEDBACK_ENDPOINT, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+  }
+  function basePayload(extra) {
+    return Object.assign({
+      tool: FB_TOOL, verdict: '', category: '',
+      file: FILES.map(f => f.name).join(' / '), page: '', comment: '',
+      reporter: reporterStore(true), appVersion: FB_APP_VERSION, userAgent: navigator.userAgent,
+      ruleId: '', expected: '', actual: '', bbox: '', engine: 'pdfjs', thumb: '',
+      cond: condText(), configText: '', rowsText: '', diag: ''
+    }, extra || {});
+  }
+  async function send() {
+    if (!fbVerdict) { showNote('「結果はどうでしたか？」を選択してください。', false); return; }
+    const reporter = $('fbReporter').value.trim();
+    reporterStore(false, reporter);
+    const btn = $('fbSend'); btn.disabled = true; btn.textContent = '画像を準備中…';
+    const extra = {
+      verdict: fbVerdict, category: $('fbCategory').value,
+      page: $('fbPage').value.trim(), comment: $('fbComment').value.trim(),
+      reporter, configText: condText(), rowsText: rowsText(),
+      thumb: captureThumb(), diag: captureDiag()
+    };
+    btn.textContent = '送信中…';
+    try {
+      await postFeedback(basePayload(extra));
+      showNote('送信しました。ありがとうございます！', true);
+      $('fbComment').value = ''; setVerdict(''); markUsed();
+      setTimeout(closeModal, 1100);
+    } catch (err) {
+      showNote('送信に失敗しました。ネットワークをご確認のうえ再度お試しください。', false);
+      btn.disabled = false; btn.textContent = '送信する';
+    }
+  }
+
+  const inl = $('fbInline');
+  function renderInline(state) {
+    if (state === 'thanks') {
+      inl.innerHTML = '<span class="done">✓ ありがとうございます！</span>';
+      setTimeout(() => inl.classList.remove('show'), 1800); return;
+    }
+    inl.innerHTML = '<span>ノド側の判定は想定どおりでしたか？</span>' +
+      '<button id="fbInY">👍 問題なし</button><button id="fbInN">👎 気になる点がある</button><button id="fbInX">✕</button>';
+    $('fbInY').onclick = fbInlineGood;
+    $('fbInN').onclick = () => { inl.classList.remove('show'); openModal({ verdict: 'wrong' }); };
+    $('fbInX').onclick = () => inl.classList.remove('show');
+  }
+  async function fbInlineGood() {
+    try { await postFeedback(basePayload({ verdict: 'correct', configText: condText(), rowsText: rowsText(), diag: captureDiag() })); } catch (e) {}
+    renderInline('thanks'); markUsed();
+  }
+  function fbAfterApply() { renderInline(); inl.classList.add('show'); }
+
+  $('fbOpen').addEventListener('click', () => openModal());
+  $('fbCancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.classList.contains('show')) closeModal(); });
+  document.querySelectorAll('#fbVerdict button').forEach(b => b.addEventListener('click', () => setVerdict(b.dataset.v)));
+  $('fbSend').addEventListener('click', send);
+
+  window.fbAfterApply = fbAfterApply;
+})();
+
+/* 作業中にハブへ戻ろうとしたら確認する（kenpan-nav.js が拾う） */
+window.KENPAN_HAS_WORK = function () { return FILES.length > 0; };
+</script>
+<script src="../assets/kenpan-nav.js"></script>
+</body>
+</html>
