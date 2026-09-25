@@ -466,8 +466,13 @@
     </div>
 
     <div class="fbfield">
-      <label>お名前・担当（任意）</label>
-      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
     </div>
 
     <div class="fbactions">
@@ -1490,7 +1495,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
 // 判定ロジック（analyze()等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.2";
+  const FB_APP_VERSION = "v1.3";
   const modal = $("fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -1529,11 +1534,22 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
     }catch(e){ return ""; }
   }
 
-  function reporterStore(get, val){
-    try{ if(get) return localStorage.getItem("nombre-kenpan-reporter") || "";
-         localStorage.setItem("nombre-kenpan-reporter", val); }catch(e){}
-    return "";
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
+     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
+     旧版のツール別保存名（nombre-kenpan-reporter）に名前が残っていれば引き継ぐ。 */
+  function kenpanWho(upd){
+    let r={name:"",email:""};
+    try{
+      const j=localStorage.getItem("kenpan-reporter");
+      if(j) r=Object.assign(r, JSON.parse(j)||{});
+      else r.name=localStorage.getItem("nombre-kenpan-reporter")||"";
+    }catch(e){}
+    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
+    return r;
   }
+  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
+  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
+  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
   function fbCurPage(){ return pdf ? ("p."+(cur+1)) : ""; }
 
   // フィードバック用：判定ロジックが見ているノンブル連番（現在ページ周辺の検出値・状態）を
@@ -1581,7 +1597,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
     $("fbPage").value = pre.page || fbCurPage();
     $("fbCategory").value = pre.category || "";
     $("fbComment").value = pre.comment || "";
-    $("fbReporter").value = reporterStore(true);
+    $("fbReporter").value = reporterStore(true); $("fbEmail").value = emailStore(true);
     $("fbNote").style.display = "none";
     $("fbSend").disabled = false; $("fbSend").textContent = "送信する";
     setVerdict(pre.verdict || "");
@@ -1632,7 +1648,7 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
     return Object.assign({
       tool: "nombre_kenpan", verdict: "", category: "",
       file: fileName || "", page: fbCurPage(), comment: "",
-      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      reporter: reporterStore(true), email: emailStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
       ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "", detailText: "", diag: ""
     }, extra || {});
@@ -1641,14 +1657,17 @@ window.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f&&f.typ
   async function send(){
     if(!fbVerdict){ showNote("「検出結果は正しかった？」を選択してください。", false); return; }
     const reporter = $("fbReporter").value.trim();
-    reporterStore(false, reporter);
+    const email = $("fbEmail").value.trim().toLowerCase();
+    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $("fbReporter").focus(); return; }
+    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $("fbEmail").focus(); return; }
+    reporterStore(false, reporter); emailStore(false, email);
     const extra = {
       verdict: fbVerdict,
       category: $("fbCategory").value,
       file: $("fbFile").value.trim(),
       page: $("fbPage").value.trim(),
       comment: $("fbComment").value.trim(),
-      reporter
+      reporter, email
     };
     const iss = (fbIssueIndex != null && fbIssues[fbIssueIndex]) ? fbIssues[fbIssueIndex] : null;
     const btn = $("fbSend"); btn.disabled = true; btn.textContent = "送信中…";

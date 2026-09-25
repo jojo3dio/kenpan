@@ -331,7 +331,7 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
 <header>
   <div class="brand" style="height:26px;color:var(--amber);display:flex;align-items:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/><circle cx="20" cy="18" r="1.4" fill="currentColor"/></svg></div>
   <h1>目次整合<span>検版</span></h1>
-  <span class="ver">v2.3 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
+  <span class="ver">v2.4 ｜ toc_core.py on Pyodide ＋ pdf.js ＋ OCR(tesseract.js) ｜ build <span id="buildId"></span></span>
   <span class="sp"></span>
   <button class="hbtn" id="resetBtn" disabled>リセット</button>
   <button class="hbtn" id="themeBtn"><span id="themeIco">◐</span> <span id="themeTxt">ダーク</span></button>
@@ -479,8 +479,13 @@ footer{color:var(--ink-faint);font-size:11px;text-align:center;margin-top:40px;
     </div>
 
     <div class="fbfield">
-      <label>お名前・担当（任意）</label>
-      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
     </div>
 
     <div class="fbactions">
@@ -3465,7 +3470,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js";
 // 下版PDF差分チェッカーと同じGASウェブアプリを共用（保存先シートは tool で振り分け）。
 // デプロイ更新手順は同梱の feedback_gas/設定手順.md を参照。
 const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-const FB_APP_VERSION = "v2.3";
+const FB_APP_VERSION = "v2.4";
 
 let pyodide = null, pyReady = null;
 // 診断（v2.3）：解析時のオプションを控えておき、フィードバックに添付する
@@ -3591,11 +3596,22 @@ document.getElementById("buildId").textContent = "091115";
     }catch(e){ console.error("[toc-kenpan] buildPageText failed:", e); return ""; }
   }
 
-  function reporterStore(get, val){
-    try{ if(get) return localStorage.getItem("toc-kenpan-reporter") || "";
-         localStorage.setItem("toc-kenpan-reporter", val); }catch(e){}
-    return "";
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
+     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
+     旧版のツール別保存名（toc-kenpan-reporter）に名前が残っていれば引き継ぐ。 */
+  function kenpanWho(upd){
+    let r={name:"",email:""};
+    try{
+      const j=localStorage.getItem("kenpan-reporter");
+      if(j) r=Object.assign(r, JSON.parse(j)||{});
+      else r.name=localStorage.getItem("toc-kenpan-reporter")||"";
+    }catch(e){}
+    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
+    return r;
   }
+  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
+  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
+  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
   function curPage(){
     return (result && typeof viewPage === "number") ? ("p" + (viewPage + 1)) : "";
   }
@@ -3630,7 +3646,7 @@ document.getElementById("buildId").textContent = "091115";
     $("fbPage").value = pre.page || curPage();
     $("fbCategory").value = pre.category || "";
     $("fbComment").value = pre.comment || "";
-    $("fbReporter").value = reporterStore(true);
+    $("fbReporter").value = reporterStore(true); $("fbEmail").value = emailStore(true);
     $("fbNote").style.display = "none";
     $("fbSend").disabled = false; $("fbSend").textContent = "送信する";
     setVerdict(pre.verdict || "");
@@ -3680,7 +3696,7 @@ document.getElementById("buildId").textContent = "091115";
     return Object.assign({
       tool: "toc_kenpan", verdict: "", category: "",
       file: fileName || "", page: curPage(), comment: "",
-      reporter: reporterStore(true), appVersion: FB_APP_VERSION,
+      reporter: reporterStore(true), email: emailStore(true), appVersion: FB_APP_VERSION,
       userAgent: navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要）
       ruleId: "", expected: "", actual: "", bbox: "", engine: "pdfjs", thumb: "",
@@ -3695,14 +3711,17 @@ document.getElementById("buildId").textContent = "091115";
       return;
     }
     const reporter = $("fbReporter").value.trim();
-    reporterStore(false, reporter);
+    const email = $("fbEmail").value.trim().toLowerCase();
+    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $("fbReporter").focus(); return; }
+    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $("fbEmail").focus(); return; }
+    reporterStore(false, reporter); emailStore(false, email);
     const extra = {
       verdict: fbVerdict,
       category: $("fbCategory").value,
       file: $("fbFile").value.trim(),
       page: $("fbPage").value.trim(),
       comment: $("fbComment").value.trim(),
-      reporter
+      reporter, email
     };
     const iss = (fbIssueIndex != null && result && result.issues)
       ? result.issues[fbIssueIndex] : null;

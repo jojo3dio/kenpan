@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.12　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.13　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -3637,8 +3637,13 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     </div>
 
     <div class="fbfield">
-      <label>お名前・担当（任意）</label>
-      <input id="fbReporter" type="text" placeholder="例：制作部 田中">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 田中">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
     </div>
 
     <div class="fbactions">
@@ -3656,16 +3661,28 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.12";
+  const APP_VERSION = "v1.13";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
   let fbRegionIndex=null;   // 指摘一覧から開いた場合のS.regionsインデックス（自動添付用）。手動オープン時はnull。
 
-  function reporterStore(get,val){
-    try{ if(get) return localStorage.getItem("pdfdiff-reporter")||""; localStorage.setItem("pdfdiff-reporter",val); }catch(e){}
-    return "";
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
+     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
+     旧版のツール別保存名（pdfdiff-reporter）に名前が残っていれば引き継ぐ。 */
+  function kenpanWho(upd){
+    let r={name:"",email:""};
+    try{
+      const j=localStorage.getItem("kenpan-reporter");
+      if(j) r=Object.assign(r, JSON.parse(j)||{});
+      else r.name=localStorage.getItem("pdfdiff-reporter")||"";
+    }catch(e){}
+    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
+    return r;
   }
+  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
+  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
+  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
 
   function curFiles(){
     const st = (typeof S!=="undefined") ? S : {};
@@ -3771,7 +3788,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
     $$("#fbFilesHint").textContent = `表示ページ: ${f.pg}`;
     $$("#fbKind").value = pre.kind || "";
     $$("#fbComment").value = pre.comment || "";
-    $$("#fbReporter").value = reporterStore(true);
+    $$("#fbReporter").value = reporterStore(true); $$("#fbEmail").value = emailStore(true);
     $$("#fbNote").style.display="none";
     $$("#fbSend").disabled=false;
     $$("#fbSend").textContent="送信する";
@@ -3792,7 +3809,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       // 他ツールが送り忘れた瞬間にこのシートへ混入する。
       tool:"pdf_diff",
       verdict:"", kind:"", fileA:f.a, fileB:f.b, page:f.pg, comment:"",
-      reporter:reporterStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent,
+      reporter:reporterStore(true), email: emailStore(true), appVersion:APP_VERSION, userAgent:navigator.userAgent,
       // 指摘一覧から送信した場合に自動添付される再現用メタデータ（手入力不要・手動オープン時は空のまま）
       ruleId:"", expected:"", actual:"", bbox:"", engine:"pdfjs", thumb:"", thumbA:"",
       // 表示中ページのA/B抽出テキスト（自動添付・手入力不要）
@@ -3865,11 +3882,14 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
       showNote("送信先が未設定です。HTML内の <code>FEEDBACK_ENDPOINT</code> にGASのURLを設定してください（別紙手順参照）。", false);
       return;
     }
-    const reporter=$$("#fbReporter").value.trim();
-    reporterStore(false, reporter);
+    const reporter = $$("#fbReporter").value.trim();
+    const email = $$("#fbEmail").value.trim().toLowerCase();
+    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $$("#fbReporter").focus(); return; }
+    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $$("#fbEmail").focus(); return; }
+    reporterStore(false, reporter); emailStore(false, email);
     const extra = {
       verdict, kind:$$("#fbKind").value,
-      comment:$$("#fbComment").value.trim(), reporter
+      comment:$$("#fbComment").value.trim(), reporter, email
     };
     const st=(typeof S!=="undefined")?S:{};
     const rg=(fbRegionIndex!=null && st.regions && st.regions[fbRegionIndex]) ? st.regions[fbRegionIndex] : null;

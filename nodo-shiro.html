@@ -560,7 +560,7 @@ button.jok:disabled{opacity:.35;cursor:not-allowed}
       <circle cx="21.5" cy="21.5" r="5" fill="currentColor" stroke="#fff" stroke-width="1.6"/>
       <path d="M21.5 19.2v4.6M19.2 21.5h4.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
     </svg></span>
-    <span class="brandtxt"><h1>ノド側の<i>白</i></h1><span class="ver">v4　·　local · no-upload</span></span>
+    <span class="brandtxt"><h1>ノド側の<i>白</i></h1><span class="ver">v6　·　local · no-upload</span></span>
   </div>
   <span class="sp"></span>
   <div class="ntabs">
@@ -734,8 +734,13 @@ button.jok:disabled{opacity:.35;cursor:not-allowed}
     </div>
 
     <div class="fbfield">
-      <label>お名前・担当（任意）</label>
-      <input id="fbReporter" type="text" placeholder="例：制作部 中田">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
     </div>
 
     <details class="fbpeek" id="fbPeek">
@@ -3025,7 +3030,7 @@ rebuild();
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   const FB_TOOL = "nodo_shiro";
-  const FB_APP_VERSION = "v5";
+  const FB_APP_VERSION = "v6";
   const FB_TEXT_MAX = 20000;
 
   const modal = $('fbModal');
@@ -3108,11 +3113,22 @@ rebuild();
     }catch(e){ console.error('[nodo-fb] captureThumb',e); return ''; }
   }
 
-  function reporterStore(get,val){
-    try{ if(get) return localStorage.getItem('nodo-reporter')||'';
-         localStorage.setItem('nodo-reporter',val); }catch(e){}
-    return '';
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
+     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
+     旧版のツール別保存名（nodo-reporter）に名前が残っていれば引き継ぐ。 */
+  function kenpanWho(upd){
+    let r={name:"",email:""};
+    try{
+      const j=localStorage.getItem("kenpan-reporter");
+      if(j) r=Object.assign(r, JSON.parse(j)||{});
+      else r.name=localStorage.getItem("nodo-reporter")||"";
+    }catch(e){}
+    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
+    return r;
   }
+  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
+  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
+  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
   function setVerdict(v){
     fbVerdict=v;
     document.querySelectorAll('#fbVerdict button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
@@ -3135,7 +3151,7 @@ rebuild();
     $('fbPage').value=pre.page||'';
     $('fbCategory').value=pre.category||'';
     $('fbComment').value=pre.comment||'';
-    $('fbReporter').value=reporterStore(true);
+    $('fbReporter').value=reporterStore(true); $('fbEmail').value = emailStore(true);
     $('fbPeekBody').textContent=[configText(),'','［白の付加］',rowsText()].join('\n');
     $('fbPeek').open=false;
     $('fbNote').style.display='none';
@@ -3182,7 +3198,7 @@ rebuild();
     return Object.assign({
       tool:FB_TOOL, verdict:'', category:'',
       file:FILES.map(f=>f.name).join(' / '), page:'', comment:'',
-      reporter:reporterStore(true), appVersion:FB_APP_VERSION, userAgent:navigator.userAgent,
+      reporter:reporterStore(true), email: emailStore(true), appVersion:FB_APP_VERSION, userAgent:navigator.userAgent,
       ruleId:'', expected:'', actual:'', bbox:'', engine:'pdfjs', thumb:'',
       /* このツール固有の自動添付（スプレッドシート側に列を足すと読める） */
       cond:condText(), configText:'', rowsText:'', diag:''
@@ -3191,15 +3207,18 @@ rebuild();
 
   async function send(){
     if(!fbVerdict){ showNote('「結果はどうでしたか？」を選択してください。',false); return; }
-    const reporter=$('fbReporter').value.trim();
-    reporterStore(false,reporter);
+    const reporter = $('fbReporter').value.trim();
+    const email = $('fbEmail').value.trim().toLowerCase();
+    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $('fbReporter').focus(); return; }
+    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $('fbEmail').focus(); return; }
+    reporterStore(false, reporter); emailStore(false, email);
     const btn=$('fbSend'); btn.disabled=true; btn.textContent='画像を準備中…';
     const extra={
       verdict:fbVerdict,
       category:$('fbCategory').value,
       page:$('fbPage').value.trim(),
       comment:$('fbComment').value.trim(),
-      reporter,
+      reporter, email,
       configText:configText(),
       rowsText:rowsText(),
       thumb:captureThumb(),
