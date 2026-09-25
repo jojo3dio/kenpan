@@ -323,6 +323,8 @@
     cursor:pointer;font-size:10px;font-family:var(--ui);font-weight:600;
     border-radius:6px;padding:2px 7px;line-height:1.3;transition:.12s;white-space:nowrap}
   .issfb:hover{color:var(--red);border-color:var(--red);background:var(--amber-soft)}
+  .issfb.zb{margin-right:4px}
+  .issfb.zb:hover{color:var(--amber);border-color:var(--amber)}
 
   /* 改善3: 初回だけ出るヒントの吹き出し */
   .fbhintbubble{position:fixed;top:50px;right:16px;z-index:900;max-width:200px;
@@ -371,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.11　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.12　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -578,7 +580,7 @@
     <div class="vbar">
       <label class="toggle" title="差分箇所の枠線をプレビュー上に表示する（B キー）"><input type="checkbox" id="showBoxes" checked> 差分枠</label>
       <label class="toggle" id="chkNums" title="差分枠に通し番号を表示する（M キー）"><input type="checkbox" id="showNums" checked> 番号</label>
-      <span class="hint">ホイール=ズーム / ドラッグ=移動 / <kbd>b</kbd>=差分枠 <kbd>m</kbd>=番号 の表示切替</span>
+      <span class="hint">ホイール=ズーム / ドラッグ=移動 / <kbd>n</kbd>/<kbd>p</kbd>=次/前の差分 <kbd>z</kbd>=拡大 <kbd>Esc</kbd>=全体 / <kbd>b</kbd>=差分枠 <kbd>m</kbd>=番号</span>
     </div>
    </div>
 
@@ -639,6 +641,7 @@ const S = {
   content:null, contentW:0, contentH:0,
   zoom:1, panX:0, panY:0,
   activeRegion:-1,
+  blink:null,                            // v1.12 選択枠の点滅 {i,t0}
   showBoxes:true, showNums:true,         // プレビュー上の差分枠／番号の表示切替
   swipeX:0.5,                          // 0..1 (content幅比)
   pageSummary:null,                      // 全ページ走査結果 [page]->{count,kinds,aMissing,bMissing}
@@ -2637,19 +2640,20 @@ function draw(){
   cctx.font="600 11px var(--mono),monospace";
   if(S.showBoxes){
     S.regions.forEach((rg,i)=>{
-      const active=(i===S.activeRegion);
+      if(i===S.activeRegion) return;      // 選択中は最後に上から描く
       const kc=(rg.cls&&rg.cls.hex)||"#ff5a4d";
-      cctx.strokeStyle=active?"#fff":kc;
-      cctx.lineWidth=active?2.4:1.6;
+      cctx.strokeStyle=kc; cctx.lineWidth=1.6;
       drawBox(rg,0);
       if(!S.showNums) return;
       const sx=S.panX+rg.x*z, sy=S.panY+rg.y*z;
-      cctx.fillStyle=active?"#fff":kc;
+      cctx.fillStyle=kc;
       cctx.fillRect(sx, sy-15, 18+(String(i+1).length-1)*7, 15);
       cctx.fillStyle="#181410"; cctx.textBaseline="middle";
       cctx.fillText(String(i+1), sx+4, sy-7);
     });
   }
+  // 選択中の枠は「差分枠」オフでも出す（どこを選んだか分からなくなるため）
+  drawActiveMarker(v.w, v.h);
   updateHud();
 }
 // 並べて：左右2ペインに同じズーム・パンでA/Bを表示（同じ箇所が両側に出る）
@@ -2665,16 +2669,17 @@ function drawSide(v){
     // 差分枠
     cctx.font="600 11px var(--mono),monospace"; cctx.textBaseline="middle";
     if(S.showBoxes) S.regions.forEach((rg,i)=>{
-      const active=(i===S.activeRegion);
+      if(i===S.activeRegion) return;
       const kc=(rg.cls&&rg.cls.hex)||"#ff5a4d";
-      cctx.strokeStyle=active?"#fff":kc; cctx.lineWidth=active?2.4:1.6;
+      cctx.strokeStyle=kc; cctx.lineWidth=1.6;
       const x=S.panX+rg.x*z, y=S.panY+rg.y*z;
       cctx.strokeRect(x,y,rg.w*z,rg.h*z);
       if(!S.showNums) return;
       const lab=String(i+1);
-      cctx.fillStyle=active?"#fff":kc; cctx.fillRect(x,y-15,18+(lab.length-1)*7,15);
+      cctx.fillStyle=kc; cctx.fillRect(x,y-15,18+(lab.length-1)*7,15);
       cctx.fillStyle="#181410"; cctx.fillText(lab,x+4,y-7);
     });
+    drawActiveMarker(hw, v.h);
     cctx.restore();
     // ペイン見出し
     cctx.save();
@@ -2694,6 +2699,62 @@ function drawBox(rg,offX){
   const z=S.zoom;
   const x=S.panX+(rg.x+offX)*z, y=S.panY+rg.y*z;
   cctx.strokeRect(x,y,rg.w*z,rg.h*z);
+}
+/* ---- v1.12 選択中の枠 ----
+   旧版は選択枠を白線(#fff)で描いており、白い紙の上では消えて見えた。
+   黒の縁取り＋アンバーの二重線にして、どの絵柄の上でも見えるようにする。
+   また全体表示では小さな差分が数pxになるので、画面上で最低16px角は確保する。
+   選択直後は約1.4秒点滅し、外から縮んでくる囲みで位置を示す。 */
+const BLINK_MS=1400, BLINK_STEP=200, ACT_MIN=16, ACT_COLOR="#ffb020";
+function drawActiveMarker(paneW, paneH){
+  const i=S.activeRegion, rg=S.regions[i]; if(!rg) return;
+  const z=S.zoom;
+  let x=S.panX+rg.x*z, y=S.panY+rg.y*z, w=rg.w*z, h=rg.h*z;
+  if(w<ACT_MIN){ x-=(ACT_MIN-w)/2; w=ACT_MIN; }
+  if(h<ACT_MIN){ y-=(ACT_MIN-h)/2; h=ACT_MIN; }
+  const pad=3; x-=pad; y-=pad; w+=pad*2; h+=pad*2;
+  let on=true, t=1;
+  const bl=S.blink;
+  if(bl && bl.i===i){
+    const el=performance.now()-bl.t0;
+    t=Math.min(1, el/BLINK_MS);
+    on=(Math.floor(el/BLINK_STEP)%2===0);
+    // 外から縮んでくる囲み（最初の半分）
+    const tr=Math.min(1, el/(BLINK_MS*0.5));
+    if(tr<1){
+      const e=1-Math.pow(1-tr,3);
+      const R=Math.max(paneW,paneH)*0.35*(1-e);
+      cctx.save();
+      cctx.globalAlpha=0.9*(1-tr)+0.1;
+      cctx.lineWidth=5; cctx.strokeStyle="#000"; cctx.strokeRect(x-R,y-R,w+R*2,h+R*2);
+      cctx.lineWidth=2.5; cctx.strokeStyle=ACT_COLOR; cctx.strokeRect(x-R,y-R,w+R*2,h+R*2);
+      cctx.restore();
+    }
+    if(on){
+      cctx.save(); cctx.fillStyle="rgba(255,176,32,.28)"; cctx.fillRect(x,y,w,h); cctx.restore();
+    }
+  }
+  const thick = (bl && bl.i===i && on) ? 1.6 : 1;
+  cctx.save();
+  cctx.lineWidth=5*thick; cctx.strokeStyle="#000"; cctx.strokeRect(x,y,w,h);
+  cctx.lineWidth=2.5*thick; cctx.strokeStyle=(bl && bl.i===i && !on)?"#fff":ACT_COLOR; cctx.strokeRect(x,y,w,h);
+  if(S.showNums){
+    const lab=String(i+1), lw=18+(lab.length-1)*7;
+    cctx.fillStyle="#000"; cctx.fillRect(x-1,y-17,lw+2,17);
+    cctx.fillStyle=ACT_COLOR; cctx.fillRect(x,y-16,lw,15);
+    cctx.fillStyle="#181410"; cctx.font="700 11px var(--mono),monospace"; cctx.textBaseline="middle";
+    cctx.fillText(lab,x+4,y-8);
+  }
+  cctx.restore();
+}
+function startBlink(i){
+  S.blink={i, t0:performance.now()};
+  const tick=()=>{
+    if(!S.blink || S.blink.i!==i) return;
+    if(performance.now()-S.blink.t0>=BLINK_MS){ S.blink=null; draw(); return; }
+    draw(); requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 /* ============ HUD / パネル ============ */
@@ -2771,11 +2832,13 @@ function updatePanel(){
         ${detailHtml}
         <span class="pos">B基準 ${cx}, ${cy} mm</span>
         <span class="sz">／ ${wmm}×${hmm}mm</span>
-        <span class="issfbrow"><button class="issfb" title="この検出は誤検知（出すぎ）だと報告する"
+        <span class="issfbrow"><button class="issfb zb" title="この箇所に寄って表示する（Z キー）。戻すときは「全体」または Esc"
+          onclick="event.stopPropagation();focusRegion(${i},{zoom:true})">🔍 拡大</button><button class="issfb" title="この検出は誤検知（出すぎ）だと報告する"
           onclick="event.stopPropagation();fbFromRegion(${S.page}, ${i})">👎 誤検知?</button></span></span>
       <span class="sev" style="background:${k.color}"></span>`;
     el.title=k.detail||k.label;
     el.onclick=()=>focusRegion(i);
+    el.ondblclick=()=>focusRegion(i,{zoom:true});
     list.appendChild(el);
   });
 }
@@ -2954,16 +3017,31 @@ function renderAllPages(){
   });
 }
 
-function focusRegion(i){
+/* v1.12：一覧クリックは「倍率を変えずに位置だけ示す」が既定。
+   旧版は毎回最大8倍まで寄っていたため、全体表示(10%前後)から一気に数十倍へ跳び、
+   絵柄のどこなのか分からなくなっていた（9/18 百瀬さん報告）。
+   opts.zoom=true（🔍ボタン／ダブルクリック／Zキー）のときだけ寄る。寄る場合も
+   周囲に30mm以上の絵柄が残る倍率に抑え、上限は4倍。 */
+function focusRegion(i, opts){
+  opts=opts||{};
   S.activeRegion=i; const rg=S.regions[i]; if(!rg) return;
   const v=viewSize();
   const paneW = (S.mode==="side") ? sideHalfW(v) : v.w;   // 並べて時は半ペイン基準
-  const margin=1.8;
-  const z=Math.min(paneW/(rg.w*margin), v.h/(rg.h*margin), 8);
-  S.zoom=z;
-  S.panX=paneW/2 - (rg.x+rg.w/2)*z;
-  S.panY=v.h/2 - (rg.y+rg.h/2)*z;
-  draw(); updatePanel();
+  const cxC=rg.x+rg.w/2, cyC=rg.y+rg.h/2;
+  if(opts.zoom){
+    const ctx=30/25.4*(S.dpi||300);               // 最低30mm四方の周囲を残す
+    const spanW=Math.max(rg.w*4, ctx), spanH=Math.max(rg.h*4, ctx);
+    S.zoom=Math.min(paneW/spanW, v.h/spanH, 4);
+    S.panX=paneW/2 - cxC*S.zoom;
+    S.panY=v.h/2 - cyC*S.zoom;
+  }else{
+    // 枠が画面内（端から40px以上内側）に収まっていれば動かさない。外れていれば中央へ。
+    const z=S.zoom, m=40;
+    const x0=S.panX+rg.x*z, y0=S.panY+rg.y*z, x1=x0+rg.w*z, y1=y0+rg.h*z;
+    const inside = x0>=m && y0>=m && x1<=paneW-m && y1<=v.h-m;
+    if(!inside){ S.panX=paneW/2 - cxC*z; S.panY=v.h/2 - cyC*z; }
+  }
+  draw(); updatePanel(); startBlink(i);
 }
 
 /* ============ 自動位置合わせ ============ */
@@ -3127,7 +3205,7 @@ $("#compareScope").addEventListener("change",e=>{S.compareScope=e.target.value;
 
 $("#zIn").onclick=()=>zoomAt(1.25, viewSize().w/2, viewSize().h/2);
 $("#zOut").onclick=()=>zoomAt(0.8, viewSize().w/2, viewSize().h/2);
-$("#zFit").onclick=()=>{fitView();draw();};
+$("#zFit").title="全体表示（Esc）";$("#zFit").onclick=()=>{fitView();draw();if(S.regions[S.activeRegion])startBlink(S.activeRegion);};
 
 /* ズーム/パン/スワイプ操作 */
 let dragging=false, dragSwipe=false, lastX=0,lastY=0;
@@ -3194,6 +3272,11 @@ window.addEventListener("keydown",e=>{
   else if(e.key==="ArrowDown"){nudge(0,big);e.preventDefault();}
   else if(e.key==="n"||e.key==="N"){if(S.regions.length)focusRegion((S.activeRegion+1)%S.regions.length);}
   else if(e.key==="p"||e.key==="P"){if(S.regions.length)focusRegion((S.activeRegion-1+S.regions.length)%S.regions.length);}
+  else if(e.key==="z"||e.key==="Z"){if(S.regions[S.activeRegion])focusRegion(S.activeRegion,{zoom:true});}
+  else if(e.key==="Escape"){
+    const md=document.getElementById("fbModal"), sp=document.getElementById("settingsPanel");
+    if((md&&md.classList.contains("show")) || (sp&&!sp.classList.contains("collapsed"))) return;  // 閉じる操作を優先
+    if(S.content){fitView();draw();if(S.regions[S.activeRegion])startBlink(S.activeRegion);}}
   else if(e.key==="b"||e.key==="B"){setShowBoxes(!S.showBoxes);}
   else if(e.key==="m"||e.key==="M"){if(S.showBoxes) setShowNums(!S.showNums);}
   else if(["1","2","3","4","5"].includes(e.key)){setMode(["diff","redcyan","onion","swipe","side"][+e.key-1]);}
@@ -3573,7 +3656,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.11";
+  const APP_VERSION = "v1.12";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
