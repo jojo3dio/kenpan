@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-09</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-26</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -615,6 +615,18 @@ def extract_price_text(text):
         m=re.search(pat,t)
         if m: return int(m.group(1).replace(",",""))
     return None
+def live_price_match(live_text, price):
+    # PDFのテキスト層(ライブ文字)に残った単独の数値が、バーコードの本体価格と一致するか。
+    # アウトライン化後に価格の数字だけ打ち直したデータでは「¥」「円」「本体」等が
+    # パス化されており、数字だけがテキスト層に残る。テキスト層は誤読が無いので、
+    # 一致した場合に限り印字価格として採用する(不一致の数値は価格とみなさない)。
+    if not live_text or price is None: return None
+    t=norm(live_text)
+    for m in re.finditer(r"(?<![0-9A-Za-z])([0-9][0-9,]{2,7})(?![0-9])", t):
+        try: v=int(m.group(1).replace(",",""))
+        except ValueError: continue
+        if v==price: return v
+    return None
 def extract_jan_text(text):
     # バーコード直下等に印字される「人が読む数字列」(スペース区切りが多い)から
     # 13桁のEAN-13として妥当な数字列を拾う。ハイフン区切りのISBN等は対象外。
@@ -630,7 +642,7 @@ def extract_jan_text(text):
             w=d[i:i+13]
             if ean13_valid(w): return w
     return None
-def cross_check(isbn_bc,dnc_bc,ocr_text,layout=""):
+def cross_check(isbn_bc,dnc_bc,ocr_text,layout="",live_text=""):
     rep={"items":[],"status":"OK"}
     def add(label,ok,detail,level="NG",rid="",exp="",act="",box=None):
         rep["items"].append({"label":label,"ok":ok,"detail":detail,"level":level,
@@ -638,6 +650,11 @@ def cross_check(isbn_bc,dnc_bc,ocr_text,layout=""):
     isbn=parse_isbn_barcode(isbn_bc) if isbn_bc else None
     dnc=parse_dnc_barcode(dnc_bc) if dnc_bc else None
     ti=extract_isbn_text(ocr_text); tc=extract_ccode_text(ocr_text); tp=extract_price_text(ocr_text)
+    tp_note=""
+    if tp is None and dnc and live_text:
+        v=live_price_match(live_text, dnc["price"])
+        if v is not None:
+            tp=v; tp_note="（テキスト層の数字で照合。¥・円等はアウトライン）"
     if isbn:
         add("ISBNバーコード チェックデジット",isbn["cd_ok"],"OK" if isbn["cd_ok"] else "／".join(isbn["errors"]),
             rid="ISBN-1", exp="有効なチェックデジット", act=("OK" if isbn["cd_ok"] else "／".join(isbn["errors"])), box="isbn")
@@ -667,7 +684,7 @@ def cross_check(isbn_bc,dnc_bc,ocr_text,layout=""):
                 rid="ISBN-8", exp="印字Cコードの読取成功", act="読取失敗", box="dnc")
         if tp is not None:
             ps=(dnc["price"]==tp)
-            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s"%(dnc["price"],tp,"" if ps else "　金額が異なります"),
+            add(lbl("本体価格 バーコード↔印字",ps),ps,"BC:%d円 ／ 印字:%d円%s%s"%(dnc["price"],tp,tp_note,"" if ps else "　金額が異なります"),
                 rid="ISBN-9", exp=dnc["price"], act=tp, box="dnc")
         else:
             add("本体価格 印字の読取",False,"印字価格を読み取れませんでした",level="WARN",
@@ -692,8 +709,8 @@ def diff_pos(a,b):
     ds=[str(i+1) for i in range(len(a)) if a[i]!=b[i]]
     return ("%s桁目が異なります"%("・".join(ds))) if ds else ""
 def lbl(name,ok): return name+(" 一致" if ok else " 不一致")
-def run_check(isbn_bc,dnc_bc,ocr_text,layout=""):
-    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or "",layout or ""),ensure_ascii=False)
+def run_check(isbn_bc,dnc_bc,ocr_text,layout="",live_text=""):
+    return json.dumps(cross_check(isbn_bc or None,dnc_bc or None,ocr_text or "",layout or "",live_text or ""),ensure_ascii=False)
 def cross_check_jan(jan_bc,ocr_text):
     # ISBN/日本図書コードの帯とは別に印字される、販売用JAN(一般商品コード)の照合。
     rep={"items":[],"status":"OK"}
@@ -1451,7 +1468,8 @@ function maskBoxesPx(canvas, qualities, fallbackPx){
     return bb ? {x:bb.x*W, y:bb.y*H, w:bb.w*W, h:bb.h*H} : b;
   });
 }
-async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
+async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot,opts){
+  opts=opts||{};
   if(!boxesPx.length) return "";
   const W=canvas.width,H=canvas.height;
   let x0=Math.min(...boxesPx.map(b=>b.x)), x1=Math.max(...boxesPx.map(b=>b.x+b.w));
@@ -1459,7 +1477,8 @@ async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
   const bw=x1-x0,bh=y1-y0;
   // 印字位置はデザイン依存なので、まず周囲の白いラベル面の実際の外形を検出して切り出す。
   // 検出できない場合のみ、従来通りの固定倍率(四方を広めに)にフォールバックする。
-  const det=detectLabelCrop(canvas,x0,y0,x1,y1);
+  // opts.wide：ラベル検出を使わず固定倍率で切り出す(下地が白でない表紙の再試行用)
+  const det=opts.wide?null:detectLabelCrop(canvas,x0,y0,x1,y1);
   let cx0,cx1,cy0,cy1;
   if(det){ cx0=det.cx0; cx1=det.cx1; cy0=det.cy0; cy1=det.cy1; }
   else{
@@ -1492,7 +1511,10 @@ async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
     rx.drawImage(srcCv,0,0);
     return rc;
   };
-  const cands = rot ? [rotCanvas(tmp,true), rotCanvas(tmp,false)] : [tmp];
+  let cands = rot ? [rotCanvas(tmp,true), rotCanvas(tmp,false)] : [tmp];
+  // 広域の再試行では、柄地(大理石調など)の模様がOCRを乱すため、大津の二値化版も
+  // 候補に加えてスコアの高い方を採用する(黒文字/白地前提。逆版は元画像側が勝つ)
+  if(opts.wide){ const bz=binarizeOtsu(tmp); if(bz) cands=cands.concat(rot?[rotCanvas(bz,true),rotCanvas(bz,false)]:[bz]); }
   try{
     const w=await ensureOcr();
     let best=null;
@@ -1515,8 +1537,26 @@ async function ocrNearBarcodes(canvas,boxesPx,maskPx,rot){
               w:(((b.x1||0)-(b.x0||0))/up)/W, h:(((b.y1||0)-(b.y0||0))/up)/H};
     });
     window.__lastOcr={img:best.img.toDataURL('image/png'), text};
-    return {text, words};
+    return {text, words, usedLabel:!!det};
   }catch(e){ window.__lastOcr={img:cands[0].toDataURL('image/png'), text:'[OCR error] '+e}; return {text:"",words:[]}; }
+}
+/* 大津の方法で二値化したキャンバスを返す(OCR前処理用) */
+function binarizeOtsu(src){
+  try{
+    const w=src.width,h=src.height; if(!w||!h) return null;
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    const g=c.getContext('2d'); g.drawImage(src,0,0);
+    const im=g.getImageData(0,0,w,h), d=im.data, n=w*h;
+    const gray=new Uint8Array(n), hist=new Float64Array(256);
+    for(let i=0,j=0;i<n;i++,j+=4){ const v=(d[j]*299+d[j+1]*587+d[j+2]*114)/1000|0; gray[i]=v; hist[v]++; }
+    let sum=0; for(let t=0;t<256;t++) sum+=t*hist[t];
+    let sB=0,wB=0,best=0,th=128;
+    for(let t=0;t<256;t++){ wB+=hist[t]; if(!wB) continue; const wF=n-wB; if(!wF) break;
+      sB+=t*hist[t]; const mB=sB/wB, mF=(sum-sB)/wF, v=wB*wF*(mB-mF)*(mB-mF);
+      if(v>best){best=v;th=t;} }
+    for(let i=0,j=0;i<n;i++,j+=4){ const v=gray[i]>th?255:0; d[j]=d[j+1]=d[j+2]=v; d[j+3]=255; }
+    g.putImageData(im,0,0); return c;
+  }catch(e){ return null; }
 }
 /* Tesseractのデータ構造から単語配列を取り出す(v5は blocks→paragraphs→lines→words) */
 function pickMarks(words, rep){
@@ -1632,6 +1672,12 @@ async function analyzePage(pageNum){
         const o=await ocrNearBarcodes(cv,boxesPx,maskPx,s.other.rot);
         if(o&&o.text) txt=(txt+" "+o.text).trim();
         if(o&&o.words) ocrWords=o.words;
+        // 白ラベル検出で狭く切りすぎた場合の再試行(ISBN側と同じ)
+        if(o&&o.usedLabel&&!/[0-9][0-9\s]{10,20}[0-9]/.test(txt)){
+          const o2=await ocrNearBarcodes(cv,boxesPx,maskPx,s.other.rot,{wide:true});
+          if(o2&&o2.text) txt=(txt+" "+o2.text).trim();
+          if(o2&&o2.words) ocrWords=ocrWords.concat(o2.words);
+        }
       }
       const janVal=s.other.value;
       const repJson=runCheckJan(janVal, txt);
@@ -1653,16 +1699,27 @@ async function analyzePage(pageNum){
     if(s.dnc) { boxesPx.push({x:s.dnc.box.x*cv.width, y:s.dnc.box.y*cv.height, w:s.dnc.box.w*cv.width, h:s.dnc.box.h*cv.height });  qs.push(qDnc);  }
     const maskPx = maskBoxesPx(cv,qs,boxesPx);
     let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
+    const liveTxt=txt;   // テキスト層のみ(OCR合算前)。数字だけライブで残った価格の照合に使う
     const hasISBN=/ISBN|97[89]/.test(txt), hasC=/C\s*[0-9]{4}/.test(txt), hasP=/[¥\\]|本体|定価/.test(txt);
     let ocrWords=[];
     if($("#optOcr").checked && (!hasISBN||!hasC||!hasP)){
-      const o=await ocrNearBarcodes(cv,boxesPx,maskPx,(s.isbn&&s.isbn.rot)||(s.dnc&&s.dnc.rot));
+      const rot=(s.isbn&&s.isbn.rot)||(s.dnc&&s.dnc.rot);
+      const o=await ocrNearBarcodes(cv,boxesPx,maskPx,rot);
       if(o&&o.text) txt=(txt+" "+o.text).trim();
       if(o&&o.words) ocrWords=o.words;
+      // 下地が白でない(色地・柄地の)表紙では白ラベル検出が切り出しを縮めすぎ、
+      // 横に置かれたISBN・Cコード・価格の印字が範囲外になる。まだ欠けている項目が
+      // あれば固定倍率の広い範囲で再OCRし、後ろに合算する(先の結果が優先される)。
+      const lack=t=>!/ISBN|97[89]/.test(t)||!/C\s*[0-9]{4}/.test(t)||!/[¥\\]\s*[0-9]|本体|定価/.test(t);
+      if(o&&o.usedLabel&&lack(txt)){
+        const o2=await ocrNearBarcodes(cv,boxesPx,maskPx,rot,{wide:true});
+        if(o2&&o2.text) txt=(txt+" "+o2.text).trim();
+        if(o2&&o2.words) ocrWords=ocrWords.concat(o2.words);
+      }
     }
     const bcIsbnVal=s.isbn?s.isbn.value:"";
     const repTxt=normalizeOcrIsbn(txt, bcIsbnVal);
-    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt, slipLayout?"slip":"");
+    const repJson=runCheck(bcIsbnVal, s.dnc?s.dnc.value:"", repTxt, slipLayout?"slip":"", liveTxt);
     window.__lastChk={bcIsbn:bcIsbnVal, txtIn:txt, txtNorm:repTxt, repJson:repJson};
     const rep=JSON.parse(repJson);
     // マーカー：OCR単語のうち、照合した実値(ISBN/Cコード/価格)に一致するものだけを採用
