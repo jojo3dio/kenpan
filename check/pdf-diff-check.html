@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.13　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.14　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -899,11 +899,36 @@ function detectTomboRect(imgData, W, H, dpi){
   const cornersDef = {
     TL:[0,win,0,win], TR:[0,win,W-win,W], BL:[H-win,H,0,win], BR:[H-win,H,W-win,W]
   };
+  // v1.14：トンボの線は「用紙の端から内側へ短く伸びる細線」。この条件で絞ってから
+  // 各軸でいちばん内側の線を仕上がり線とする（日本式の二重トンボは外側=塗り足し線・内側=仕上がり線）。
+  // 以前は窓内の交点候補を全部平均していたため、仕上がり線と塗り足し線の中間（約1.5mm外側）を
+  // 取ったり、70mm窓に入った本文の細線（商品コードの字形・背の罫など）を拾って仕上がり枠が
+  // 大きく内側にずれたりしていた。dpiで拾える線が変わるため、100dpiでは下辺が約10mm内側に
+  // なり、枠外扱いで商品コードの差分が消えていた（実データ 03590088→03610019 で確認）。
+  const edgeTol=Math.round(5/25.4*dpi), maxMarkLen=Math.round(25/25.4*dpi);
+  function edgeCorner(key,hlines,vlines){
+    const L=key[1]==="L", T=key[0]==="T";
+    const hs=hlines.filter(([y,a,b])=>(b-a)<=maxMarkLen && (L? a<=edgeTol : b>=W-1-edgeTol));
+    const vs=vlines.filter(([x,a,b])=>(b-a)<=maxMarkLen && (T? a<=edgeTol : b>=H-1-edgeTol));
+    if(!hs.length||!vs.length) return null;
+    // トンボはL字の組み合わせ：縦線のxには、端から伸びた横線の内側の端が来ている（逆も同じ）。
+    // 用紙端近くの見出し文字の縦画など、単独の短い線はこれで除外される。
+    const jt=Math.max(3, Math.round(0.5/25.4*dpi));
+    const hIn=l=> L? l[2] : l[1];          // 横線の内側の端（x）
+    const vIn=l=> T? l[2] : l[1];          // 縦線の内側の端（y）
+    const vOK=vs.filter(v=>hs.some(h=>Math.abs(hIn(h)-v[0])<=jt));
+    const hOK=hs.filter(h=>vs.some(v=>Math.abs(vIn(v)-h[0])<=jt));
+    if(!hOK.length||!vOK.length) return null;
+    const ys=hOK.map(l=>l[0]), xs=vOK.map(l=>l[0]);
+    const cy=T? Math.max(...ys) : Math.min(...ys);
+    const cx=L? Math.max(...xs) : Math.min(...xs);
+    return [cx+0.5, cy+0.5];     // 画素の中心
+  }
   const pts={};
   for(const key in cornersDef){
     const [y0,y1,x0,x1]=cornersDef[key];
     const {hlines,vlines}=findLines(y0,y1,x0,x1);
-    pts[key]=cornerPoint(hlines,vlines,6);
+    pts[key]=edgeCorner(key,hlines,vlines) || cornerPoint(hlines,vlines,6);
   }
   const foundN=Object.values(pts).filter(Boolean).length;
   if(foundN<3) return null;   // 4隅のうち3隅未満しか見つからなければ信頼できない
@@ -2283,6 +2308,31 @@ function diffChars(a,b){
   flush();
   return blocks;
 }
+// 変更ブロックの文字を「紙面上でつながっている塊」ごとに分ける（v1.14）。
+// LCSは読み順の文字列で突き合わせるため、間に一致文字が1つも無い2か所の変更
+// （例：表1と表4の住所。入稿側がアウトライン化されていて間の文字が無い）は
+// 1個のブロックに連結される。そのままbboxを取ると見開きをまたぐ巨大な枠になり、
+// 画素検証(diffFracCommon)で実際に変わったインクの割合が薄まって6%を割り、
+// 「実差分なし」として消えていた（実データ 03590088→03610019 の「3-3-7→3-11-6」×2で確認）。
+// 塊に分けてから、塊ごとに枠を取り・画素検証する。
+function splitCharsSpatial(cs){
+  if(!cs||!cs.length) return [];
+  const out=[[cs[0]]];
+  for(let k=1;k<cs.length;k++){
+    const pv=cs[k-1], c=cs[k];
+    const sz=Math.max(pv.w,pv.h,c.w,c.h);
+    const gx=Math.max(0, c.x-(pv.x+pv.w), pv.x-(c.x+c.w));
+    const gy=Math.max(0, c.y-(pv.y+pv.h), pv.y-(c.y+c.h));
+    // 同じ行（縦組みなら同じ列）で字送り程度の隙間までは連続とみなす。
+    // 行送り1回ぶん（改行して続く書き換え）も連続扱いにして、段落内の修正は1件のまま保つ。
+    const sameLine = gy<=sz*0.3 && gx<=sz*1.5;
+    const sameCol  = gx<=sz*0.3 && gy<=sz*1.5;
+    const nextLine = gy<=sz*1.2 && Math.abs(c.y-pv.y)<=sz*2.2 && gx<=sz*40;
+    if(sameLine||sameCol||nextLine) out[out.length-1].push(c);
+    else out.push([c]);
+  }
+  return out;
+}
 function charsBBox(cs){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const c of cs){x0=Math.min(x0,c.x);y0=Math.min(y0,c.y);x1=Math.max(x1,c.x+c.w);y1=Math.max(y1,c.y+c.h);} return {x:x0,y:y0,w:Math.max(2,x1-x0),h:Math.max(2,y1-y0)}; }
 // 共通座標(X0..X1,Y0..Y1)の暗画素の割合。offx/offyはそのデータの左上が置かれた共通座標。
 function darkFracCommon(data,w,h,offx,offy,X0,Y0,X1,Y1){
@@ -2353,7 +2403,7 @@ function textDiff(p){
   const DIAG = S.diag = {
     ran:true,
     inputs:{ aItems:aItems.length, bItems:bItems.length, aChars:0, bChars:0, nm:0, fallback:false },
-    counts:{ blocks:0, emitted:0 },
+    counts:{ blocks:0, emitted:0, split:0 },
     cut:{ multiset:0, pair:0, reflow:0, pixel:0 },
     cutSample:[],
     note:""
@@ -2452,7 +2502,11 @@ function textDiff(p){
   //  ・画素がほぼ一致 → ライブ文字がアウトライン化されただけ等で内容は不変 → 出さない
   //  ・下版(B)にインクあり → “削除”でなく“内容が変わっています”（例：（続刊）→アウトラインの価格）
   //  ・下版(B)が白紙 → 本当に削除
-  const emitDel=(chs,aStr)=>{
+  const emitDel=(chs0,aStr0)=>{ const parts=splitCharsSpatial(chs0);
+    if(parts.length>1){ DIAG.counts.split=(DIAG.counts.split||0)+parts.length-1; parts.forEach(cs=>emitDel1(cs,cs.map(c=>c.ch).join(""))); }
+    else emitDel1(chs0,aStr0); };
+  const emitDel1=(chs,aStr)=>{
+    if(!aStr.trim()) return;
     let box=charsBBox(chs);
     if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN){ DIAG.cut.pixel++; _cutLog("pixel/del", aStr, ""); return; }
     const padx=Math.max(box.w,box.h)*0.25+2;
@@ -2464,7 +2518,11 @@ function textDiff(p){
       findings.push(Object.assign(box,{cls:mkCls("removed","文字が削除されています",`「${trunc(aStr)}」`,"TXT-7",aStr,"")}));
     }
   };
-  const emitAdd=(chs,bStr)=>{
+  const emitAdd=(chs0,bStr0)=>{ const parts=splitCharsSpatial(chs0);
+    if(parts.length>1){ DIAG.counts.split=(DIAG.counts.split||0)+parts.length-1; parts.forEach(cs=>emitAdd1(cs,cs.map(c=>c.ch).join(""))); }
+    else emitAdd1(chs0,bStr0); };
+  const emitAdd1=(chs,bStr)=>{
+    if(!bStr.trim()) return;
     let box=charsBBox(chs);
     if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) < DF_MIN){ DIAG.cut.pixel++; _cutLog("pixel/add", "", bStr); return; }
     const padx=Math.max(box.w,box.h)*0.25+2;
@@ -2479,7 +2537,27 @@ function textDiff(p){
   for(const x of _blks){
     if(_cancelled.has(x)) continue;
     const {blk,aStr,bStr}=x;
-    if(aStr && bStr){
+    if(aStr && bStr && (splitCharsSpatial(blk.aChars).length>1 || splitCharsSpatial(blk.bChars).length>1)){
+      // 置換ブロックが紙面上で複数か所に分かれている（v1.14）。A側/B側の塊を位置で対応づけ、
+      // 重なる塊どうしは「文字が変わっています」、相手の無い塊は削除/追加として個別に判定する。
+      const aP=splitCharsSpatial(blk.aChars), bP=splitCharsSpatial(blk.bChars);
+      DIAG.counts.split=(DIAG.counts.split||0)+aP.length+bP.length-2;
+      const aUsed=new Array(aP.length).fill(false);
+      for(const bs of bP){
+        const bb=charsBBox(bs), pad=Math.max(bb.h,bb.w>bb.h*3?bb.h:bb.w)*0.5;
+        const bbx={x:bb.x-pad,y:bb.y-pad,w:bb.w+pad*2,h:bb.h+pad*2};
+        const hit=[]; aP.forEach((as,i)=>{ if(!aUsed[i] && rectOverlap(charsBBox(as),bbx)>0){ aUsed[i]=true; hit.push(as); } });
+        const bS=bs.map(c=>c.ch).join("");
+        if(!hit.length){ emitAdd1(bs,bS); continue; }
+        const aS=hit.flat().map(c=>c.ch).join("");
+        const box=charsBBox(bs);
+        if(diffFracCommon(p, box.x,box.y,box.x+box.w,box.y+box.h) >= DF_MIN)
+          findings.push(Object.assign(box,{cls:mkCls("text","文字が変わっています",`「${trunc(aS)}」→「${trunc(bS)}」`,"TXT-10",aS,bS)}));
+        else { DIAG.cut.pixel++; _cutLog("pixel/rep", aS, bS); }
+      }
+      aP.forEach((as,i)=>{ if(!aUsed[i]) emitDel1(as,as.map(c=>c.ch).join("")); });
+    }
+    else if(aStr && bStr){
       // 置換だがA片とB片が空間的にほとんど重ならない＝LCSの離れた誤対応。
       //（実際の“その場の書き換え”は同じ位置に出る。離れた対応は偽陽性なので分割して個別判定）
       const ba=charsBBox(blk.aChars), bb=charsBBox(blk.bChars);
@@ -3661,7 +3739,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.13";
+  const APP_VERSION = "v1.14";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
