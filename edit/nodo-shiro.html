@@ -14,7 +14,6 @@
   --bg:#101416; --panel:#1a1f22; --panel2:#232a2e; --line:#333c41;
   --ink:#e8eef0; --ink-dim:#9fabb1; --ink-faint:#74818a;
   --main:#5DE0F0; --main-soft:#0d3d47;
-  --accent:#5DE0F0;              /* kenpan-nav.js が「ハブへ」ボタンの色に使う */
   --pink:#FF6E97; --green:#2BD4A4; --orange:#FFA94D; --cyan:#3AD8ED;
   --need:#FF6E97; --need-soft:#3a1f2c;
   --no:#2BD4A4; --no-soft:#16332a;
@@ -29,7 +28,6 @@ body.light{
   --bg:#f4fafc; --panel:#ffffff; --panel2:#eff6f8; --line:#d8e3e7;
   --ink:#17262b; --ink-dim:#566970; --ink-faint:#8ea0a7;
   --main:#00B4D8; --main-soft:#d9f5fb;
-  --accent:#00B4D8;
   --pink:#FF4D7E; --green:#12B886; --orange:#FF922B; --cyan:#12BDD4;
   --need:#FF4D7E; --need-soft:#ffe9f0;
   --no:#12B886; --no-soft:#e2f7f0;
@@ -68,80 +66,6 @@ header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:
 .hbtn svg{width:15px;height:15px}
 .hbtn.primary{background:var(--main);color:#fff;border-color:var(--main);font-weight:700}
 .hbtn.primary:hover:not(:disabled){filter:brightness(1.08);color:#fff}
-
-/* ---------- フィードバック（差分チェッカー・目次整合と同形） ---------- */
-.fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--ui);font-size:12px;font-weight:700;
-  color:#fff;background:var(--main);border:1px solid var(--main);border-radius:8px;
-  padding:7px 13px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em;
-  box-shadow:0 0 0 0 rgba(93,224,240,.5)}
-.fbbtn.invite{animation:fbpulse 2.2s ease-out 3}
-.fbbtn:hover{filter:brightness(1.06);transform:translateY(-1px);animation:none;
-  box-shadow:0 5px 16px rgba(93,224,240,.4)}
-.fbbtn:active{transform:translateY(0)}
-.fbbtn svg{width:15px;height:15px}
-@keyframes fbpulse{0%{box-shadow:0 0 0 0 rgba(93,224,240,.5)}70%{box-shadow:0 0 0 9px rgba(93,224,240,0)}100%{box-shadow:0 0 0 0 rgba(93,224,240,0)}}
-@media (prefers-reduced-motion:reduce){.fbbtn{animation:none}}
-.fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
-  background:rgba(6,12,14,.58);backdrop-filter:blur(3px)}
-.fbmodal.show{display:flex}
-.fbcard{width:min(470px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
-  border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
-.fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
-.fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--ink-dim);line-height:1.65}
-.fbfield{margin-bottom:13px}
-.fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-dim);margin-bottom:5px}
-.fbfield label .req{color:var(--need);margin-left:3px}
-.fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--ui);font-size:13px;color:var(--ink);
-  background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
-.fbfield textarea{min-height:64px;line-height:1.5}
-.fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:4px;word-break:break-all}
-.fbrow2{display:flex;gap:9px}
-.fbrow2 .fbfield{flex:1;margin-bottom:13px}
-.fbverdict{display:flex;gap:7px}
-.fbverdict button{flex:1;font-family:var(--ui);font-size:12px;color:var(--ink-dim);background:var(--panel2);
-  border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
-.fbverdict button:hover{border-color:var(--main)}
-.fbverdict button.on{background:var(--main);color:#fff;border-color:var(--main);font-weight:700}
-.fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
-.fbactions{display:flex;gap:9px;margin-top:18px}
-.fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
-.fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
-.fbactions .fbcancel:hover{color:var(--ink)}
-.fbactions .fbsend{background:var(--main);border:1px solid var(--main);color:#fff;font-weight:700}
-.fbactions .fbsend:hover{filter:brightness(1.06)}
-.fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
-.fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
-  background:var(--need-soft);color:var(--need);border:1px solid var(--need)}
-.fbnote.ok{background:var(--no-soft);color:var(--no);border-color:var(--no)}
-.fbnote code{font-family:var(--mono);font-size:10.5px}
-/* 添付される内容のたたみ表示 */
-.fbpeek{margin-top:-4px;margin-bottom:13px}
-.fbpeek summary{font-size:11px;color:var(--ink-faint);cursor:pointer;list-style:none}
-.fbpeek summary::-webkit-details-marker{display:none}
-.fbpeek summary::before{content:'▸ ';font-family:var(--mono)}
-.fbpeek[open] summary::before{content:'▾ '}
-.fbpeek pre{margin:7px 0 0;padding:9px 11px;background:var(--panel2);border:1px solid var(--line);
-  border-radius:7px;font-family:var(--mono);font-size:10.5px;line-height:1.6;color:var(--ink-dim);
-  max-height:150px;overflow:auto;white-space:pre-wrap;word-break:break-all}
-/* 書き出し直後の軽い誘導（画面下中央に出す） */
-.fbinline{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:900;
-  display:none;align-items:center;gap:10px;flex-wrap:wrap;max-width:calc(100vw - 32px);
-  background:var(--panel);border:1px solid var(--main);border-radius:11px;
-  padding:9px 13px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
-.fbinline.show{display:flex}
-.fbinline .q{color:var(--ink-dim);font-weight:600}
-.fbinline button{font-family:var(--ui);font-size:12px;font-weight:700;cursor:pointer;
-  border:1px solid var(--line);border-radius:7px;padding:5px 11px;background:var(--panel2);color:var(--ink);transition:.12s}
-.fbinline button:hover{border-color:var(--main);color:var(--main)}
-.fbinline .x{border:0;background:transparent;color:var(--ink-faint);padding:5px 4px;font-weight:400}
-.fbinline .done{color:var(--no);font-weight:700}
-/* 初回ヒントの吹き出し */
-.fbhintbubble{position:fixed;top:52px;right:16px;z-index:900;max-width:210px;
-  background:var(--main);color:#fff;font-size:11.5px;line-height:1.5;border-radius:9px;
-  padding:9px 12px;box-shadow:0 6px 20px rgba(0,0,0,.3)}
-.fbhintbubble::after{content:"";position:absolute;top:-7px;right:26px;border:7px solid transparent;
-  border-bottom-color:var(--main);border-top:0}
-.fbhintbubble b{cursor:pointer;margin-left:6px;opacity:.85}
 
 /* ---------- toolbar ---------- */
 .toolbar{display:flex;align-items:center;gap:9px;padding:7px 14px;flex-wrap:wrap;white-space:nowrap;
@@ -560,7 +484,7 @@ button.jok:disabled{opacity:.35;cursor:not-allowed}
       <circle cx="21.5" cy="21.5" r="5" fill="currentColor" stroke="#fff" stroke-width="1.6"/>
       <path d="M21.5 19.2v4.6M19.2 21.5h4.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
     </svg></span>
-    <span class="brandtxt"><h1>ノド側の<i>白</i></h1><span class="ver">v6　·　local · no-upload</span></span>
+    <span class="brandtxt"><h1>ノド側の<i>白</i></h1><span class="ver">v4　·　local · no-upload</span></span>
   </div>
   <span class="sp"></span>
   <div class="ntabs">
@@ -571,10 +495,6 @@ button.jok:disabled{opacity:.35;cursor:not-allowed}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
     <span>リセット</span></button>
   <button class="hbtn" id="themeBtn"><span id="themeIco"></span><span id="themeLbl">ダーク</span></button>
-  <button class="fbbtn" id="fbOpen" title="この案件についてのフィードバックを送信（判定・白の位置・気づいた点）">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-    <span>フィードバック</span>
-  </button>
 </header>
 
 <div class="toolbar" id="toolbar">
@@ -684,80 +604,6 @@ button.jok:disabled{opacity:.35;cursor:not-allowed}
 
 <div class="peek" id="peek" style="display:none"></div>
 <div class="toast" id="toast"></div>
-
-<!-- ============ フィードバック（差分チェッカー・目次整合と同形） ============ -->
-<div class="fbmodal" id="fbModal">
-  <div class="fbcard">
-    <h3>フィードバックを送信</h3>
-    <p class="fbsub">この案件で気づいた点を送ってください。実際の案件の条件を集めて、判定ルールと自動選択の改良に使います。<br>
-      ※送られるのは<b>条件と選択内容のテキスト</b>と、プレビュー中の1面の画像だけです。<b>PDFファイルそのものはアップロードされません。</b></p>
-
-    <div class="fbfield">
-      <label>結果はどうでしたか？<span class="req">*</span></label>
-      <div class="fbverdict" id="fbVerdict">
-        <button type="button" data-v="correct">問題なし<span class="vm">このまま下版できる</span></button>
-        <button type="button" data-v="wrong">結果が違う<span class="vm">位置・寸法・面</span></button>
-        <button type="button" data-v="unsure">迷った<span class="vm">判断がつかない</span></button>
-      </div>
-    </div>
-
-    <div class="fbrow2">
-      <div class="fbfield">
-        <label>種別</label>
-        <select id="fbCategory">
-          <option value="">（選択しない）</option>
-          <option value="判定ルール">判定ルール（内1.5／ドブ3の要否）</option>
-          <option value="構成の組み立て">構成の組み立て（並び順・折・端数）</option>
-          <option value="継ぎ目・貼る面">継ぎ目・貼る面の選択</option>
-          <option value="展開もの">展開もの（二つ折り・観音・Z折り）</option>
-          <option value="白の位置・寸法">白の位置・寸法（刷り上がり実測）</option>
-          <option value="書き出し・削除">書き出し・削除</option>
-          <option value="要望">要望・使い勝手</option>
-          <option value="その他">その他</option>
-        </select>
-      </div>
-      <div class="fbfield">
-        <label>該当ページ・パーツ</label>
-        <input id="fbPage" type="text" placeholder="例: p12 / 巻末4p / 片観音">
-      </div>
-    </div>
-
-    <div class="fbfield">
-      <label>案件の条件</label>
-      <input id="fbCond" type="text" readonly>
-      <div class="fbhint" id="fbFileHint"></div>
-    </div>
-
-    <div class="fbfield">
-      <label>自由コメント</label>
-      <textarea id="fbComment" placeholder="例：巻末の4pで前後とも白が出たが、製本部の指示は片側だけだった／Z折りの端の選び方が分からなかった など"></textarea>
-    </div>
-
-    <div class="fbfield">
-      <label>お名前・担当（必須）</label>
-      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
-    </div>
-    <div class="fbfield">
-      <label>メールアドレス（必須・対応のご連絡用）</label>
-      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
-      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
-    </div>
-
-    <details class="fbpeek" id="fbPeek">
-      <summary>一緒に送られる内容を確認する</summary>
-      <pre id="fbPeekBody"></pre>
-    </details>
-
-    <div class="fbactions">
-      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
-      <button type="button" class="fbsend" id="fbSend">送信する</button>
-    </div>
-    <div class="fbnote" id="fbNote" style="display:none"></div>
-  </div>
-</div>
-
-<div class="fbinline" id="fbInline"></div>
-<div class="fbhintbubble" id="fbHint" style="display:none">迷ったところ・違ったところは、ここで教えてください<b id="fbHintX">✕</b></div>
 
 <script>/* =====================================================================
    nodo_core.js — ノド糊しろ白 / PDF増分更新エンジン
@@ -1359,6 +1205,81 @@ function rebuildDict(dict, src, replace, extra) {
   return concat(out);
 }
 
+/* ---------- レイヤー一覧（/OCProperties）の更新 ----------
+   既存のレイヤー（非表示の指示レイヤーなど）と、その表示状態は必ず残す。
+   以前は一覧を自分のレイヤー1つで置き換えていたため、他のレイヤーが一覧から外れ、
+   非表示にしていた内容が印刷に出るおそれがあった（2026-10 修正）。 */
+
+/* 構文解析した値を PDF の文字列に戻す（辞書・配列・文字列は元のバイト列をそのまま） */
+function valText(v, src) {
+  if (!v) return "null";
+  if (v.t === "ref") return v.num + " " + v.gen + " R";
+  if (v.t === "num") return String(v.v);
+  if (v.t === "name") return v.v;
+  if (v.t === "bool") return v.v ? "true" : "false";
+  if (v.t === "null") return "null";
+  if (v.s !== undefined && v.e !== undefined) return latin(src, v.s, v.e);
+  return "null";
+}
+/* 配列（参照なら解決）。{items:[{v,src}]} を返す */
+async function arrOf(doc, ent, src) {
+  if (!ent) return [];
+  const r = await doc.resolve(ent.v, src);
+  return r.v.t === "arr" ? r.v.items.map(v => ({ v, src: r.src })) : [];
+}
+const isRefTo = (it, nums) => it.v.t === "ref" && nums.has(it.v.num);
+const txt = it => valText(it.v, it.src);
+
+/* 一覧を組み直す。add: 足すOCG番号（null可）、drop: 外すOCG番号の集合 */
+async function rebuildOcp(doc, cat, add, drop) {
+  const me = add !== null && add !== undefined ? add + " 0 R" : null;
+  const addSet = new Set(me ? [add] : []);
+  const asNew = me ? "<< /Event /Print /Category [/Print] /OCGs [" + me + "] >>" : null;
+  const ent = cat.dict.map.get("/OCProperties");
+  const ocp = ent ? await doc.resolve(ent.v, cat.src) : null;
+  if (!ocp || ocp.v.t !== "dict")
+    return me ? "<< /OCGs [" + me + "] /D << /Order [" + me + "] /ON [" + me + "] /AS [" + asNew + "] >> >>" : null;
+
+  const keep = it => !isRefTo(it, drop) && !isRefTo(it, addSet);   // add は末尾に1回だけ入れる
+  const out = [];
+  for (const [k, e] of ocp.v.map) if (k !== "/OCGs" && k !== "/D") out.push(k + " " + valText(e.v, ocp.src));
+  const ocgs = (await arrOf(doc, ocp.v.map.get("/OCGs"), ocp.src)).filter(keep).map(txt);
+  if (me) ocgs.push(me);
+  if (!ocgs.length) return null;                       // レイヤーが1つも残らない
+  out.push("/OCGs [" + ocgs.join(" ") + "]");
+
+  const d = [];
+  let order = [], on = [], off = [], as = [];
+  const dEnt = ocp.v.map.get("/D");
+  const dd = dEnt ? await doc.resolve(dEnt.v, ocp.src) : null;
+  if (dd && dd.v.t === "dict") {
+    for (const [k, e] of dd.v.map)
+      if (!["/Order", "/ON", "/OFF", "/AS"].includes(k)) d.push(k + " " + valText(e.v, dd.src));
+    order = (await arrOf(doc, dd.v.map.get("/Order"), dd.src)).filter(keep).map(txt);
+    on = (await arrOf(doc, dd.v.map.get("/ON"), dd.src)).filter(keep).map(txt);
+    off = (await arrOf(doc, dd.v.map.get("/OFF"), dd.src)).filter(keep).map(txt);   // 足すレイヤーは表示ONにする
+    let printSeen = false;
+    for (const it of await arrOf(doc, dd.v.map.get("/AS"), dd.src)) {
+      const cfg = await doc.resolve(it.v, it.src);
+      if (cfg.v.t !== "dict") { as.push(txt(it)); continue; }
+      const ev = cfg.v.map.get("/Event");
+      const isPrint = ev && ev.v.t === "name" && ev.v.v === "/Print";
+      const g = (await arrOf(doc, cfg.v.map.get("/OCGs"), cfg.src)).filter(keep).map(txt);
+      if (isPrint && me && !printSeen) { g.push(me); printSeen = true; }
+      if (!g.length) continue;                         // 中身が空になった設定は外す
+      { const u = rebuildDict(cfg.v, cfg.src, { "/OCGs": "[" + g.join(" ") + "]" }); as.push(latin(u, 0, u.length)); }
+    }
+    if (me && !printSeen) as.push(asNew);
+  } else if (me) as.push(asNew);
+  if (me) { order.push(me); on.push(me); }
+  if (order.length) d.push("/Order [" + order.join(" ") + "]");
+  if (on.length) d.push("/ON [" + on.join(" ") + "]");
+  if (off.length) d.push("/OFF [" + off.join(" ") + "]");
+  if (as.length) d.push("/AS [" + as.join(" ") + "]");
+  out.push("/D << " + d.join(" ") + " >>");
+  return "<< " + out.join(" ") + " >>";
+}
+
 /* ---------- 情報取得 ---------- */
 async function info(buf) {
   const doc = await Doc.load(buf);
@@ -1411,9 +1332,14 @@ async function add(buf, opts) {
 
   let ocgNum = null;
   if (o.useOcg) {
-    ocgNum = w.alloc();
-    w.obj(ocgNum, "<< /Type /OCG /Name " + pdfTextString(o.layerName) +
-      " /Intent [/View /Design] /Usage << /View << /ViewState /ON >> /Print << /PrintState /ON /Subtype /Print >> >> >>");
+    // 同名のレイヤーが既にあれば使い回す（再保存されたPDFに同名レイヤーが2つできないように。Python版と同じ）
+    const existing = await findOcgNums(doc, o.layerName);
+    if (existing.size) ocgNum = Math.min(...existing);
+    else {
+      ocgNum = w.alloc();
+      w.obj(ocgNum, "<< /Type /OCG /Name " + pdfTextString(o.layerName) +
+        " /Intent [/View /Design] /Usage << /View << /ViewState /ON >> /Print << /PrintState /ON /Subtype /Print >> >> >>");
+    }
   }
   const gsNum = w.alloc();
   w.obj(gsNum, "<< /Type /ExtGState /OP false /op false /OPM 0 /BM /Normal /CA 1 /ca 1 /SMask /None >>");
@@ -1463,21 +1389,22 @@ async function add(buf, opts) {
       const rr = await doc.resolve(resEnt.v, resSrc);
       if (rr.v.t === "dict") { resDict = rr.v; resDictSrc = rr.src; }
     }
-    const mergeSub = async (key, addStr) => {
+    /* 既に同じ名前があれば差し替える（以前は二重に書いて重複キーになっていた。2026-10 修正） */
+    const mergeSub = async (key, name, val) => {
       let inner = "";
       if (resDict && resDict.map.has(key)) {
         const sub = await doc.resolve(resDict.map.get(key).v, resDictSrc);
         if (sub.v.t === "dict") {
           const parts = [];
-          for (const [k, ent] of sub.v.map) parts.push(k + " " + latin(sub.src, ent.s, ent.e));
-          inner = parts.join(" ") + " ";
+          for (const [k, ent] of sub.v.map) if (k !== name) parts.push(k + " " + latin(sub.src, ent.s, ent.e));
+          inner = parts.join(" ") + (parts.length ? " " : "");
         }
       }
-      return "<< " + inner + addStr + " >>";
+      return "<< " + inner + name + " " + val + " >>";
     };
-    const gsStr = await mergeSub("/ExtGState", RES_GS + " " + gsNum + " 0 R");
+    const gsStr = await mergeSub("/ExtGState", RES_GS, gsNum + " 0 R");
     const repl = { "/ExtGState": gsStr };
-    if (o.useOcg) repl["/Properties"] = await mergeSub("/Properties", RES_OC + " " + ocgNum + " 0 R");
+    if (o.useOcg) repl["/Properties"] = await mergeSub("/Properties", RES_OC, ocgNum + " 0 R");
     const resNum = w.alloc();
     w.obj(resNum, resDict
       ? rebuildDict(resDict, resDictSrc, repl)
@@ -1499,13 +1426,9 @@ async function add(buf, opts) {
   }
 
   // カタログ（レイヤー定義と復元用の基準長）
-  const ocp = o.useOcg
-    ? "<< /OCGs [" + ocgNum + " 0 R] /D << /Order [" + ocgNum + " 0 R] /ON [" + ocgNum +
-      " 0 R] /AS [<< /Event /Print /Category [/Print] /OCGs [" + ocgNum + " 0 R] >>] >> >>"
-    : null;
+  // レイヤーは既存の一覧に「足す」。直接描く場合は一覧に触らない（以前は一覧ごと消していた）
   const catRepl = { [BASEKEY]: String(buf.length) };
-  if (ocp) catRepl["/OCProperties"] = ocp;
-  else catRepl["/OCProperties"] = null;
+  if (o.useOcg) catRepl["/OCProperties"] = await rebuildOcp(doc, cat, ocgNum, new Set());
   w.obj(cat.num, rebuildDict(cat.dict, cat.src, catRepl));
 
   return { data: w.finish(), warnings, applied };
@@ -1640,20 +1563,10 @@ async function remove(buf, opts) {
   }
   if (!hit) throw new Error("糊しろ白が見つかりません");
 
-  /* レイヤー定義の後片付け。他のレイヤーがある場合は触らない */
+  /* レイヤー定義の後片付け。ノド白のレイヤーだけを一覧から外し、他のレイヤーはそのまま残す */
   const catRepl = { [BASEKEY]: null };
-  let others = 0;
-  const ocpEnt = cat.dict.map.get("/OCProperties");
-  if (ocpEnt) {
-    const ocp = await doc.resolve(ocpEnt.v, cat.src);
-    const gEnt = ocp.v.t === "dict" ? ocp.v.map.get("/OCGs") : null;
-    if (gEnt) {
-      const arr = (await doc.resolve(gEnt.v, ocp.src)).v;
-      if (arr.t === "arr") for (const it of arr.items)
-        if (!(it.t === "ref" && ocgNums.has(it.num))) others++;
-    }
-  }
-  if (!others) catRepl["/OCProperties"] = null;
+  if (cat.dict.map.has("/OCProperties") && ocgNums.size)
+    catRepl["/OCProperties"] = await rebuildOcp(doc, cat, null, ocgNums);   // 1つも残らなければ null（一覧ごと削除）
   w.obj(cat.num, rebuildDict(cat.dict, cat.src, catRepl));
   return w.finish();
 }
@@ -2957,7 +2870,6 @@ $('btnApply').onclick=async()=>{
   }
   toast(`${files}ファイル・${n}面に白を追加しました（既定：${CFG.joint==='front'?'前で貼る':'後ろで貼る'}）`,'ok');
   $('btnApply').disabled=false;
-  if(files&&typeof window.fbAfterApply==='function') setTimeout(window.fbAfterApply,900);
 };
 $('btnRemove').onclick=async()=>{
   $('btnRemove').disabled=true;
@@ -3021,265 +2933,6 @@ $('btnReset').onclick=()=>{
 setTheme((()=>{try{return (localStorage.getItem(THEME)||'light')==='light'}catch(e){return true}})());
 setTab(location.hash==='#wiz'?'wiz':'pdf');
 rebuild();
-
-/* ================= フィードバック =================
-   下版差分チェッカー・目次整合検版と同じGASウェブアプリへ送る。
-   保存先シートは payload.tool で振り分けられる。
-   このツールは「検出の正誤」ではなく実案件の条件そのものを集めたいので、
-   条件・構成・継ぎ目の選択内容を自動で添付する（手入力させない）。 */
-(function(){
-  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_TOOL = "nodo_shiro";
-  const FB_APP_VERSION = "v6";
-  const FB_TEXT_MAX = 20000;
-
-  const modal = $('fbModal');
-  let fbVerdict = "";
-
-  const BINDLBL={a:'あじろ・糸かがり',b:'無線・無線PUR',naka:'中綴じ'};
-  const trunc = s => (s && s.length > FB_TEXT_MAX) ? s.slice(0, FB_TEXT_MAX) + "…(省略)" : (s || "");
-
-  /* ---- 案件の条件（1行） ---- */
-  function condText(){
-    const b=$('fBind'), bl=(b&&b.options[b.selectedIndex]?b.options[b.selectedIndex].text:BINDLBL[CFG.bind])||'';
-    return [`製本:${bl}`, `綴じ:${CFG.dir==='right'?'右':'左'}`,
-            `${CFG.fold}p掛け`, `総頁:${CFG.pages}`,
-            `既定:${CFG.joint==='front'?'前で貼る':'後ろで貼る'}`].join(' / ');
-  }
-
-  /* ---- 構成（台割）と継ぎ目の選択内容 ---- */
-  function configText(){
-    try{
-      const L=[];
-      L.push('［条件］ '+condText());
-      if(FILES.length){
-        L.push('［入稿ファイル］');
-        FILES.forEach((f,i)=>L.push(`  ${i+1}\t${f.name}\t${f.info?f.info.pageCount:'?'}p\t種別:${f.kind||''}`
-          +(f.info&&f.info.hasLayer?'\t※既に白レイヤーあり':'')));
-      }
-      if(PLIST.length){
-        L.push('［構成］');
-        PLIST.forEach(p=>L.push(`  ${p.external?'通し外':'通し'}\t${p.label}\t${p.len}p\t物理p${p.physStart}`
-          +(p.form==='spread'?'\t展開入稿':'')));
-      }
-      const pk=Object.keys(PICKS||{});
-      if(pk.length){
-        L.push('［継ぎ目の選択］');
-        pk.forEach(id=>{
-          const p=partById(id), k=PICKS[id]||{};
-          const faces=(k.faces||[]).map(f=>`${f.face||(f.page===1?'外面':'中面')}`
-            +(f.end?`・${f.end==='left'?'左端':'右端'}`:'')
-            +(f.panelSide?`・折スジ${f.panelSide==='left'?'左':'右'}`:'')
-            +`(pdf p${f.page}/${f.edge})`).join(' ＋ ') || '(面なし)';
-          L.push(`  ${p?p.label:id}\t${k.joint||'-'}\t${k.wrap||'-'}\t${faces}\t${k.done?'確定':'未確定'}`);
-        });
-      }
-      if(W && W.bind){
-        L.push('［判定タブ］ '+[`製本:${BINDLBL[W.bind]||W.bind}`,`見返し:${W.mika||'-'}`,
-          `パーツ:${W.part||'-'}`,`ノド印刷:${W.print||'-'}`,`位置:${W.loc||'-'}`].join(' / '));
-      }
-      return trunc(L.join('\n'));
-    }catch(e){ console.error('[nodo-fb] configText',e); return ''; }
-  }
-
-  /* ---- 実際に出力される白の一覧（指示一覧そのもの） ---- */
-  function rowsText(){
-    try{
-      const on=(ROWS||[]).filter(r=>r.on);
-      if(!on.length) return '(白の付加なし)';
-      const L=['file\tpdfPage\t辺\t内mm\tドブmm\toffset\t理由'];
-      on.forEach(r=>{
-        const f=fileById(r.fileId);
-        L.push([f?f.name:'-', r.filePage||r.partPage, r.side,
-                r.inner, r.outer, r.offset||0, r.why||''].join('\t'));
-      });
-      return trunc(L.join('\n'));
-    }catch(e){ console.error('[nodo-fb] rowsText',e); return ''; }
-  }
-
-  /* ---- プレビュー中の1面を縮小して添付（PDF本体は送らない） ---- */
-  function captureThumb(){
-    try{
-      const src=document.querySelector('#spread canvas');
-      if(!src||!src.width) return '';
-      const max=900, sc=Math.min(1, max/Math.max(src.width,src.height));
-      const c=document.createElement('canvas');
-      c.width=Math.max(1,Math.round(src.width*sc));
-      c.height=Math.max(1,Math.round(src.height*sc));
-      const ctx=c.getContext('2d');
-      ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
-      ctx.drawImage(src,0,0,c.width,c.height);
-      return c.toDataURL('image/jpeg',0.72);
-    }catch(e){ console.error('[nodo-fb] captureThumb',e); return ''; }
-  }
-
-  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる（v2026-09 返信機能）。
-     同じ場所から開いたツール同士なら、どれか1つで入れれば全部に引き継がれる。
-     旧版のツール別保存名（nodo-reporter）に名前が残っていれば引き継ぐ。 */
-  function kenpanWho(upd){
-    let r={name:"",email:""};
-    try{
-      const j=localStorage.getItem("kenpan-reporter");
-      if(j) r=Object.assign(r, JSON.parse(j)||{});
-      else r.name=localStorage.getItem("nodo-reporter")||"";
-    }catch(e){}
-    if(upd){ Object.assign(r,upd); try{ localStorage.setItem("kenpan-reporter", JSON.stringify(r)); }catch(e){} }
-    return r;
-  }
-  function reporterStore(get,val){ if(get) return kenpanWho().name||""; kenpanWho({name:val}); return ""; }
-  function emailStore(get,val){ if(get) return kenpanWho().email||""; kenpanWho({email:val}); return ""; }
-  const KENPAN_MAIL_RE=/^[^@\s]+@fujiwara-i\.com$/i;
-  function setVerdict(v){
-    fbVerdict=v;
-    document.querySelectorAll('#fbVerdict button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  }
-  function showNote(msg,ok){
-    const n=$('fbNote'); n.style.display='block';
-    n.className='fbnote'+(ok?' ok':''); n.innerHTML=msg;
-  }
-  function markUsed(){
-    try{ localStorage.setItem('nodo-fb-used','1'); }catch(e){}
-    $('fbOpen').classList.remove('invite');
-  }
-
-  function openModal(pre){
-    pre=pre||{};
-    $('fbCond').value=condText();
-    $('fbFileHint').textContent=FILES.length
-      ? `ファイル ${FILES.length} 件／白の付加 ${(ROWS||[]).filter(r=>r.on).length} 面`
-      : 'PDF未読込（判定タブのみの報告として送れます）';
-    $('fbPage').value=pre.page||'';
-    $('fbCategory').value=pre.category||'';
-    $('fbComment').value=pre.comment||'';
-    $('fbReporter').value=reporterStore(true); $('fbEmail').value = emailStore(true);
-    $('fbPeekBody').textContent=[configText(),'','［白の付加］',rowsText()].join('\n');
-    $('fbPeek').open=false;
-    $('fbNote').style.display='none';
-    $('fbSend').disabled=false; $('fbSend').textContent='送信する';
-    setVerdict(pre.verdict||'');
-    modal.classList.add('show');
-  }
-  function closeModal(){ modal.classList.remove('show'); }
-
-  async function postFeedback(payload){
-    await fetch(FEEDBACK_ENDPOINT,{method:'POST',mode:'no-cors',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
-  }
-  /* 診断情報（v5）。このツールは検出の正誤ではなく案件条件を集めるものなので、
-     「どこまで確定できているか」を数えて残す。未確定の継ぎ目が残っていれば、
-     出力が不完全なまま送られている可能性が高い。 */
-  function captureDiag(){
-    try{
-      const parts = (typeof PARTS !== 'undefined' && PARTS) ? PARTS : [];
-      const picks = PICKS || {};
-      const ids = Object.keys(picks);
-      const done = ids.filter(id => picks[id] && picks[id].done).length;
-      const withLayer = FILES.filter(f => f.info && f.info.hasLayer).length;
-      const spread = PLIST.filter(p => p.form === 'spread').length;
-      return JSON.stringify({
-        ran: FILES.length > 0 && PLIST.length > 0,
-        inputs: {
-          files: FILES.length, filesWithExistingLayer: withLayer,
-          parts: PLIST.length, spreadInputs: spread,
-          totalPages: CFG.pages, fold: CFG.fold,
-          bind: CFG.bind, dir: CFG.dir, defaultJoint: CFG.joint
-        },
-        params: { wizard: (W && W.bind) ? {
-          bind: W.bind, mika: W.mika, part: W.part, print: W.print, loc: W.loc } : null },
-        counts: { jointsPicked: ids.length, jointsConfirmed: done,
-                  jointsPending: ids.length - done },
-        note: (ids.length && done < ids.length)
-          ? '未確定の継ぎ目が残った状態で送信されている' : ''
-      });
-    }catch(e){ return JSON.stringify({ ran:null, note:'診断の収集に失敗: ' + e }); }
-  }
-
-  function basePayload(extra){
-    return Object.assign({
-      tool:FB_TOOL, verdict:'', category:'',
-      file:FILES.map(f=>f.name).join(' / '), page:'', comment:'',
-      reporter:reporterStore(true), email: emailStore(true), appVersion:FB_APP_VERSION, userAgent:navigator.userAgent,
-      ruleId:'', expected:'', actual:'', bbox:'', engine:'pdfjs', thumb:'',
-      /* このツール固有の自動添付（スプレッドシート側に列を足すと読める） */
-      cond:condText(), configText:'', rowsText:'', diag:''
-    }, extra||{});
-  }
-
-  async function send(){
-    if(!fbVerdict){ showNote('「結果はどうでしたか？」を選択してください。',false); return; }
-    const reporter = $('fbReporter').value.trim();
-    const email = $('fbEmail').value.trim().toLowerCase();
-    if(!reporter){ showNote("お名前を入れてください（対応のご連絡に使います）。", false); $('fbReporter').focus(); return; }
-    if(!KENPAN_MAIL_RE.test(email)){ showNote("メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。", false); $('fbEmail').focus(); return; }
-    reporterStore(false, reporter); emailStore(false, email);
-    const btn=$('fbSend'); btn.disabled=true; btn.textContent='画像を準備中…';
-    const extra={
-      verdict:fbVerdict,
-      category:$('fbCategory').value,
-      page:$('fbPage').value.trim(),
-      comment:$('fbComment').value.trim(),
-      reporter, email,
-      configText:configText(),
-      rowsText:rowsText(),
-      thumb:captureThumb(),
-      diag:captureDiag()
-    };
-    btn.textContent='送信中…';
-    try{
-      await postFeedback(basePayload(extra));
-      showNote('送信しました。ありがとうございます！',true);
-      $('fbComment').value=''; setVerdict(''); markUsed();
-      setTimeout(closeModal,1100);
-    }catch(err){
-      showNote('送信に失敗しました。ネットワークをご確認のうえ再度お試しください。',false);
-      btn.disabled=false; btn.textContent='送信する';
-    }
-  }
-
-  /* ---- 書き出し直後の軽い誘導 ---- */
-  const inl=$('fbInline');
-  function renderInline(state){
-    if(state==='thanks'){ inl.innerHTML='<span class="done">✓ ありがとうございます！</span>';
-      setTimeout(()=>inl.classList.remove('show'),1800); return; }
-    inl.innerHTML='<span class="q">白の位置は想定どおりでしたか？</span>'
-      +'<button id="fbInY">👍 問題なし</button>'
-      +'<button id="fbInN">👎 気になる点がある</button>'
-      +'<button class="x" id="fbInX">✕</button>';
-    $('fbInY').onclick=fbInlineGood;
-    $('fbInN').onclick=()=>{ inl.classList.remove('show'); openModal({verdict:'wrong'}); };
-    $('fbInX').onclick=()=>inl.classList.remove('show');
-  }
-  async function fbInlineGood(){
-    try{ await postFeedback(basePayload({verdict:'correct',configText:configText(),rowsText:rowsText(),diag:captureDiag()})); }catch(e){}
-    renderInline('thanks'); markUsed();
-  }
-  function fbAfterApply(){
-    renderInline(); inl.classList.add('show');
-    setTimeout(()=>{ if(inl.classList.contains('show')&&!inl.querySelector('.done')) inl.classList.remove('show'); },30000);
-    let used=false,hinted=false;
-    try{ used=!!localStorage.getItem('nodo-fb-used'); hinted=!!localStorage.getItem('nodo-fb-hint-seen'); }catch(e){}
-    if(!used){ const b=$('fbOpen'); b.classList.remove('invite'); void b.offsetWidth; b.classList.add('invite'); }
-    if(!hinted){
-      const h=$('fbHint'); h.style.display='block';
-      try{ localStorage.setItem('nodo-fb-hint-seen','1'); }catch(e){}
-      setTimeout(()=>{ h.style.display='none'; },8000);
-    }
-  }
-
-  $('fbOpen').addEventListener('click',()=>{ $('fbHint').style.display='none'; openModal(); });
-  $('fbCancel').addEventListener('click',closeModal);
-  modal.addEventListener('click',e=>{ if(e.target===modal) closeModal(); });
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&modal.classList.contains('show')) closeModal(); });
-  document.querySelectorAll('#fbVerdict button').forEach(b=>b.addEventListener('click',()=>setVerdict(b.dataset.v)));
-  $('fbSend').addEventListener('click',send);
-  $('fbHintX').addEventListener('click',()=>{ $('fbHint').style.display='none'; });
-
-  window.fbAfterApply=fbAfterApply;
-})();
-
-/* 作業中にハブへ戻ろうとしたら確認する（kenpan-nav.js が拾う） */
-window.KENPAN_HAS_WORK=function(){ return FILES.length>0; };
 </script>
-<script src="../assets/kenpan-nav.js"></script>
 </body>
 </html>
