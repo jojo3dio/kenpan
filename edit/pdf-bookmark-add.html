@@ -21,8 +21,8 @@
     --shu-dim:rgba(220,38,38,.09);
     --ok:#2e7d46;
     --ok-dim:rgba(46,125,70,.09);
-    --warn:#a87412;
-    --warn-dim:rgba(168,116,18,.10);
+    --warn:#b4235a;
+    --warn-dim:rgba(180,35,90,.08);
     --err:#c8362a;
     --err-dim:rgba(200,54,42,.09);
     --console:#211a16;
@@ -45,8 +45,8 @@
     --shu-dim:rgba(255,107,82,.14);
     --ok:#6fd08f;
     --ok-dim:rgba(111,208,143,.14);
-    --warn:#f0b658;
-    --warn-dim:rgba(240,182,88,.14);
+    --warn:#f472b6;
+    --warn-dim:rgba(244,114,182,.14);
     --err:#ff8a7a;
     --err-dim:rgba(255,138,122,.14);
     --console:#0d0a09;
@@ -124,15 +124,18 @@
   }
   .bm-alert .ba-close:hover{background:var(--warn-dim); color:var(--ink);}
   @keyframes bmAlertPulse{
-    0%,100%{box-shadow:0 0 0 0 rgba(168,116,18,0);}
+    0%,100%{box-shadow:0 0 0 0 transparent;}
     50%{box-shadow:0 0 0 5px var(--warn-dim);}
   }
   @media (prefers-reduced-motion:reduce){ .bm-alert{animation:none;} }
   /* 自動修正された行の目印 */
-  .bm-row.fixed{background:var(--warn-dim);}
-  .bm-row .bm-fixmark{
-    flex:none; width:14px; text-align:center; color:var(--warn);
-    font-size:11px; font-weight:700; line-height:1;
+  .bm-row.fixed{outline:1.5px dashed color-mix(in srgb, var(--warn) 70%, transparent); outline-offset:-3px;}
+  .bm-row .bm-fixmark{flex:none; width:0; overflow:hidden;}
+  .bm-row.fixed .bm-fixmark{
+    width:17px; height:17px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:var(--warn); color:#fff;
+    font-size:11px; font-weight:800; line-height:1; font-family:var(--sans);
   }
   .hdr-sp{flex:1;}
   .hdr-btn{
@@ -382,6 +385,17 @@
     transition:background .15s;
   }
   .bm-row.lv1{border-left-color:color-mix(in srgb, var(--shu) 45%, var(--line));}
+  /* 階層の見分け：上位ほど濃く（左帯の濃さ・背景の淡い塗り・文字の太さ） */
+  .bm-row[data-lv="0"]{background:color-mix(in srgb, var(--shu) 12%, var(--panel)); border-left-width:5px;}
+  .bm-row[data-lv="0"] .bm-title{font-weight:700; color:var(--ink);}
+  .bm-row[data-lv="1"]{background:color-mix(in srgb, var(--shu) 4%, var(--panel)); border-left-color:color-mix(in srgb, var(--shu) 55%, var(--line));}
+  .bm-row[data-lv="1"] .bm-title{font-weight:500; color:var(--ink);}
+  .bm-row[data-lv="2"]{background:var(--panel); border-left-color:color-mix(in srgb, var(--shu) 25%, var(--line));}
+  .bm-row[data-lv="3"]{background:var(--panel); border-left-color:var(--line);}
+  .bm-row[data-lv="2"] .bm-title, .bm-row[data-lv="3"] .bm-title{font-weight:400; color:var(--sub);}
+  .bm-row[data-lv]:hover{background:color-mix(in srgb, var(--shu) 5%, var(--panel));}
+  .bm-row[data-lv="0"]:hover{background:color-mix(in srgb, var(--shu) 12%, var(--panel));}
+  .bm-row[data-lv].sel{background:color-mix(in srgb, var(--shu) 18%, var(--panel));}
   .bm-row:last-child{border-bottom:none;}
   .bm-row:hover{background:var(--panel);}
   .bm-row .bm-handle{
@@ -455,7 +469,6 @@
     border-radius:7px;
     transition:border-color .15s, background .15s;
   }
-  .bm-row.lv1 .bm-title{font-weight:400;color:var(--sub);}
   .bm-row .bm-title:hover{border-color:var(--line);}
   .bm-row .bm-title:focus{outline:none;border-color:var(--shu);background:var(--panel);}
   /* ページラベル：長円の白い窓の中に数字/文字を入力（ノンブル上の見た目のラベルであることを明示） */
@@ -603,7 +616,7 @@
   #logBox::-webkit-scrollbar{width:10px;}
   #logBox::-webkit-scrollbar-thumb{background:#4a3e34;border-radius:99px;border:3px solid transparent;background-clip:content-box;}
   #logBox .ok{color:#7ee0a0;}
-  #logBox .warn{color:#f0b658;}
+  #logBox .warn{color:#f5a3c7;}
   #logBox .err{color:#ff8a7a;}
 
   /* ── 結果バー ── */
@@ -623,7 +636,7 @@
   }
   #resultBar.success{display:flex;background:var(--shu-dim);border-bottom-color:rgba(220,38,38,.25);color:var(--shu-deep);}
   #resultBar.success::before{content:"";background:var(--shu);box-shadow:0 0 8px var(--shu);}
-  #resultBar.failure{display:flex;background:var(--warn-dim);border-bottom-color:rgba(168,116,18,.25);color:var(--warn);}
+  #resultBar.failure{display:flex;background:var(--warn-dim);border-bottom-color:color-mix(in srgb, var(--warn) 25%, transparent);color:var(--warn);}
   #resultBar.failure::before{content:"";background:var(--warn);box-shadow:0 0 8px var(--warn);}
 
   footer-spacer{display:block;height:40px;}
@@ -1146,7 +1159,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.8";
+const APP_VERSION = "v1.9";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1228,7 +1241,7 @@ function showBmAlert(count, samples){
     `Windowsで「□」に化ける文字を ${count} 件見つけて自動修正しました。該当行をご確認ください`;
   const head = samples.slice(0, 3).join("／");
   $("bmAlertList").textContent =
-    `該当：${head}${samples.length > 3 ? ` ほか${samples.length - 3}件` : ""}（黄色く色が付いた行です）`;
+    `該当：${head}${samples.length > 3 ? ` ほか${samples.length - 3}件` : ""}（「!」印が付き、破線で囲まれた行です）`;
   box.classList.add("show");
 }
 function hideBmAlert(){
@@ -2954,6 +2967,7 @@ function renderBmList(focusIndex){
     const row = document.createElement("div");
     row.className = "bm-row" + (e.level > 0 ? " lv1" : "") + (selectedEntries.has(e) ? " sel" : "") + (e._fixed ? " fixed" : "");
     row.style.setProperty("--lv", e.level);
+    row.dataset.lv = String(Math.min(e.level || 0, 3));
 
     // 複数選択チェックボックス
     const check = document.createElement("input");
@@ -3124,7 +3138,7 @@ function renderBmList(focusIndex){
     const fixmark = document.createElement("span");
     fixmark.className = "bm-fixmark";
     if(e._fixed){
-      fixmark.textContent = "⚠";
+      fixmark.textContent = "!";
       fixmark.title = "Windowsで「□」化する文字を自動修正した行です。見出しをご確認ください";
     }
     row.append(check, handle, guide, btnOut, btnIn, fixmark, title, btnAdd, btnDel);
