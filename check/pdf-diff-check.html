@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.14　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.15　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -979,6 +979,7 @@ function boxPxForLogical(r, boxes, mode){
 // trim/bleedボックスがmedia(用紙)と実質同一＝トンボ情報が無い/信頼できない場合はtrue
 function boxIsTrivial(boxes){
   if(!boxes||!boxes.media) return true;
+  if(boxes.trimEqualsMedia) return false;   // v1.15：用紙＝仕上がり（断ち代なし）と相手PDFから確定済み
   const b=boxes.trim||boxes.bleed; if(!b) return true;
   const eps=1; // pt
   return (boxes.media.w-b.w)<=eps && (boxes.media.h-b.h)<=eps;
@@ -1173,7 +1174,16 @@ function inferBoxesFrom(rawBoxes, plan, fin){
     const w=fin.w*k, h=fin.h;
     if(!(w>0)||!(h>0)) return bx;
     if(w>M.w+1 || h>M.h+1) return bx;                     // 用紙に収まらない＝推定が破綻
-    if((M.w-w)<=1 && (M.h-h)<=1) return bx;               // 用紙＝仕上がり。推定しても同じ
+    // 用紙＝仕上がり（断ち代なしの仕上がりサイズ書き出し）。
+    // v1.14まではここで何もせず返していたため「Box情報なし」扱いのまま中央そろえに落ち、
+    // 相手が見開き＋トンボ付きだと半ページ内で仕上がりが背側に寄っている分（例：断ち代+トンボ13mm→6.5mm）
+    // 左右ページで逆向きに横ズレしていた（a.pdf 210×148単ページ × b.pdf 見開きトンボ付きで確認）。
+    // 用紙そのものを仕上がりとして確定させ、仕上がり基準の位置合わせに乗せる。
+    // ※断ち代3mm付き等で用紙が仕上がりより大きい場合は、下の「用紙中央に仕上がり」推定で対応済み。
+    if((M.w-w)<=1 && (M.h-h)<=1){
+      n++;
+      return Object.assign({}, bx, {trim:{x:M.x, y:M.y, w:M.w, h:M.h}, trimInferred:true, trimEqualsMedia:true});
+    }
     n++;
     return Object.assign({}, bx, {trim:{x:M.x+(M.w-w)/2, y:M.y+(M.h-h)/2, w, h}, trimInferred:true});
   });
@@ -3739,7 +3749,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.14";
+  const APP_VERSION = "v1.15";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
