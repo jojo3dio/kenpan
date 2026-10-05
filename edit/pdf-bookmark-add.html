@@ -1146,7 +1146,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.5";
+const APP_VERSION = "v1.8";
 
 // ───────────────────────────────────────────
 //  状態
@@ -2222,6 +2222,12 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
         if(!t) continue;
         // ページ番号がランに含まれたままの場合もあるため、前方一致（余剰6文字以内）も許す
         if(n === t || (n.startsWith(t) && n.length - t.length <= 6)) return i;
+        // 縦組みで2列に送られた見出しの前半・後半（「補論　日常の政治運営」「──将軍への…　二二七」）も
+        // その項目の行として扱う（小見出しと取り違えて子しおりを作らないため）
+        if(n.length >= 6){
+          const n2 = n.replace(/[0-9０-９〇一二三四五六七八九十百千]+$/, "");
+          if(t.startsWith(n) || (n2.length >= 6 && t.endsWith(n2))) return i;
+        }
         if(i > ptr + 40) break;   // 読み順から大きく離れた項目までは探さない
       }
       return -1;
@@ -2374,6 +2380,56 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
   return added;
 }
 
+// 目次にページ番号が載っていない部扉・章扉（_door 付きでラベル空の行）のページを本文から探す。
+// 探す範囲は前後の解決済み項目のあいだに限り、そのページの文字（ノンブルを除く）が
+// ほぼ見出しだけ（余分が10文字以内）であるページを扉とみなす。範囲内で最初に見つかったものを採る
+// （同じ部の柱は扉より後ろにしか出ないため）。見つからない行は従来どおり直後の項目のページを暫定で使う。
+async function locateDoorPages(list, pdfjsDoc, totalPages, resolveLabel, pageLabels){
+  const physOf = e => {
+    if(e.physFixed && typeof e.physIdx === "number") return e.physIdx;
+    if(!e.label || !e.label.trim()) return null;
+    const p = resolveLabel(e.label);
+    return (p === null || p === undefined) ? null : p;
+  };
+  const phys = list.map(physOf);
+  const stripMarker = t => t.replace(new RegExp(`^(?:第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*[部章編]|[\\u2160-\\u216B])[\\s\\u3000]*`), "");
+  let found = 0;
+  for(let i = 0; i < list.length; i++){
+    const e = list[i];
+    if(!e._door || (e.label && e.label.trim()) || phys[i] !== null) continue;
+    let lo = 0, loLabel = null, loPhys = null;
+    for(let j = i - 1; j >= 0; j--) if(phys[j] !== null){ lo = phys[j]; loLabel = list[j].label; loPhys = phys[j]; break; }
+    let hi = totalPages - 1;
+    for(let j = i + 1; j < list.length; j++) if(phys[j] !== null){ hi = phys[j]; break; }
+    if(hi < lo || hi - lo > 80) continue;
+    const keys = [normText(e.title)];
+    const k2 = normText(stripMarker(e.title));
+    if(k2 && k2.length >= 2 && k2 !== keys[0]) keys.push(k2);
+
+    let hit = null;
+    for(const key of keys){
+      if(!key) continue;
+      for(let p = lo; p <= hi && hit === null; p++){
+        const {runs} = await extractRuns(pdfjsDoc, p + 1);
+        const body = runs.filter(r => !NUM_ONLY_RE.test(r.text)).map(r => normText(r.text)).join("");
+        if(body.includes(key) && body.length - key.length <= 10) hit = p;
+      }
+      if(hit !== null) break;
+    }
+    if(hit === null){
+      log(`  ⚠ 「${e.title}」の扉ページが本文から見つかりませんでした（直後の項目のページを暫定で使います）`, "warn");
+      continue;
+    }
+    const label = labelForPhys(hit, loLabel, loPhys, resolveLabel, pageLabels);
+    if(label){ e.label = label; }
+    else { e.physIdx = hit; e.physFixed = true; }
+    phys[i] = hit;
+    found++;
+    log(`  扉ページを本文から特定：「${e.title}」→ ${label || ("PDF " + (hit + 1) + "ページ")}`);
+  }
+  return found;
+}
+
 // 目次項目が2行以上に折り返されている場合（1行目に見出しの前半だけがあり、ページ番号は2行目の末尾にある）、
 // ページ番号を持たない行を次のページ番号行の前に連結して1項目にまとめる。
 // 柱（ランニングヘッド）やノンブルを巻き込まないよう、次の条件をすべて満たす行だけを継続行とみなす：
@@ -2470,15 +2526,25 @@ async function findTocPages(pdfjsDoc, maxScan){
   const threshold = Math.max(2, Math.floor(best.hit * 0.4));
   const pages = [best.p];
   for(let i = idx - 1; i >= 0; i--){ if(scores[i].hit >= threshold) pages.unshift(scores[i].p); else break; }
-  for(let i = idx + 1; i < scores.length; i++){ if(scores[i].hit >= threshold) pages.push(scores[i].p); else break; }
+  // 目次の最終ページは「参考文献・補論」など数項目しか載らないことが多く、ヒット数だけでは足切りされる。
+  // 直前まで目次が続いていて、そのページの行の半分以上が「見出し＋ページ番号」なら目次の続きとみなす（1ページだけ）。
+  const isTocTail = s => s.hit >= 1 && s.hit * 2 >= s.total;
+  let tailTaken = false;
+  for(let i = idx + 1; i < scores.length; i++){
+    if(scores[i].hit >= threshold){ pages.push(scores[i].p); continue; }
+    if(isTocTail(scores[i])){ pages.push(scores[i].p); tailTaken = true; }
+    break;
+  }
 
   // 目次が走査範囲の末尾まで続いている場合、走査上限で切ってしまうと途中までしか読み込めない。
   // 続きがある限り走査範囲の外へ伸ばす（暴走しないよう上限を設ける）。
   const hardLimit = Math.min(totalPages, scanLimit + 40);
-  if(pages[pages.length - 1] === scanLimit){
+  if(!tailTaken && pages[pages.length - 1] === scanLimit){
     for(let p = scanLimit + 1; p <= hardLimit; p++){
       const s = await scoreTocPage(pdfjsDoc, p);
-      if(s.hit >= threshold) pages.push(p); else break;
+      if(s.hit >= threshold){ pages.push(p); continue; }
+      if(isTocTail(s)) pages.push(p);
+      break;
     }
   }
   return pages;
@@ -2520,6 +2586,21 @@ async function autoDetectToc(){
     const rawLines = [];
     // 折り返し行の連結はページ単位で行う（行間の基準はページごとに求める）
     for(const p of pages) rawLines.push(...mergeWrappedTocLines(await extractLines(pdfjsDoc, p)));
+
+    // 縦組みの目次では、長い見出しが「補論　日常の政治運営」「──将軍への謁見と…　二二七」のように
+    // 副題の頭（ダーシ）で次の列へ送られることがある（横組みの折り返し連結は縦組みでは働かない）。
+    // ページ番号のない行の直後が「──」で始まりページ番号を持つ行なら、1項目に連結する。
+    for(let i = 0; i + 1 < rawLines.length; i++){
+      const a = rawLines[i], b = rawLines[i + 1];
+      if(a.parsed || parseTocLine(a.text)) continue;
+      const bt = b.text.replace(/^[\s\u3000]+/, "");
+      if(!/^[\u2500\u2501\u2014\u2015]/.test(bt)) continue;
+      const at = a.text.replace(/[\s\u3000]+$/, "");
+      if(!looksLikeRealTitle(at.trim(), 60)) continue;
+      const r = parseTocLine(at + bt, 120);
+      if(!r) continue;
+      rawLines.splice(i, 2, {...b, x: a.x, y: a.y, text: at + bt, parsed: r});
+    }
 
     const parsed = [];
     let skipped = 0, wrapped = 0, noFolio = 0;
@@ -2577,9 +2658,24 @@ async function autoDetectToc(){
       }
       bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
+    // ページ番号のない部扉・章扉は、runBookmark で本文から扉ページを探す
+    parsed.forEach((e, i) => { if(!e.label && bmEntries[i]) bmEntries[i]._door = true; });
     hideBmAlert();
     sanitizeEntries(bmEntries);   // 目次ページから取り出したテキストは制御文字・互換漢字が混入しやすい
     normalizeLevels(bmEntries);
+    // 記号から階層が取れなかった目次では、漢数字の節番号（「一　江戸城小史」）を直前の章の1段下に置く
+    if(!markerLevels){
+      const secs = nestKanjiSections(bmEntries);
+      if(secs > 0){
+        normalizeLevels(bmEntries);
+        levelNote += `\n  階層：漢数字の節番号（一　二　…）の項目 ${secs} 件を、直前の章の1段下に置きました`;
+      }
+    }
+    const nested = nestUnderParts(bmEntries);
+    if(nested > 0){
+      normalizeLevels(bmEntries);
+      levelNote += `\n  階層：部見出し（Ⅰ／第○部 など）の配下 ${nested} 件を1段下げました`;
+    }
 
     // 小見出し（目次で「／」区切りで列挙される項目）を各項目に持たせておき、
     // 本文からの位置特定は runBookmark 内（ページラベルの解決が済んだあと）で行う
@@ -2605,7 +2701,7 @@ async function autoDetectToc(){
     if(wrapped > 0) log(`  （2行以上に折り返された項目を連結：${wrapped} 件）`);
     if(noFolio > 0){
       log(`  ⚠ 目次にページ番号が印字されていない見出しが ${noFolio} 件あります（部扉・章扉など）。`, "warn");
-      log("    該当行はページラベル欄が空・通し番号が「—」になっています。ラベルを入力すると通し番号が追随します。", "warn");
+      log("    本文から扉のページを探し、見つからなかった行だけページラベル欄が空のまま残ります（入力すると通し番号が追随します）。", "warn");
     }
     if(skipped > 0) log(`  （パターンに合わず読み飛ばした行：${skipped}）`);
     log(levelNote);
@@ -2637,7 +2733,9 @@ function markerRank(title){
   if(!t) return null;
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*部`).test(t)) return LV_RANK.bu;
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*章`).test(t)) return LV_RANK.sho;
-  if(/^(序章|終章|補章|序論|結論)/.test(t)) return LV_RANK.sho;
+  if(/^(序章|終章|補章|序論|結論|補論|付論)/.test(t)) return LV_RANK.sho;
+  // 「Ⅰ　儀式・政治空間」のように全角ローマ数字だけで部を立てる本（「第」「部」が付かない）
+  if(/^[\u2160-\u216B](?:[\s\u3000.．、]|$)/.test(t)) return LV_RANK.bu;
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*節`).test(t)) return LV_RANK.setsu;
   if(/^[\u2474-\u247F\u3220-\u3229]/.test(t)) return LV_RANK.paren;             // ⑴ ㈠
   if(/^[\u2460-\u2473]/.test(t)) return LV_RANK.circle;                          // ①
@@ -2674,6 +2772,55 @@ function levelsFromMarkers(entries){
     stack.push(r);
   });
   return levels;
+}
+
+// 漢数字の節番号（「一　江戸城小史」「一〇　国持大名の…」）で始まる項目を、直前の章（節番号の無い項目）の1段下に置く。
+// 縦組みの目次は行頭位置で階層が取れず、漢数字は地の文の書き出しとも紛れるため markerRank には入れず、
+// 記号から階層が取れなかった場合だけ使う。誤判定を避けるため、
+//   ・節番号の後ろに必ず空白（全角アキ／半角スペース）がある
+//   ・そうした項目が3件以上あり、「一」で始まる節が少なくとも1回ある
+// を条件にする。部見出し・後付の直後に来た節は親が無いので動かさない。戻り値は動かした件数。
+const KANJI_SECTION_RE = /^[〇一二三四五六七八九十]{1,4}[\s\u3000]/;
+function nestKanjiSections(entries){
+  const isSec = e => KANJI_SECTION_RE.test(e.title);
+  const secs = entries.filter(isSec);
+  if(secs.length < 3 || !secs.some(e => /^一[\s\u3000]/.test(e.title))) return 0;
+  let parent = null, moved = 0;
+  for(const e of entries){
+    if(!isSec(e)){
+      const rank = markerRank(e.title);
+      parent = (rank === LV_RANK.bu || BACK_MATTER_RE.test(normText(e.title))) ? null : e;
+      continue;
+    }
+    if(!parent) continue;
+    const lv = (parent.level || 0) + 1;
+    if((e.level || 0) < lv){ e.level = lv; moved++; }
+  }
+  return moved;
+}
+
+// 部見出し（第○部／Ⅰ　など）の配下を1段下げる。
+// 縦組みで記号が拾えずフラットになった目次や、部と章が同じインデントの横組み目次では、
+// 部と章が同じ段に並んでしまうため。範囲は「部の直後から、次の部・後付（むすび／あとがき／参考文献 等）の手前まで」。
+// すでに配下が部より深い段にある場合（記号から階層が取れた場合）は何もしない。戻り値は下げた件数。
+const BACK_MATTER_RE = /^(むすび|おわりに|終わりに|あとがき|後書|参考文献|引用文献|主要参考文献|文献|索引|補論|付論|終章|結論|結語|付録|附録|解説|年表|初出)/;
+function nestUnderParts(entries){
+  const isPart = e => markerRank(e.title) === LV_RANK.bu;
+  const isBack = e => BACK_MATTER_RE.test(normText(e.title));
+  let moved = 0;
+  for(let i = 0; i < entries.length; i++){
+    if(!isPart(entries[i])) continue;
+    const base = entries[i].level || 0;
+    let end = i + 1;
+    while(end < entries.length && !isPart(entries[end]) && !isBack(entries[end])) end++;
+    if(end === i + 1) continue;
+    const scope = entries.slice(i + 1, end);
+    const minLv = Math.min(...scope.map(e => e.level || 0));
+    const shift = base + 1 - minLv;
+    if(shift <= 0) continue;
+    for(const e of scope){ e.level = (e.level || 0) + shift; moved++; }
+  }
+  return moved;
 }
 
 // 階層の正規化：先頭は0、直前の行より2段以上深くならないようにする
@@ -3683,6 +3830,19 @@ async function runBookmark(opts){
         console.error(e);
       }
     }
+
+    // 目次にページ番号が無かった部扉・章扉のページを本文から探す
+    if(bmEntries.some(e => e._door && !(e.label || "").trim())){
+      try{
+        log("── 部扉・章扉のページを本文から検出中 ──");
+        const n = await locateDoorPages(bmEntries, pdfjsDoc, totalPages, resolveLabel, previewPageLabels);
+        if(n > 0) renderBmList();
+      }catch(e){
+        log(`  ⚠ 扉ページの検出に失敗しました：${e.message || e}`, "warn");
+        console.error(e);
+      }
+    }
+    for(const en of bmEntries) if(en._door) delete en._door;
 
     // 未解決ラベルの事前確認（該当行は赤くハイライトし、スキップして続行）
     // ラベルが空の行（目次にページ番号が無かった部扉・章扉）は「間違ったラベル」ではないので、
