@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.15　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.16　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -758,8 +758,52 @@ async function renderOne(doc, pageNum, scale){
   ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,cv.width,cv.height);   // 白背景でインクを比較
   await page.render({canvasContext:ctx, viewport:vp}).promise;
   const baseVp = page.getViewport({scale:1});
+  // v1.16：描画に使った命令列から配置画像の矩形を拾っておく（getImageRectsLogicalで再利用）。
+  // 以前はgetImageRectsLogicalが別途 page.getOperatorList() を呼んでおり、pdf.jsはこのとき
+  // ページ内の画像を「もう一度」展開する。高解像度CMYK写真のPDF（b.pdf：4000×3000px×7点）では
+  // これだけで全体の約3割（11ページ走査で7秒）を占めていた。
+  try{ cacheImageRectsFromRender(doc, pageNum, page); }catch(e){}
   return {cv,ctx,w:cv.width,h:cv.height,ptW:baseVp.width,ptH:baseVp.height, view:page.view.slice()};
 }
+/* ---- v1.16 高速化：画像矩形と見開き描画のキャッシュ ---- */
+// doc -> Map(物理ページ番号 -> 画像矩形[scale=1のpx])。PDFを読み直せばdocが変わるので自動的に無効。
+const imgRectCache=new WeakMap();
+// 命令列(ops)をCTM追跡して配置画像の矩形を返す（vpTransform基準のpx）
+function imageRectsFromOps(ops, vpTransform){
+  const OPS=pdfjsLib.OPS, AT=pdfjsLib.Util.applyTransform, MT=pdfjsLib.Util.transform;
+  let ctm=vpTransform.slice(); const st=[]; const rects=[];
+  for(let i=0;i<ops.fnArray.length;i++){ const fn=ops.fnArray[i], ar=ops.argsArray[i];
+    if(fn===OPS.save) st.push(ctm.slice());
+    else if(fn===OPS.restore){ if(st.length) ctm=st.pop(); }
+    else if(fn===OPS.transform) ctm=MT(ctm, ar);
+    else if(fn===OPS.paintFormXObjectBegin){ st.push(ctm.slice()); if(ar&&ar[0]) ctm=MT(ctm, ar[0]); }
+    else if(fn===OPS.paintFormXObjectEnd){ if(st.length) ctm=st.pop(); }
+    else if(fn===OPS.paintImageXObject||fn===OPS.paintInlineImageXObject||fn===OPS.paintImageMaskXObject||fn===OPS.paintJpegXObject){
+      const c=[[0,0],[1,0],[1,1],[0,1]].map(pt=>AT(pt,ctm));
+      const xs=c.map(q=>q[0]), ys=c.map(q=>q[1]);
+      const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+      rects.push({x:x0,y:y0,w:x1-x0,h:y1-y0});
+    }
+  }
+  return rects;
+}
+// 描画直後のページから、pdf.jsが描画に使った命令列（内部の_intentStates）を読む。
+// pdf.js 3.11.174固定の内部構造に依存するため、取れなければ何もしない（従来のgetOperatorListに戻る）。
+function cacheImageRectsFromRender(doc, pageNum, page){
+  let m=imgRectCache.get(doc); if(m && m.has(pageNum)) return;
+  const states=page._intentStates; if(!states || typeof states.values!=="function") return;
+  let ops=null;
+  for(const st of states.values()){
+    const ol=st && st.operatorList;
+    if(ol && ol.lastChunk && ol.fnArray && ol.fnArray.length){ ops=ol; break; }
+  }
+  if(!ops) return;
+  const rects=imageRectsFromOps(ops, page.getViewport({scale:1}).transform);
+  if(!m){ m=new Map(); imgRectCache.set(doc, m); }
+  m.set(pageNum, rects);
+}
+// 見開きの全面描画を直近1枚だけ持つ（左右の半ページで描画を共有＝見開き1面の描画・画像展開を1回に）
+const spreadRenderCache=new WeakMap();   // doc -> {key, full}
 
 /* ============ ボックス読み取り（pdf-lib）と起点合わせ ============ */
 // 物理ページごとに {media,crop,trim,bleed}（PDF pt, 原点左下）を返す
@@ -1516,7 +1560,13 @@ async function renderLogical(doc, plan, logical, scale){
   if(!doc || !plan) return null;
   const m=plan[logical-1];
   if(!m || m.src<1 || m.src>doc.numPages) return null;
-  const full=await renderOne(doc, m.src, scale);
+  let full;
+  if(m.crop){
+    // 見開きは左右の半ページで同じ全面描画を使い回す（全面キャンバスは半分を切り出すだけで書き換えない）
+    const key=`${m.src}|${scale}`, c=spreadRenderCache.get(doc);
+    if(c && c.key===key) full=c.full;
+    else { full=await renderOne(doc, m.src, scale); if(full) spreadRenderCache.set(doc,{key,full}); }
+  } else full=await renderOne(doc, m.src, scale);
   if(!full) return null;
   if(!m.crop){ full.crop=null; full.sx=0; full.fullW=full.w; return full; }
   const halfW=Math.floor(full.w/2);
@@ -1545,22 +1595,17 @@ async function getTextItemsLogical(doc, plan, logical, scale){
 async function getImageRectsLogical(doc, plan, logical, scale){
   const m=plan?plan[logical-1]:null; if(!doc||!m||m.src<1||m.src>doc.numPages) return [];
   try{
-    const page=await doc.getPage(m.src); const vp=page.getViewport({scale}); const ops=await page.getOperatorList();
-    const OPS=pdfjsLib.OPS, AT=pdfjsLib.Util.applyTransform, MT=pdfjsLib.Util.transform;
-    let ctm=vp.transform.slice(); const st=[]; const rects=[];
-    for(let i=0;i<ops.fnArray.length;i++){ const fn=ops.fnArray[i], ar=ops.argsArray[i];
-      if(fn===OPS.save) st.push(ctm.slice());
-      else if(fn===OPS.restore){ if(st.length) ctm=st.pop(); }
-      else if(fn===OPS.transform) ctm=MT(ctm, ar);
-      else if(fn===OPS.paintFormXObjectBegin){ st.push(ctm.slice()); if(ar&&ar[0]) ctm=MT(ctm, ar[0]); }
-      else if(fn===OPS.paintFormXObjectEnd){ if(st.length) ctm=st.pop(); }
-      else if(fn===OPS.paintImageXObject||fn===OPS.paintInlineImageXObject||fn===OPS.paintImageMaskXObject||fn===OPS.paintJpegXObject){
-        const c=[[0,0],[1,0],[1,1],[0,1]].map(pt=>AT(pt,ctm));
-        const xs=c.map(q=>q[0]), ys=c.map(q=>q[1]);
-        const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
-        if((x1-x0)>4&&(y1-y0)>4) rects.push({x:x0,y:y0,w:x1-x0,h:y1-y0});
-      }
+    const page=await doc.getPage(m.src); const vp=page.getViewport({scale});
+    let rects;
+    const cached=imgRectCache.get(doc);
+    if(cached && cached.has(m.src)){
+      // 描画時に拾った矩形（scale=1）を拡大するだけ。ビューポート変換はscaleに比例するのでそのまま掛ければ一致。
+      rects=cached.get(m.src).map(r=>({x:r.x*scale,y:r.y*scale,w:r.w*scale,h:r.h*scale}));
+    } else {
+      const ops=await page.getOperatorList();
+      rects=imageRectsFromOps(ops, vp.transform);
     }
+    rects=rects.filter(r=>r.w>4&&r.h>4);
     if(!m.crop) return rects;
     const fullW=Math.round(vp.width); const halfW=Math.floor(fullW/2); const sx=(m.crop==='L')?0:(fullW-halfW);
     return rects.filter(r=> (r.x+r.w/2)>=sx && (r.x+r.w/2)<sx+halfW).map(r=>({x:r.x-sx,y:r.y,w:r.w,h:r.h}));
@@ -3749,7 +3794,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.15";
+  const APP_VERSION = "v1.16";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
