@@ -1293,6 +1293,14 @@ function buildWarnings(tl,dims,tb,tolPt){
       W.push(mid+'が左右非対称です（'+(a*PT2MM).toFixed(2)+'mm / '+(b*PT2MM).toFixed(2)
              +'mm）。見開きではなく、角トンボの内外誤判定の可能性があります。');
   }
+  // 背の中にまとめたセンタートンボが、背の中央からずれていないか
+  for(const d of hs){
+    if(d.centerOffPt===undefined) continue;
+    const off=Math.abs(d.centerOffPt)*PT2MM;
+    if(off>0.2)
+      W.push('センタートンボが背の中央から'+(d.centerOffPt>0?'右':'左')+'へ'+off.toFixed(2)
+             +'mmずれています（'+d.label.replace('（センター含む）','')+'）。');
+  }
   return W;
 }
 
@@ -1373,12 +1381,36 @@ function computeDims(tl,pgW,pgH,ignoreCenterOpt){
   const rowOffset=18;
   const yPos=aboveBase-rowOffset;
 
-  for(let i=0;i<xptsU.length-1;i++){
-    const a=xptsU[i],b=xptsU[i+1];
-    dims.push({type:'H',x1:a.x,x2:b.x,
+  // 背の中央に入ったセンタートンボで背幅が2つに割れないよう、区切り点から外す。
+  // 外すのは「センターの両隣が実在する境界で、その間（背）が左右の面より十分狭い」ときだけ。
+  // 見開きの折り位置にあるセンター（両隣が角）や、蛇腹の中央折りは従来どおり区切りに残す。
+  const segPts=xptsU.slice();
+  const viaCenter=new Map(); // 統合した区間の左端インデックス → センターのx
+  for(let i=1;i<segPts.length-1;i++){
+    if(segPts[i].lbl!=='センター') continue;
+    if(i<2||i>segPts.length-3) continue;      // 両隣とも内側の境界であること
+    const a=segPts[i-1], b=segPts[i+1];
+    const span=b.x-a.x;
+    let maxL=0, maxR=0;
+    for(let k=0;k<i-1;k++) maxL=Math.max(maxL,segPts[k+1].x-segPts[k].x);
+    for(let k=i+1;k<segPts.length-1;k++) maxR=Math.max(maxR,segPts[k+1].x-segPts[k].x);
+    if(!(span<0.6*Math.min(maxL,maxR))) continue;
+    viaCenter.set(a, segPts[i].x);
+    segPts.splice(i,1); i--;
+  }
+  for(let i=0;i<segPts.length-1;i++){
+    const a=segPts[i],b=segPts[i+1];
+    const d={type:'H',x1:a.x,x2:b.x,
       y:yPos, _yRef:aboveBase,
       label:a.lbl+' → '+b.lbl, distPt:b.x-a.x,
-      color:HC[i%HC.length], visible:true, row:i});
+      color:HC[i%HC.length], visible:true, row:i};
+    if(viaCenter.has(a)){
+      const cx=viaCenter.get(a);
+      d.centerX=cx;
+      d.centerOffPt=cx-(a.x+b.x)/2;   // +なら右寄り
+      d.label+='（センター含む）';
+    }
+    dims.push(d);
   }
   if(xptsU.length>2){
     const first=xptsU[0], last=xptsU[xptsU.length-1];
@@ -1539,6 +1571,12 @@ function drawDim(ctx,d,sc,act){
       ctx.restore();
     }
     ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();
+    if(d.centerX!==undefined){ // 背の中のセンター位置を小さな目印で示す
+      const xc=d.centerX*sc;
+      ctx.save(); ctx.lineWidth=1; ctx.setLineDash([2,2]); ctx.globalAlpha*=0.7;
+      ctx.beginPath();ctx.moveTo(xc,y-Ts*0.8);ctx.lineTo(xc,y+Ts*0.8);ctx.stroke();
+      ctx.restore();
+    }
     ctx.beginPath();ctx.moveTo(x1,y-Ts);ctx.lineTo(x1,y+Ts);ctx.stroke();
     ctx.beginPath();ctx.moveTo(x2,y-Ts);ctx.lineTo(x2,y+Ts);ctx.stroke();
     ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x1+ARs,y-ARs*.35);ctx.lineTo(x1+ARs,y+ARs*.35);ctx.closePath();ctx.fill();
