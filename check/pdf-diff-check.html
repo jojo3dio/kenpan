@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.16　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.17　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -541,6 +541,12 @@
           <option value="hi">高感度（塗り・文字色も）</option>
           <option value="off">オフ</option>
         </select>
+        <span class="glabel" title="自動＝片方がグレー（出力見本など）で片方がカラー（特色・色変換後の下版など）のときだけ、色を無視して濃淡で比較します">色の扱い</span>
+        <select class="sel" id="inkMode" title="グレー見本とカラー下版の比較など、色の違いを差分にしたくないとき">
+          <option value="auto" selected>自動</option>
+          <option value="color">色も比較</option>
+          <option value="density">濃淡のみ（色を無視）</option>
+        </select>
         <span class="glabel" title="同じ文字でも線の太さ（フォントのウエイト）が変わった箇所を、行ごとのインク量で検出します">太さ変化</span>
         <select class="sel" id="weightDetect" title="文字の太さ（ウエイト）変化の検出">
           <option value="on">オン</option>
@@ -627,7 +633,7 @@ const S = {
   docA:null, docB:null, nameA:"", nameB:"",
   page:1, dpi:300, scale:300/72,
   offX:0, offY:0,                       // BをAに対してずらす量(px, 現在のscale基準)
-  thresh:38, noise:3, edgeTol:1, colorDetect:"on", weightDetect:false, mode:"diff", onionOp:0.5, expDpi:100,
+  thresh:38, noise:3, edgeTol:1, colorDetect:"on", inkMode:"auto", inkActive:false, inkToastShown:false, weightDetect:false, mode:"diff", onionOp:0.5, expDpi:100,
   // ページ単位のレンダリング結果
   aCv:null, bCv:null, aData:null, bData:null, aW:0,aH:0,bW:0,bH:0,
   aPtW:0,aPtH:0,bPtW:0,bPtH:0,
@@ -708,6 +714,7 @@ async function loadPdf(file, side){
       $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
+    S.inkToastShown=false;                              // v1.17 新しいPDFでは「濃淡で比較」を改めて知らせる
     clearSigCache();                                    // 別のPDFに差し替わったので指紋を破棄
     await autoDetectSpreads();   // 見開きを先に自動判別（誤って「ノンブル自動」に倒さないため）
     await rebuildPlans();
@@ -859,10 +866,15 @@ function detectTomboRect(imgData, W, H, dpi){
     const i=(y*W+x)*4;
     return (data[i]+data[i+1]+data[i+2])/3 < 150;
   };
-  const win = Math.round(70/25.4*dpi);
   const minLen = Math.round(2.5/25.4*dpi);
   const maxThick = 4;
-  if(win*2>=W || win*2>=H) return null;   // ページが小さすぎて窓が確保できない
+  // v1.17：探す範囲（X0..X1, Y0..Y1）を引数化。まず用紙の四隅で探し、だめなら
+  // 「インクのある範囲（＝いちばん外側のトンボ）」の四隅で探し直す（下の本体で実行）。
+  // ・帯は天地が約110mmしかなく、従来の「70mm窓×2が用紙に入らなければ諦める」で必ず失敗していた。
+  //   窓は範囲の半分までに縮める。
+  // ・Illustratorの出力見本はアートボードが帯より大きく（上に約140mmの余白）、トンボが用紙端から
+  //   遠いため「用紙端から伸びる線」の条件で全部落ちていた。
+  let X0=0, Y0=0, X1=W, Y1=H, win=0;
   function rowMostlyDark(x0,x1,y){
     let cnt=0; const total=x1-x0; if(total<=0) return false;
     for(let x=x0;x<x1;x++) if(isDark(x,y)) cnt++;
@@ -940,9 +952,9 @@ function detectTomboRect(imgData, W, H, dpi){
     let sx=0,sy=0; for(const c of cands){ sx+=c[0]; sy+=c[1]; }
     return [sx/cands.length, sy/cands.length];
   }
-  const cornersDef = {
-    TL:[0,win,0,win], TR:[0,win,W-win,W], BL:[H-win,H,0,win], BR:[H-win,H,W-win,W]
-  };
+  const cornersDefOf = ()=>({
+    TL:[Y0,Y0+win,X0,X0+win], TR:[Y0,Y0+win,X1-win,X1], BL:[Y1-win,Y1,X0,X0+win], BR:[Y1-win,Y1,X1-win,X1]
+  });
   // v1.14：トンボの線は「用紙の端から内側へ短く伸びる細線」。この条件で絞ってから
   // 各軸でいちばん内側の線を仕上がり線とする（日本式の二重トンボは外側=塗り足し線・内側=仕上がり線）。
   // 以前は窓内の交点候補を全部平均していたため、仕上がり線と塗り足し線の中間（約1.5mm外側）を
@@ -952,8 +964,8 @@ function detectTomboRect(imgData, W, H, dpi){
   const edgeTol=Math.round(5/25.4*dpi), maxMarkLen=Math.round(25/25.4*dpi);
   function edgeCorner(key,hlines,vlines){
     const L=key[1]==="L", T=key[0]==="T";
-    const hs=hlines.filter(([y,a,b])=>(b-a)<=maxMarkLen && (L? a<=edgeTol : b>=W-1-edgeTol));
-    const vs=vlines.filter(([x,a,b])=>(b-a)<=maxMarkLen && (T? a<=edgeTol : b>=H-1-edgeTol));
+    const hs=hlines.filter(([y,a,b])=>(b-a)<=maxMarkLen && (L? a<=X0+edgeTol : b>=X1-1-edgeTol));
+    const vs=vlines.filter(([x,a,b])=>(b-a)<=maxMarkLen && (T? a<=Y0+edgeTol : b>=Y1-1-edgeTol));
     if(!hs.length||!vs.length) return null;
     // トンボはL字の組み合わせ：縦線のxには、端から伸びた横線の内側の端が来ている（逆も同じ）。
     // 用紙端近くの見出し文字の縦画など、単独の短い線はこれで除外される。
@@ -968,14 +980,35 @@ function detectTomboRect(imgData, W, H, dpi){
     const cx=L? Math.max(...xs) : Math.min(...xs);
     return [cx+0.5, cy+0.5];     // 画素の中心
   }
-  const pts={};
-  for(const key in cornersDef){
-    const [y0,y1,x0,x1]=cornersDef[key];
-    const {hlines,vlines}=findLines(y0,y1,x0,x1);
-    pts[key]=edgeCorner(key,hlines,vlines) || cornerPoint(hlines,vlines,6);
+  function detectIn(x0,y0,x1,y1){
+    X0=x0; Y0=y0; X1=x1; Y1=y1;
+    win=Math.min(Math.round(70/25.4*dpi), Math.floor(Math.min(X1-X0, Y1-Y0)/2));
+    if(win < Math.round(12/25.4*dpi)) return null;          // 範囲が小さすぎる
+    const defs=cornersDefOf(), pts={};
+    for(const key in defs){
+      const [y0,y1,x0,x1]=defs[key];
+      const {hlines,vlines}=findLines(y0,y1,x0,x1);
+      pts[key]=edgeCorner(key,hlines,vlines) || cornerPoint(hlines,vlines,6);
+    }
+    return Object.values(pts).filter(Boolean).length>=3 ? pts : null;   // 3隅未満は信頼できない
   }
-  const foundN=Object.values(pts).filter(Boolean).length;
-  if(foundN<3) return null;   // 4隅のうち3隅未満しか見つからなければ信頼できない
+  // インクのある範囲（白以外の画素の外接矩形）。間引かずに数える（端の細線を落とさないため）
+  function inkBounds(){
+    let x0=W, y0=H, x1=-1, y1=-1;
+    for(let y=0;y<H;y++){ const row=y*W*4;
+      for(let x=0;x<W;x++){ const i=row+x*4;
+        if(data[i]<235||data[i+1]<235||data[i+2]<235){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+      }
+    }
+    return x1<0 ? null : [x0,y0,x1+1,y1+1];
+  }
+  let pts=detectIn(0,0,W,H);
+  if(!pts){
+    const ib=inkBounds();
+    const edgeGap=Math.round(5/25.4*dpi);
+    if(ib && (ib[0]>edgeGap||ib[1]>edgeGap||W-ib[2]>edgeGap||H-ib[3]>edgeGap)) pts=detectIn(ib[0],ib[1],ib[2],ib[3]);
+  }
+  if(!pts) return null;
   const avg=arr=>arr.length? arr.reduce((a,b)=>a+b,0)/arr.length : null;
   const left = avg([pts.TL,pts.BL].filter(Boolean).map(p=>p[0]));
   const right= avg([pts.TR,pts.BR].filter(Boolean).map(p=>p[0]));
@@ -1165,10 +1198,20 @@ async function autoDetectSpreads(){
   let sa=await detectSpreadDoc(S.docA);
   let sb=await detectSpreadDoc(S.docB);
   // 全ページ均一形状で混在検出できないとき、両PDFを突き合わせ「相手より約2倍横長」を見開きとみなす
+  // v1.17：横長というだけでは割らない。帯・カバー（1ページ同士）で、入稿側がIllustratorの
+  // 大きめのアートボード（上下に余白）・下版側が帯の形にぴったり、という組み合わせのとき、
+  // 縦横比が2.4倍違うだけで下版を見開き扱いにして2ページに割り、Aの1ページと対応が取れず
+  // 「差分ありは0ページ」と素通りしていた（実データ 福翁百話 帯）。割るのは
+  //  ・割るとページ数がそろう（Aの論理ページ数≒Bの2倍）か
+  //  ・割った半ページの縦横比が相手とほぼ同じ（±12%）
+  // のどちらかを満たすときだけ。
   if(S.docA && S.docB && !sa && !sb){
     const ra=await docAspect(S.docA), rb=await docAspect(S.docB);
-    if(ra>rb*1.6 && ra>1.25) sa=true;
-    else if(rb>ra*1.6 && rb>1.25) sb=true;
+    const na=S.docA.numPages, nb=S.docB.numPages;
+    const near=(x,y)=>Math.abs(x/y-1)<=0.12;
+    const fits=(nSpread,nOther,rSpread,rOther)=> (Math.abs(nSpread*2-nOther)<=2 && nOther>nSpread) || near(rSpread/2,rOther);
+    if(ra>rb*1.6 && ra>1.25 && fits(na,nb,ra,rb)) sa=true;
+    else if(rb>ra*1.6 && rb>1.25 && fits(nb,na,rb,ra)) sb=true;
   }
   const changed = (sa!==S.spreadA)||(sb!==S.spreadB);
   S.spreadA=sa; S.spreadB=sb;
@@ -1626,9 +1669,10 @@ async function refreshPage(suggestCenter){
     S.aPtW=a?a.ptW:0; S.aPtH=a?a.ptH:0; S.bPtW=b?b.ptW:0; S.bPtH=b?b.ptH:0;
     S.aData = a? a.ctx.getImageData(0,0,a.w,a.h):null;
     S.bData = b? b.ctx.getImageData(0,0,b.w,b.h):null;
+    applyInkMode();
     S.aText = await getTextItemsLogical(S.docA, S.planA, S.aLogical, S.scale);
     S.bText = await getTextItemsLogical(S.docB, S.planB, S.bLogical, S.scale);
-    S.bImgRects = (S.colorDetect!=="off" && S.docB) ? await getImageRectsLogical(S.docB, S.planB, S.bLogical, S.scale) : [];
+    S.bImgRects = ((S.colorDetect!=="off"||S.inkActive) && S.docB) ? await getImageRectsLogical(S.docB, S.planB, S.bLogical, S.scale) : [];
     // 文書全体テキスト（reflow相殺用）を一度だけ構築。単ページ表示でも参考文献等の流れ込み誤検出を防ぐ。
     if(S.docA && S.docB) await ensureGlobalText();
 
@@ -1652,10 +1696,124 @@ async function refreshPage(suggestCenter){
     }
     if(tomboRect){ S.alignedByBox=true; S.aTrimPx=tomboRect; S.aBleedPx=null; }
     else setCompareRects(a, aligned);
+    fitInkLut();
     computeDiff(); buildContent(); fitView(); draw(); updatePanel(); updatePageLabel();
     if(S.docA && S.docB && window.fbAfterResults) window.fbAfterResults();
   }catch(err){ console.error(err); toast("レンダリングに失敗しました"); }
   finally{ showBusy(false); }
+}
+
+/* ---- v1.17 色の扱い（濃淡のみで比較） ----
+   背景（実データ 福翁百話 帯）：出力見本はグレー1色、下版は墨＋特色（DIC526）。特色ベタが
+   見本では約65%グレー、写真も特色の網に置き換わっており、色も濃さも違うため写真・見出しが
+   全部「差分」になって本当の差（文字の欠け等）が埋もれていた。
+   「濃淡のみ」では
+    1) A・Bとも明るさ(輝度)のグレーに置き換える（色味を捨てる）
+    2) 位置合わせ後、重なり部分の画素から「Aの明るさ→Bの明るさ」の対応表（トーンカーブ）を
+       作ってAに当てる（Aの明るさごとのBの中央値。暗いほど暗い、の単調性を保証）
+   墨→墨はそのまま、特色の置き換え分（グレー65%→特色ベタ 等）だけが吸収される。中央値なので
+   文字の有無など局所的な違いはカーブに影響せず、差分としてそのまま残る。
+   自動：片方がほぼ無彩色（グレー見本）で、もう片方に色がある場合だけ濃淡のみにする。 */
+function chromaFrac(img){
+  if(!img) return 0; const d=img.data; let ink=0, col=0;
+  for(let i=0;i<d.length;i+=4*7){                 // 7画素おきの間引きで十分
+    const r=d[i],g=d[i+1],b=d[i+2]; const mn=Math.min(r,g,b);
+    if(mn>=230) continue; ink++;
+    if(Math.max(r,g,b)-mn>30) col++;
+  }
+  return ink? col/ink : 0;
+}
+function toLumGray(img){
+  const d=img.data;
+  for(let i=0;i<d.length;i+=4){ const l=Math.round(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114); d[i]=d[i+1]=d[i+2]=l; }
+}
+// 1) 判定とグレー化（位置合わせ前に呼ぶ）
+function applyInkMode(){
+  S.inkActive=false; S.inkLut=null;
+  if(!S.aData||!S.bData) return;
+  let on = S.inkMode==="density";
+  if(S.inkMode==="auto"){
+    const fa=chromaFrac(S.aData), fb=chromaFrac(S.bData);
+    on = (fa<0.01 && fb>0.05) || (fb<0.01 && fa>0.05);
+  }
+  if(!on) return;
+  toLumGray(S.aData); toLumGray(S.bData);
+  S.inkActive=true;
+  if(S.inkMode==="auto" && !S.inkToastShown){
+    S.inkToastShown=true;
+    toast("片方がグレー・片方がカラーのため、色を無視して濃淡で比較します（詳細設定「色の扱い」で変更可）","ok");
+  }
+}
+// 暗部をつぶす（L≦48は0、48〜96は0〜96へ連続につなぐ）
+function shadowFold(d){
+  for(let i=0;i<d.length;i+=4){ const v=d[i]; if(v>=96) continue; const w=v<=48?0:(v-48)*2; d[i]=d[i+1]=d[i+2]=w; }
+}
+// 2) トーンカーブ合わせ（位置合わせ後・computeDiffの前に呼ぶ）。Aの画素を書き換える。
+//    カーブは「配置画像の外（文字・罫・ベタ）」で1本、「配置画像ごと」に1本ずつ作る。
+//    同じグレーでも、文字（墨→墨）と写真（グレー→特色の網）では行き先が違うため1本では合わない
+//    （実データ：見本の写真の暗部L≈27は下版で特色ベタL≈128、見本の墨文字L≈27は下版でも墨）。
+function fitInkLut(){
+  if(!S.inkActive||!S.aData||!S.bData) return;
+  const ox=S.offX|0, oy=S.offY|0;                  // B(x,y) は A(x+ox, y+oy) に重なる
+  const aw=S.aW, ah=S.aH, bw=S.bW, bh=S.bH;
+  const X0=Math.max(0,ox), Y0=Math.max(0,oy), X1=Math.min(aw,ox+bw), Y1=Math.min(ah,oy+bh);
+  if(X1-X0<10||Y1-Y0<10) return;
+  const aD=S.aData.data, bD=S.bData.data;
+  const orig=new Uint8Array(aw*ah); for(let i=0,j=0;j<orig.length;i+=4,j++) orig[j]=aD[i];
+  // 配置画像の矩形（A座標）。同じ位置の重複（画像＋マスク）はまとめる。小さすぎるもの（約5mm角未満）は除外
+  const minSide=Math.round(5/25.4*S.dpi);
+  const rects=[];
+  for(const r of (S.bImgRects||[])){
+    const q={x0:Math.max(X0,Math.floor(r.x+ox)), y0:Math.max(Y0,Math.floor(r.y+oy)), x1:Math.min(X1,Math.ceil(r.x+r.w+ox)), y1:Math.min(Y1,Math.ceil(r.y+r.h+oy))};
+    if(q.x1-q.x0<minSide||q.y1-q.y0<minSide) continue;
+    if(rects.some(t=>Math.abs(t.x0-q.x0)<4&&Math.abs(t.y0-q.y0)<4&&Math.abs(t.x1-q.x1)<4&&Math.abs(t.y1-q.y1)<4)) continue;
+    rects.push(q);
+  }
+  const inRects=(x,y)=>{ for(const t of rects) if(x>=t.x0&&x<t.x1&&y>=t.y0&&y<t.y1) return true; return false; };
+  function fit(x0,y0,x1,y1,skip){
+    const joint=new Uint32Array(65536), cnt=new Float64Array(256);
+    for(let y=y0;y<y1;y+=2){ const ar=y*aw, br=(y-oy)*bw;
+      for(let x=x0;x<x1;x+=2){
+        if(skip && skip(x,y)) continue;
+        const la=orig[ar+x], lb=bD[(br+x-ox)<<2];
+        joint[(la<<8)|lb]++; cnt[la]++;
+      }
+    }
+    const med=new Float64Array(256), have=new Uint8Array(256);
+    for(let a=0;a<256;a++){
+      if(cnt[a]<20) continue;
+      const half=cnt[a]/2; let acc=0;
+      for(let b=0;b<256;b++){ acc+=joint[(a<<8)|b]; if(acc>=half){ med[a]=b; break; } }
+      have[a]=1;
+    }
+    med[255]=255; have[255]=1; cnt[255]=Math.max(cnt[255],1);   // 紙白は紙白
+    // 単調化（明るいほど明るい）は画素数で重み付けした「隣接違反の併合（PAVA）」で行う。
+    // 単純に最小値を下へ伝えると、ごく少数の画素（見本では銅像の白フチ・下版では文字＝黒）
+    // の1階調だけで、その下の全階調が黒に引きずられ、写真全体が誤検出になっていた。
+    const blk=[];
+    for(let a=0;a<256;a++){ if(!have[a]) continue;
+      blk.push({s:med[a]*cnt[a], w:cnt[a], idx:[a]});
+      while(blk.length>1){ const q=blk[blk.length-1], r=blk[blk.length-2];
+        if(r.s/r.w <= q.s/q.w) break;
+        r.s+=q.s; r.w+=q.w; r.idx=r.idx.concat(q.idx); blk.pop(); }
+    }
+    for(const b of blk){ const v=b.s/b.w; for(const a of b.idx) med[a]=v; }
+    const lut=new Uint8Array(256); let prev=-1;     // 足りない階調は線形補間
+    for(let a=0;a<256;a++){
+      if(!have[a]) continue;
+      if(prev<0){ for(let k=0;k<=a;k++) lut[k]=med[a]; }
+      else { for(let k=prev+1;k<=a;k++) lut[k]=Math.round(med[prev]+(med[a]-med[prev])*(k-prev)/(a-prev)); }
+      prev=a;
+    }
+    return lut;
+  }
+  const apply=(lut,x0,y0,x1,y1)=>{ for(let y=y0;y<y1;y++){ const r=y*aw; for(let x=x0;x<x1;x++){ const i=(r+x)<<2, v=lut[orig[r+x]]; aD[i]=aD[i+1]=aD[i+2]=v; } } };
+  const lutG=fit(X0,Y0,X1,Y1, rects.length?inRects:null);
+  apply(lutG,0,0,aw,ah);
+  for(const t of rects) apply(fit(t.x0,t.y0,t.x1,t.y1,null), t.x0,t.y0,t.x1,t.y1);
+  // 墨ベタの出方（K100とリッチブラック、RIP差）は濃淡比較では意味がないので、暗部を両側とも同じ形でつぶす
+  shadowFold(aD); shadowFold(bD);
+  S.inkLut=lutG;
 }
 
 /* ============ 配置と差分計算 ============ */
@@ -1693,7 +1851,7 @@ function computeDiff(){
   const ovD=overlay.data;
   const cellActiveMin=Math.max(2, Math.floor(cell*cell*0.16));
   // 色味・濃度の変化検出用：セル毎の符号付き色差合計（AAノイズに強い平均ベース）
-  const colorOn = (S.colorDetect!=="off");
+  const colorOn = (S.colorDetect!=="off") && !S.inkActive;   // v1.17 濃淡のみで比較中は色変化を出さない
   const weightOn = (S.weightDetect!==false);        // 文字の太さ（ウエイト）変化検出（既定オン）
   const inkUse = colorOn||weightOn;                 // インク画素カウントを使うか
   const colorTh = (S.colorDetect==="hi")?4:7;
@@ -3089,8 +3247,12 @@ async function scanAllPages(){
     }
     S.pageSummary=summary;                      // 途中停止でも走査済み分は反映
     const withDiff=summary.filter(s=>s&&s.count>0).length;
-    if(aborted) toast(`読み込みを停止しました（${done}/${mx}ページまで走査・差分あり${withDiff}）`,"ok");
-    else        toast(`全${mx}ページを走査：差分ありは${withDiff}ページ`,"ok");
+    // v1.17：相手のページが見つからなかったページは「差分なし」ではなく「未チェック」。
+    // 以前は件数0として数え、対応が1ページも取れなくても「差分ありは0ページ」と出ていた。
+    const unmatched=summary.filter(s=>s&&(s.aMissing||s.bMissing)).length;
+    const um=unmatched?`・相手ページ無しで未チェック${unmatched}ページ`:"";
+    if(aborted) toast(`読み込みを停止しました（${done}/${mx}ページまで走査・差分あり${withDiff}${um}）`,unmatched?undefined:"ok");
+    else        toast(`全${mx}ページを走査：差分ありは${withDiff}ページ${um}`,unmatched?undefined:"ok");
   }catch(e){ console.error(e); toast("全ページ走査に失敗しました"); }
   finally{
     S.scanning=false; S.scanAbort=false; setBusyProgress(-1);
@@ -3130,12 +3292,14 @@ function renderAllPages(){
   }
   const total=S.pageSummary.length-1;
   const withDiff=S.pageSummary.filter(s=>s&&s.count>0).length;
-  let html=`<div class="allhdr"><span style="flex:1;font-size:11px;color:var(--ink-dim);align-self:center">差分あり ${withDiff} / ${total} ページ</span></div>`;
+  const unmatched=S.pageSummary.filter(s=>s&&(s.aMissing||s.bMissing)).length;
+  let html=`<div class="allhdr"><span style="flex:1;font-size:11px;color:var(--ink-dim);align-self:center">差分あり ${withDiff} / ${total} ページ${unmatched?`<span style="color:var(--red)">・未チェック ${unmatched}</span>`:""}</span></div>`;
   for(let pg=1; pg<S.pageSummary.length; pg++){
     const s=S.pageSummary[pg]; if(!s) continue;
     const cur = pg===S.page ? " cur":"";
-    const zero = s.count===0;
-    const dot = zero ? `<span class="pdot ok">✓</span>` : `<span class="pdot ng">${s.count}</span>`;
+    const miss = s.aMissing||s.bMissing;
+    const zero = s.count===0 && !miss;
+    const dot = miss ? `<span class="pdot ng">?</span>` : zero ? `<span class="pdot ok">✓</span>` : `<span class="pdot ng">${s.count}</span>`;
     let chips="";
     for(const key of ["moved","text","weight","removed","added","color","changed"]){
       if(s.kinds[key]) chips+=`<span style="color:${KIND[key].hex}">${KIND[key].short}${s.kinds[key]}</span>`;
@@ -3261,6 +3425,7 @@ $("#edgeTol").addEventListener("change",e=>{S.edgeTol=+e.target.value;
   computeDiff();buildContent();draw();updatePanel();invalidateScan();});
 $("#colorDetect").addEventListener("change",e=>{S.colorDetect=e.target.value;
   computeDiff();buildContent();draw();updatePanel();invalidateScan();});
+$("#inkMode").addEventListener("change",e=>{S.inkMode=e.target.value; S.inkToastShown=true; invalidateScan(); refreshPage(false);});
 $("#weightDetect").addEventListener("change",e=>{S.weightDetect=(e.target.value!=="off");
   computeDiff();buildContent();draw();updatePanel();invalidateScan();});
 $("#onionOp").addEventListener("input",e=>{S.onionOp=e.target.value/100;$("#onionVal").textContent=e.target.value+"%";
@@ -3451,6 +3616,7 @@ function resetAll(){
   if($("#bindDir")) $("#bindDir").value="rtl";
   if($("#originMode")) $("#originMode").value="center";
   S.colorDetect="on"; if($("#colorDetect")) $("#colorDetect").value="on";
+  S.inkMode="auto"; S.inkActive=false; S.inkToastShown=false; if($("#inkMode")) $("#inkMode").value="auto";
   S.weightDetect=false; if($("#weightDetect")) $("#weightDetect").value="off";
   // 検出の詳細設定（感度・ノイズ除去・エッジ許容・解像度・比較範囲）も既定値に戻す。
   // 前の案件でノイズ調整した設定が残ったまま別件を検査すると、感度が鈍って検出漏れになるため。
@@ -3558,9 +3724,10 @@ async function loadPageForExport(pg){
   S.aPtW=a?a.ptW:0; S.aPtH=a?a.ptH:0; S.bPtW=b?b.ptW:0; S.bPtH=b?b.ptH:0;
   S.aData=a?a.ctx.getImageData(0,0,a.w,a.h):null;
   S.bData=b?b.ctx.getImageData(0,0,b.w,b.h):null;
+  applyInkMode();
   S.aText=await getTextItemsLogical(S.docA,S.planA,S.aLogical,S.scale);
   S.bText=await getTextItemsLogical(S.docB,S.planB,S.bLogical,S.scale);
-  S.bImgRects=(S.colorDetect!=="off" && S.docB)?await getImageRectsLogical(S.docB,S.planB,S.bLogical,S.scale):[];
+  S.bImgRects=((S.colorDetect!=="off"||S.inkActive) && S.docB)?await getImageRectsLogical(S.docB,S.planB,S.bLogical,S.scale):[];
   let alignedExp=false, tomboRectExp=null;
   if(a&&b){
     alignedExp=applyAlignment(a,b);
@@ -3572,6 +3739,7 @@ async function loadPageForExport(pg){
   } else { S.offX=0; S.offY=0; }
   if(tomboRectExp){ S.alignedByBox=true; S.aTrimPx=tomboRectExp; S.aBleedPx=null; }
   else setCompareRects(a, alignedExp);
+  fitInkLut();
   computeDiff();
 }
 
@@ -3794,7 +3962,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.16";
+  const APP_VERSION = "v1.17";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
