@@ -369,12 +369,51 @@ function parseRoman(t){
   for(let k=0;k<s.length;k++){ const a=V[s[k]], b=V[s[k+1]]||0; v += a<b ? -a : a; }
   return v>0 ? v : null;
 }
-// ノンブル候補トークン → {val,label}。数字・ローマ数字以外は null
+// 漢数字ノンブル（「十二」「二十一」「百五」型と「一二」「一〇」型の両方）
+const KANJI_D={'〇':0,'零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+function parseKanjiNum(t){
+  if(!/^[〇零一二三四五六七八九十百]{1,6}$/.test(t)) return null;
+  if(/[十百]/.test(t)){
+    let v=0, cur=0;
+    for(const ch of t){
+      if(ch==='百'){ v+=(cur||1)*100; cur=0; }
+      else if(ch==='十'){ v+=(cur||1)*10; cur=0; }
+      else cur=cur*10+KANJI_D[ch];
+    }
+    v+=cur;
+    return v>0 ? v : null;
+  }
+  let v=0; for(const ch of t) v=v*10+KANJI_D[ch];
+  return v>0 ? v : null;
+}
+// ノンブル候補トークン → {val,label,weak}。数字・ローマ数字・英字1字(a=1,b=2…)・漢数字以外は null。
+// 英字1字と漢数字は本文中の記号や節見出し（「一　はじめに」等）と紛れやすいため weak=true とし、
+// 呼び出し側で位置条件を厳しくする。i/v/x はローマ数字を優先する。
 function parseNombreToken(raw){
-  const t=toHalfWidthDigits(raw).trim().replace(/^[\-–—.]+|[\-–—.]+$/g,'');
-  if(/^\d{1,4}$/.test(t)) return {val:parseInt(t,10), label:t};
+  const t=toHalfWidthDigits(raw).trim()
+    .replace(/[\uFF21-\uFF3A\uFF41-\uFF5A]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0))
+    .replace(/^[\-–—.]+|[\-–—.]+$/g,'');
+  if(/^\d{1,4}$/.test(t)) return {val:parseInt(t,10), label:t, weak:false};
   const r=parseRoman(t);
-  return r ? {val:r, label:t} : null;
+  if(r) return {val:r, label:t, weak:false};
+  if(/^[a-zA-Z]$/.test(t)) return {val:t.toLowerCase().charCodeAt(0)-96, label:t, weak:true};
+  const k=parseKanjiNum(t);
+  if(k) return {val:k, label:t, weak:true};
+  return null;
+}
+// weak トークン用：その数字が帯の中で「柱行／最下行」として本文から離れて独立しているか。
+// 上部帯なら最上行であり、かつ次の行まで文字高の2倍以上空いていること（柱と本文1行目の関係）。
+// 下部帯なら最下行であること（脚注より下にあるノンブル位置）。
+function isEdgeLine(col, it, top){
+  const y=it.transform[5], h=it.height||8;
+  const ys=col.filter(o=>o.str.trim()).map(o=>o.transform[5]);
+  if(top){
+    if(ys.some(v=>v>y+3)) return false;
+    const below=ys.filter(v=>v<y-3);
+    if(below.length && y-Math.max(...below) < h*2) return false;
+    return true;
+  }
+  return !ys.some(v=>v<y-3);
 }
 // 同じ行で非数字テキストと「くっついて」いる数字は、目次の「（381）」や本文中の数値であって
 // ノンブルではない。柱とノンブルの間には通常1字分以上のアキがあるため、文字高の半分未満の
@@ -400,13 +439,21 @@ function findNombreInBand(items, pageH, xMin, xMax, top){
     if(xMax!=null && x>=xMax) return false;
     return true;
   });
+  // weak トークンの行位置判定用：帯の外も含めた同じ横範囲の全テキスト
+  const col=items.filter(it=>{
+    const x=it.transform[4];
+    if(xMin!=null && x<xMin) return false;
+    if(xMax!=null && x>=xMax) return false;
+    return true;
+  });
   let best=null;
   // 柱とノンブルが同一テキスト要素内で連結されているケース（例:「タイトル　　3」）
   for(const it of band){
     const hw=toHalfWidthDigits(it.str);
-    const m=hw.match(/^(.*?)[ \u3000]+(\d{1,4}|[ivxIVX]{1,6}|[\u2160-\u217B])[ \u3000]*$/);
+    const m=hw.match(/^(.*?)[ \u3000]+(\d{1,4}|[ivxIVX]{1,6}|[\u2160-\u217B]|[a-zA-Z]|[〇一二三四五六七八九十百]{1,6})[ \u3000]*$/);
     if(m && m[1].replace(/[\s\u3000]/g,'').length>=2){
       const tok=parseNombreToken(m[2]); if(!tok) continue;
+      if(tok.weak && !isEdgeLine(col, it, top)) continue;
       if(!best || it.transform[5]>best.y) best={y:it.transform[5], val:tok.val, label:tok.label};
     }
   }
@@ -417,6 +464,7 @@ function findNombreInBand(items, pageH, xMin, xMax, top){
     if(!tok) continue;
     if(!top && !isIsolatedNumeral(band, it)) continue;
     if(touchesText(band, it)) continue;
+    if(tok.weak && !isEdgeLine(col, it, top)) continue;
     if(!best || it.transform[5]>best.y) best={y:it.transform[5], val:tok.val, label:tok.label};
   }
   return best;
