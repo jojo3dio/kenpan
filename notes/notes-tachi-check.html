@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>断ち代チェック — 開発メモ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* KENPAN の開発メモ共通の作り（notes-nodo-dobu.html と同じ）。アクセントは桔梗色。アンバー／琥珀系は使わない */
+:root{
+  --accent:#5457c9;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#5457c9; --glow:var(--accent);
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#8d90f2;
+  --accent:#8d90f2; --glow:var(--accent);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+.wrap{max-width:760px;margin:0 auto;padding:24px 18px 60px}
+.hero{background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:24px 26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero h1{margin:0 0 6px;font-size:23px;line-height:1.3}
+.hero p{margin:0;color:var(--ink-dim);font-size:14px}
+.hero .meta{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+h2{font-size:17px;margin:38px 0 14px;padding-left:12px;border-left:4px solid var(--glow);line-height:1.4}
+h3{font-size:14.5px;margin:22px 0 8px;color:var(--ink)}
+p,li{font-size:14px}
+ul,ol{padding-left:20px} li{margin:5px 0}
+table.t{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0;display:block;overflow-x:auto}
+table.t th,table.t td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.t th{background:var(--panel2);font-weight:700;white-space:nowrap}
+code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto}
+pre code{border:0;padding:0;background:none}
+hr{border:0;border-top:1px solid var(--line);margin:28px 0}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-faint)}
+@media (max-width:560px){ .top{padding:12px 16px;gap:10px} .top .nm+span{display:none} }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="back" href="../index.html">← ハブに戻る</a>
+  <span class="nm">断ち代チェック</span><span style="color:var(--ink-faint);font-size:13px">開発メモ</span>
+  <span class="sp"></span>
+  <a class="back" href="../manual/manual-tachi-check.html">操作マニュアル</a>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>開発メモ</h1>
+    <p>判定と補正をなぜこの形にしたか、実データで何を確かめたか、どこで間違えたかの記録。仕様を変えるときは、まずここを読んでください。断ち代チェック・ノド側の白・ノド断ち代の「辺」を扱うツールに共通のメモです。</p>
+    <div class="meta">最終更新 2026-10-09</div>
+  </div>
+<h2>1. ツールの関係</h2>
+<table class="t">
+<thead>
+<tr>
+<th>ツール</th>
+<th>ファイル</th>
+<th>何をするか</th>
+<th>状態</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>断ち代チェック</td>
+<td><code>tachi/</code> → <code>dist/tachi-check.html</code></td>
+<td>天・地・小口の断ち代不足を見つけ、足りない分だけ反転か引き伸ばしで補う</td>
+<td>2026-10-09 ハブ登録の準備済み（<code>edit/tachi-check.html</code>）</td>
+</tr>
+<tr>
+<td>ノド白</td>
+<td><code>nodo/</code> → <code>dist/nodo-shiro.html</code></td>
+<td>ノド側に糊しろの白帯を付ける／外す</td>
+<td>公開済み（<code>edit/nodo-shiro.html</code>）。2026-10 にレイヤー一覧の不具合を修正</td>
+</tr>
+<tr>
+<td>ノド断ち代</td>
+<td>（元ファイル未収録）</td>
+<td>リング綴じなど、ペラ丁合のノド側に断ち代を作る</td>
+<td>公開済み（<code>edit/nodo-dobu.html</code>）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>断ち代チェックとノド断ち代は<strong>意味合いが違うので別ツール</strong>にした（ノド断ち代は「隣ページの絵柄をどうするか」、断ち代チェックは「足りない断ち代を補う」）。</li>
+<li>将来は<strong>ノド断ち代とノド白を統合</strong>したい。どちらも「ノド側の処理」で、製本方式で分かれる。ただし「ノド断ち代」として公開済みなので、利用者が混乱しないよう旧URLは残して転送する。</li>
+<li>統合のときは<strong>ノド白を最後の追記にする</strong>（ノド白の「外すと元ファイルと完全一致」を崩さないため）。</li>
+<li>共通部品は <code>shared/</code>。将来はノド系も <code>shared/</code> を使う想定。</li>
+</ul>
+<h2>2. 共通部品</h2>
+<h3><code>shared/pdf-incr.js</code>（増分更新エンジン）</h3>
+<ul>
+<li><code>nodo/nodo_core.js</code> の読み取り・追記部分（Parser / Doc / Writer / rebuildDict / boxOf / pageGeom など）を<strong>1行も変えずに</strong>切り出したもの。EQUIOS を通った実績のあるコード。</li>
+<li>直すときは <code>nodo_core.js</code> と揃えること。末尾の「追加分」（deflate・startsWith）だけがこのファイル独自。</li>
+</ul>
+<h3><code>shared/edge-core.js</code>（辺の判定と補正）</h3>
+<p>UI に依存しない処理だけを置く。主な関数：
+- <code>readPages(buf)</code>：ページとボックス。補正済みなら <code>base</code>（補正前のファイル長）も返す
+- <code>sideRoles(pageIndex, opts)</code>：天・地・小口・ノドの割り当て
+- <code>analyzeEdges(imageData, geom, opts)</code>：辺ごとの実測と、足りない区間（segments）。区間には補正用の <code>edge</code>（元の絵柄の端の折れ線）と <code>axis</code>（反転の軸。斜めなら傾き付き）も入る
+- <code>refineEdges(edges, side, imageData, geom)</code>：不足の辺の帯（<code>stripRect()</code> の範囲）を高い解像度で描いた画像から、<code>edge</code>・<code>axis</code> だけを測り直す（判定は変えない）
+- <code>fillEdges(buf, jobs, opts)</code>：補う（増分更新）
+- <code>revert(buf)</code>：補正前に戻す（追記部分の切り捨て）
+- <code>expandCropForView(buf, pages)</code>：表示専用。CropBox を MediaBox に広げた複製（保存には使わない）
+- <code>toBleedGaps(pages)</code>：dtp-preflight の BLEED_GAP 形式で書き出す</p>
+<h2>3. 断ち代チェック：判定</h2>
+<h3>辺の割り当て</h3>
+<ul>
+<li>右綴じ：奇数ページは小口が左、偶数ページは小口が右</li>
+<li>左綴じ：奇数ページは小口が右、偶数ページは小口が左</li>
+<li>「ペラもの・表紙」は4辺すべて対象。本文はノド側を判定しない</li>
+<li>抜き出しPDFのために「先頭ページのノンブル」を詳細設定に置いた</li>
+</ul>
+<h3>実測（200dpi でレンダリングし、列ごとに測る）</h3>
+<table class="t">
+<thead>
+<tr>
+<th>項目</th>
+<th>値</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>白とみなす濃さ</td>
+<td><strong>0%だけ</strong>（RGBの差 2/255 以下）</td>
+<td>写真のハイライトは5%前後でも色が入っている。4%基準だと色変換やJPEGの揺らぎで白と判定され誤検知した（p.97 の件）</td>
+</tr>
+<tr>
+<td>内側の確認位置</td>
+<td>仕上がり線の 0.4mm 内側（3px平均）</td>
+<td>ここが白なら「仕上がり際が白＝補う必要なし」</td>
+</tr>
+<tr>
+<td>網点の隙間</td>
+<td><strong>0.3mm 以下の白は絵柄が続いているとみなす</strong>。両隣の列も見る</td>
+<td>網点・写真の明るい部分は点の間に白がある。網点があれば断ち代と判断してよい（中田さん確認）</td>
+</tr>
+<tr>
+<td>許容誤差</td>
+<td>0.2mm</td>
+<td></td>
+</tr>
+<tr>
+<td>短い区間</td>
+<td><strong>5mm 未満は前後に吸収</strong></td>
+<td>5月の preflight.py の MIN_RUN_MM=5 に合わせた。写真の中の小さな白で細かく割らない</td>
+</tr>
+<tr>
+<td>段差</td>
+<td>0.5mm 以上違えば別の区間</td>
+<td>「上の写真は0.5mm不足・下の地色は2mm不足」のようなちぐはぐな形に対応</td>
+</tr>
+<tr>
+<td>段差で分ける最小の長さ</td>
+<td>5mm</td>
+<td></td>
+</tr>
+<tr>
+<td>写真のハイライト</td>
+<td>前後が足りている・15mm以下・内側の平均が10%未満 → <strong>写真の一部とみなして不足にしない</strong></td>
+<td>「写真の一部であれば良い」（中田さん）。詳細設定で外せる</td>
+</tr>
+</tbody>
+</table>
+<h3>部分的な不足</h3>
+<ul>
+<li>足りている区間には<strong>一切触らない</strong>。例：p.15 の小口は上半分が写真（足りている）、下半分が地色（0mm）→ 下半分だけ補う</li>
+<li>「足りている」区間との境目は 2px 広げる（測るときに両隣の列も見ているので、境目に髪の毛ほどの白が残るのを防ぐ）。広げた所は元の絵柄が仕上がり近くまであるので、元の端から描けば重ならない</li>
+<li><strong>「足りない」区間どうしの境目は広げない</strong>（ぴったり接する）。広げるとその幅が二重に描かれ、透明効果で濃くなる（2026-10-07）</li>
+</ul>
+<h2>4. 断ち代チェック：補正</h2>
+<ul>
+<li><strong>足りない分だけを補う</strong>。今ある断ち代は残す。最初は仕上がり線から3mm全部を描き直していたが「それはダメ」と指摘された</li>
+<li>区間ごとに、今ある絵柄の端を軸にする。軸は実際の端より <strong>1画素＋0.05mm 内側</strong>（軸が端より外に出ると、そこが白く折り返されるため）</li>
+<li>反転：軸で折り返してコピー。引き伸ばし：軸のすぐ内側 0.1mm を外へ伸ばす。式は <code>x' = c(1+k) − k·x</code>（反転は k=1）</li>
+</ul>
+<h3>元の絵柄と重ねない（2026-10-07 p.86 の件）</h3>
+<ul>
+<li>以前は反転コピーを<strong>軸から</strong>断ち代の外端まで描いていた。軸は端より内側なので、元の塗り足しの上に 0.03〜0.2mm 重なる（段差の区間では最大 0.5mm 以上）。<strong>不透明な絵柄なら重なっても見えないが、乗算・不透明度の絵柄では重なった所が濃い線になる</strong>（p.86 の天：元 1.5mm → 3.0mm で、元の端に濃い線）</li>
+<li>今は、<strong>透明効果のあるページは「元の絵柄の端〜断ち代の外端」だけ</strong>を描く。切り抜きは区間の中の端の位置を 0.5mm ごとにたどった折れ線（端が波打っていても斜めでも合う）。近くの最小値をとるので、ずれるときは隙間ではなくわずかな重なりの側</li>
+<li>透明効果のないページは<strong>これまでどおり軸から</strong>描く（少し重ねる）。ぴったり接すると、画面のアンチエイリアスで継ぎ目に白い髪の毛のような筋が出る（印刷では出ないが、拡大プレビューで「白い筋」と誤解される）。重なっても見えないので重ねた方がよい</li>
+<li>透明効果の判定（<code>usesTransparency</code>）：ExtGState の描画モードが Normal 以外・不透明度 1 未満・ソフトマスク、画像のソフトマスク。Form の中まで見る。<strong>ページの /Group は見ない</strong>（InDesign の書き出しでは透明効果が無くても付く。00.pdf の p.18 もそう）</li>
+<li><code>fillEdges(..., {exact:true|false})</code> で強制できる。結果の <code>exactPages</code> に「ぴったり描いたページ」が入る</li>
+</ul>
+<h3>端の位置を細かく測る</h3>
+<ul>
+<li>判定の 200dpi 画像では 1画素 = 0.127mm。端の画素の塗られ具合（アンチエイリアスの濃さ ÷ 1つ内側の画素の濃さ）で 1画素より細かく出すが、それでも ±0.03mm ほどずれる（poppler は 4×4 の間引きでアンチエイリアスする、大きな四角はアンチエイリアスしない、画像の端は「画素の中心が入れば塗る」など、描き方で変わる）</li>
+<li>そこで<strong>不足の辺だけ、辺の帯（仕上がり線の 1mm 内側〜断ち代の外端）を 1200dpi で描き直して端を測る</strong>（<code>refineEdges</code>）。画面は pdf.js の <code>transform</code> で帯だけ描く。帯の長い方が 16000px を超えるときは解像度を下げる。失敗したら 200dpi の値のまま</li>
+<li><strong>判定（足りている／足りない・区間・不足量）は 200dpi のまま変えない</strong>。測り直すのは補正の切り抜き位置と軸だけ</li>
+<li>塗られ具合の中間がほとんど無い辺（画像の端など）は、塗り切られた画素の端が「その画素の中ほど〜次の画素の中ほど」のどこかにあるので、内側の 0.5 画素をとる（隙間を作らない側）</li>
+</ul>
+<h3>斜めの不足（2026-10-07 p.18・p.19）</h3>
+<ul>
+<li>写真が少し傾いて置かれていると、断ち代が辺に沿って少しずつ減る（p.18 の天：左 2.0mm → 右 0.05mm）。判定では 0.5mm の段差ごとに区間が分かれる（4か所）</li>
+<li>以前は区間ごとに水平な軸で折り返していたので、区間の中で端との差が最大 0.5mm 以上あり、段差状に補われ、重なりも大きかった</li>
+<li>今は<strong>端の並びに直線を当てはめて、傾いた軸で折り返す</strong>。辺に垂直な向きに折り返す（<code>y' = (1+k)·c(x) − k·y</code>、c(x) が傾いた軸）ので、軸の上は動かず継ぎ目がずれない。傾きが小さい（p.18 で 0.9°）ので絵柄の歪みは見えない</li>
+<li>接している「足りない」区間がまとめて1本の直線に乗るなら（ずれ 0.15mm 以内）<strong>同じ軸にして1つの多角形で描く</strong>。別々に描くと、接している境目の1画素が両方に塗られて濃くなる。段差のある区間（<code>halftone_steps.pdf</code> p.2）は別々の軸のまま</li>
+</ul>
+<h3>角</h3>
+<ul>
+<li>角はどの部分も<strong>1回だけ</strong>描く。両方の辺を補うときは、角を「左右側の続き（左右の元の端より外 × 仕上がり線〜天地の元の端）」「天地側の続き」「外側の角（縦横とも折り返す＝点対称）」に分け、それぞれ片方の辺の区間だけが描く。両方の元の端の内側は元の絵柄のまま</li>
+<li>片方の辺だけを補う角は、その区間を角まで延ばす（斜めの端・傾いた軸もそのまま延長）</li>
+<li>両方を補う角の中は、水平・垂直な軸で折り返す（角での軸の値を使う）</li>
+<li>描き方：ページ自身の内容を Form XObject として複製し、変形して断ち代の範囲だけに切り抜いて重ねる。画像は元のオブジェクトを参照するだけなので、<strong>再圧縮・ラスタライズ・色変換なし</strong>（CMYKのまま）</li>
+<li>そのため補正したページの内容ストリームぶんファイルが増える（p.15 で約800KB）。増分更新では避けられない</li>
+<li>補ったら、補正後のPDFをもう一度判定して確かめる</li>
+</ul>
+<h2>5. 保存（ノド白と同じ増分更新）</h2>
+<ul>
+<li>元のバイト列は1バイトも変えず、末尾に追記するだけ。理由：データを壊すリスクを避けたい（中田さん）。ライブラリでの全体書き直し（pdf-lib）は最初に試したが、やめた</li>
+<li>カタログに <code>/KenpanEdgeBase</code>（補正前のファイル長）を記録。入れ直すと「補正前に戻して保存」が出る</li>
+<li>断ち代チェックの後にノド白がかかっている（<code>/NodoShiroBase</code> ≥ <code>/KenpanEdgeBase</code>）ときは、戻すとノド白まで消えるので戻さない</li>
+<li>補った部分はレイヤー「断ち代補正」に入れる（ノド白と同じ設定：表示・印刷とも ON）。詳細設定で外せる</li>
+<li><strong>レイヤー一覧（/OCProperties）は既存に足すだけ</strong>。置き換えると他のレイヤーが一覧から外れ、非表示の指示レイヤーなどが印刷に出るおそれがある</li>
+<li>補正は毎回元のPDFから作り直す（重ねがけにならない）。1ページずつ補う／取り消すも同じ</li>
+</ul>
+<h2>6. 2026-10 のノド白の修正（<code>nodo/nodo_core.js</code>・<code>nodo/nodo_shiro.py</code>）</h2>
+<ol>
+<li>レイヤー一覧を自分のレイヤー1つで<strong>置き換えていた</strong> → 既存に足す（<code>rebuildOcp()</code>）</li>
+<li>「直接描く（PDF/X-1a）」でレイヤー一覧を<strong>丸ごと消していた</strong> → 触らない</li>
+<li><code>/GsNodoShiro</code> <code>/OcNodoShiro</code> を<strong>二重に書いていた</strong>（同じ名前のキーの重複）→ 差し替え</li>
+<li>同じ名前のレイヤーがあると<strong>2つ目を作っていた</strong> → 使い回して表示ONに揃える（Python版と同じ）</li>
+<li>保存し直されたPDFから外すとき、ノド白のレイヤーが一覧に<strong>残っていた</strong> → 外す</li>
+<li>Python版：レイヤーを外す処理が pikepdf のオブジェクトを <code>id()</code> で比べていて<strong>何も外せていなかった</strong> → <code>objgen</code> で比べる</li>
+<li>未確認：修正版でレイヤー付きPDF/X-4を EQUIOS に通すテスト</li>
+<li>過去にノド白で処理したデータのうち、ノド白以外のレイヤーがあったものは、非表示の内容が表に出ている可能性がある</li>
+</ol>
+<h2>7. 画面（UI）の方針</h2>
+<ul>
+<li>KENPAN の他ツールと同じ作り（トンボ計測・ISBN検版の3カラム）。上部ツールバーは<strong>下版差分チェッカーと同じ並び</strong>：表示（補正前／補正後／スワイプ／並べて）｜ページ（« ‹ n/N › »）｜詳細設定</li>
+<li>色：アクセントは<strong>桔梗色</strong>（#5457c9 / ダーク #8d90f2）。他ツールと被らない色。<strong>アンバー／琥珀系は使用禁止</strong>（CSS変数名は他ツールに合わせて <code>--amber</code> だが中身は青紫）。スワイプの仕切り線も桔梗色（差分チェッカーはアンバーだったので合わせない）</li>
+<li>基本操作はシンプルに、細かい設定は詳細設定に隠す</li>
+<li>ズームは<strong>ホイールだけ</strong>（修飾キー不要）。カーソル位置を中心に拡大</li>
+<li><strong>拡大しても左・上へ戻れること</strong>。中央寄せを <code>justify-content:center</code> でやると、はみ出した左・上がスクロール範囲から外れる。<code>margin:auto</code> で中央寄せする（他ツールでも起きた罠）</li>
+<li>並べて表示は<strong>2ウインドウ</strong>（左右それぞれスクロール、位置と倍率は連動）</li>
+<li>進め方「まとめて補う／1ページずつ確認」はプルダウンではなくボタン（気づかれないため）</li>
+<li><strong>操作ボタンは「このページ」のカードの下に集める</strong>（2026-10-07 中田さん）。以前は「残りをまとめて補う」が右上、「このページを補う／次へ」が真ん中、「補正をすべて取り消す」が下の「全体」と散らばっていて、どこを見ればよいか分からなかった。「全体」はスクロールしないと見えず、誰も気づかない</li>
+<li>1ページずつのとき：主ボタン（このページを補う／次へ）→ その下に「残り ○ページ（○辺）をまとめて補う」（一段控えめ）→ 破線の下に「補正をすべて取り消す」（文字だけ・右寄せ。押し間違えないよう主ボタンから離す。「戻す」でやり直せるので確認ダイアログは出さない）</li>
+<li>まとめて補うとき：上の「断ち代を補う」ボタンはそのまま。補正後は「このページ」の下に「補正をすべて取り消す」</li>
+<li>「確認 ○/○ ページ（補正・見送り・未確認）」は、上部に固定の「不足 ○ページ」の下に出す。すべて確認したら、ヘッダーの「補正済みPDFを保存」を3回だけ光らせる</li>
+<li>下の「全体」は細かい内訳（追記量・レイヤー・処理できなかったページ）だけ。見られなくても困らない内容にする</li>
+<li>
+<p>ヘッダーの「リセット」は他ツールに合わせて名前を変えない（PDFを閉じて最初に戻す）</p>
+</li>
+<li>
+<p>重ね表示（仕上がり線・不足箇所）は目のアイコン・色見本・「表示中／非表示」で意味が分かるように</p>
+</li>
+<li>チェック中・補正中は、プレビューの上に進み具合を出す</li>
+<li>フィードバックは他ツールと同じ GAS。<code>tool</code> は <code>tachi_check</code></li>
+</ul>
+<h2>8. 5月の塗り足し漏れ検出（dtp-preflight の BLEED_GAP）との対応</h2>
+<ul>
+<li>5月：内側1.5mm・外側1.5mmの2点だけを見る（72dpi）。内側 gray≤240（明るい画像も拾うよう緩めた）、外側 gray≥248 を紙とみなす。5mm未満は捨て、25mm以内は1件にまとめる。ノド側は隣ページと照合して重複を抑える</li>
+<li>断ち代チェック：外へ連続して測るので「何mmあるか」まで出る。外側は0%だけを紙とみなす</li>
+<li><code>toBleedGaps()</code> で同じ形の gaps を出せる。<code>shortage_mm</code> は実測の不足量（5月は辺の断ち代全体を入れていた）</li>
+<li><strong>方針の違いに注意</strong>：5月は「明るい画像も取りこぼさない」、断ち代チェックは「明るい短い区間は写真の一部」。チェックシステム（お客様に戻す側）を復活させるときは、どちらに合わせるかを決める</li>
+</ul>
+<h2>9. テスト</h2>
+<p><code>node tests/run.js</code> で回帰テスト（42項目＋ノド白3本）。
+- 補正のテスト（<code>fillAndRecheck</code>）は画面と同じく、不足の辺の帯を 1200dpi で描いて <code>refineEdges</code> してから補う
+- 重なり・隙間のテスト（<code>bandCheck</code>）は補正後の断ち代を 1200dpi・<strong>アンチエイリアスなし</strong>で描き、仕上がり線の 0.5mm 内側の色より濃い（薄い）所の太さを測る。太さは「中に入る一番大きな正方形の一辺」（細い継ぎ目どうしが交わる所を太いと数えないため）判定のテストには poppler の <code>pdftoppm</code> が必要（Mac：<code>brew install poppler</code>）。</p>
+<ul>
+<li>最後に <code>nodo/tests/</code> の3本も走る（旧フォルダ nodo-project から移したもの。2026-10-02 にパスを新しい配置に直した）</li>
+<li><code>test_core.js</code>：ノド白の追加・外す・二重適用・直接描く・再保存後の重ねがけ／外す。レイヤー一覧は「足すだけ」、同名レイヤーは使い回し、<code>/GsNodoShiro</code> <code>/OcNodoShiro</code> の重複キーなし（6章の修正1〜5）を見る。samples/layers_hidden.pdf と samples/nodo/ のPDFを使う。旧版は表示だけで、出力を元PDFの横に書いていた → 判定つき・一時フォルダに書き出しに変更</li>
+<li><code>test_book.js</code>：本の構成と継ぎ目（book.js）</li>
+<li><code>test_app7.js</code>：画面（<code>dist/nodo-shiro.html</code> を見るので、先に <code>cd nodo &amp;&amp; node build.js</code>）。<strong>jsdom が必要</strong>（このフォルダで <code>npm install</code>。package.json に devDependencies として記録済み。node_modules はテスト用で KENPAN には置かない）。無ければ飛ばす</li>
+<li>再保存の模擬は「/NodoShiroBase を消す増分更新」で作る（切り捨てで戻せない状態＝6章の(2)の経路を通す）</li>
+</ul>
+<table class="t">
+<thead>
+<tr>
+<th>サンプル</th>
+<th>期待する結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cover_top-short.pdf</code>（実データ・表紙）</td>
+<td>天だけ約1.5mm（不足約1.5mm）、他はOK</td>
+</tr>
+<tr>
+<td><code>multi_6p.pdf</code></td>
+<td>右綴じで p2 天／p4 地・右／p6 天・左 が不足、p1・3・5 はOK</td>
+</tr>
+<tr>
+<td><code>halftone_steps.pdf</code> p1</td>
+<td>右の上半分（明るい網点）はOK、下半分だけ不足</td>
+</tr>
+<tr>
+<td><code>halftone_steps.pdf</code> p2</td>
+<td>右が2区間（約0.5mm・約2mm不足）、補正後はOK</td>
+</tr>
+<tr>
+<td><code>photo_highlight.pdf</code> p1</td>
+<td>5%・2%のハイライトがあっても不足なし</td>
+</tr>
+<tr>
+<td><code>photo_highlight.pdf</code> p2</td>
+<td>5%の地色が仕上がり線で止まる → 右全体が不足</td>
+</tr>
+<tr>
+<td><code>layers_hidden.pdf</code></td>
+<td>補正・ノド白のどちらでも、非表示レイヤーが残る</td>
+</tr>
+<tr>
+<td><code>01-32_1c.pdf</code> p.15（実データ・各自で置く）</td>
+<td>左綴じで小口の下半分だけ不足、写真の部分はOK</td>
+</tr>
+<tr>
+<td><code>transparency.pdf</code> p1（合成・乗算・不透明度50%）</td>
+<td>天 1.5mm・左 0.5mm が不足。透明効果ありと判断して元の絵柄の端からぴったり補う。<strong>補正後に重なりで濃くならないこと</strong>（1200dpi・アンチエイリアスなしで、濃くなった所の太さ 0.06mm 未満＝接する境目の1画素だけ）、白い隙間もないこと。角を含む</td>
+</tr>
+<tr>
+<td><code>transparency.pdf</code> p2（合成・乗算・不透明度50%・傾き）</td>
+<td>天が左 2.0mm → 右 0.3mm と斜めに不足。区間に分かれても同じ傾いた軸で補い、重なりで濃くならず、白い隙間もないこと</td>
+</tr>
+<tr>
+<td><code>00_p86-18-19.pdf</code> p1（実データ 00.pdf の p.86）</td>
+<td>天が 1.5mm で不足（乗算の帯）。元の端を 1.47〜1.5mm と測り、補正後に元の端に濃い線が出ないこと</td>
+</tr>
+<tr>
+<td><code>00_p86-18-19.pdf</code> p2・p3（実データ 00.pdf の p.18・p.19）</td>
+<td>天が斜めに不足（傾いた写真）。1本の傾いた軸で補い、補正後はOK（p.18 の写真にはソフトマスクがあるので、ぴったり描く側になる）</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>samples/make_samples.py</code> で合成のサンプルは作り直せる</li>
+<li>実データで新しい誤検知・見逃しが見つかったら、そのページを samples に足して期待する結果をこの表に書く</li>
+</ul>
+<h2>10. 既知の制約・未対応</h2>
+<ul>
+<li>回転指定のあるページは回転前の向きで判定する（表示で注意を出す）</li>
+<li>TrimBox の無いページは判定しない。BleedBox が無いときは既定3mm</li>
+<li>直接埋め込みページ（参照でないページ）、LZW・ASCII85 の内容ストリームは補正できない（警告を出してスキップ）</li>
+<li>pdf.js は cdnjs から読み込む（和文表示の CMap も）。ネットに出られない環境では動かない</li>
+<li>写真の明るい部分で本当に数mm足りないケースは、「写真の一部とみなす」で見逃す可能性がある（方針として誤検知を減らす側に倒した）</li>
+<li>透明効果のあるページでも、元の絵柄とぴったり接する境目の<strong>1画素（RIP の解像度で 0.01mm 前後）</strong>は両方に塗られる（「画素に少しでもかかれば塗る」規則のため。避けられない。目では見えない）</li>
+<li>透明効果のあるページを拡大プレビューすると、継ぎ目にアンチエイリアスの白い筋が見えることがある（p.18 の写真など）。アンチエイリアスなしで描くと隙間は無い（印刷では出ない）</li>
+<li>端が曲線の絵柄は、端は折れ線でたどるが、軸は直線を当てはめる（3% 点まで内側へ寄せる）。曲がりが大きいと、軸から遠い所は少し離れた絵柄を折り返す</li>
+<li>画面の 1200dpi の測り直し（pdf.js）は、この環境では動かして確かめられていない（node の pdf.js＋Skia が透明効果のページで落ちるため）。テストは poppler で同じ流れを通している。ブラウザで p.86・p.18 を補って確かめること</li>
+</ul>
+<h2>11. 踏んだ罠</h2>
+<ul>
+<li>HTMLだけ配って <code>edge-core.js</code> を置き忘れ → 「undefined is not an object (evaluating 'E.mm2pt')」。部品はビルドで埋め込む</li>
+<li><code>.notice{display:flex}</code> が <code>hidden</code> 属性に勝って、空の帯が出た → <code>[hidden]{display:none!important}</code></li>
+<li><code>justify-content:center</code> で拡大時に左へ戻れない（7章）</li>
+<li>ハイライトの誤検知：4%基準だと5%前後の写真が白扱いになる</li>
+<li>補正の境目の白い筋：区間の端を2px重ねて解決</li>
+<li>pikepdf のオブジェクトを <code>id()</code> で比べても一致しない（6章の Python の件）</li>
+<li><strong>反転コピーが元の塗り足しに重なっていた</strong>（2026-10-07 p.86）。テストの絵柄が不透明だったので、重なっても見えず気づけなかった。透明効果（乗算・不透明度）のサンプル <code>transparency.pdf</code> を足して、重なりで濃くならないことを確かめるようにした。<strong>補正のテストは不透明な絵柄だけでは足りない</strong></li>
+<li>濃くなったかどうかをアンチエイリアスありの画像で測ると、継ぎ目の混ざり（白っぽい・濃い筋）と本当の重なりを見分けられない。アンチエイリアスなしで、太さで判断する</li>
+<li>斜めの区間を別々の多角形で接して描くと、境目の1画素の列が二重に塗られる → 同じ軸の区間は1つの多角形にまとめた</li>
+<li>InDesign のPDFはページに /Group（透明グループ）が付いているので、それで透明効果の有無を判断すると全部「あり」になる</li>
+</ul>
+<h2>12. ハブ登録とマニュアル（2026-10-09）</h2>
+<ul>
+<li>置き場所は KENPAN の今のフォルダ構成に合わせた：ツール <code>edit/</code>、マニュアル <code>manual/</code>、開発メモ <code>notes/</code>。README の古い表（全部 <code>edit/</code>）は直した</li>
+<li>登録は <code>kenpan/register-tachi.js</code>。<code>index.html</code> だけでなく <strong><code>kenpan-shell.html</code> の FALLBACK・ICON_COLORS にも足す</strong>（タブでまとめるウインドウは自前の控えを持っていて、そこに無いと名前・色が出ない）</li>
+<li>表示名「断ち代チェック」、分類「断ち代付加」（ノド断ち代と同じ）、編集グループでノド断ち代の後ろ。アイコンは新しく <code>trim</code>（ツール本体のロゴ＝仕上がり線と点線の断ち代に、チェックを足した形）。色は桔梗色 #5457c9</li>
+<li>既存の利用者のブラウザには、ハブの <code>load()</code> が「まだ見ていない既定ツール」として一覧の末尾に足す（並びはその人の保存どおり）</li>
+<li>操作マニュアルは、他ツールのマニュアル（<code>manual-nodo-dobu.html</code>）と同じ作りの html を<strong>直接書く</strong>ことにした。md から作る方式では、ヒーロー・手順カード・FAQ などの共通の見た目が出せないため。<code>docs/manual-tachi-check.md</code> は不要（消してよい）</li>
+<li>開発メモは <code>python3 docs/build-docs.py</code> で NOTES.md から作る。見た目は <code>notes-nodo-dobu.html</code> と同じ（上の帯・テーマ切替・<code>kenpan-nav.js</code>）</li>
+<li>マニュアル・開発メモの色も桔梗色。テンプレートの <code>--amber</code> は変数名合わせで中身は桔梗色（琥珀色は使わない）</li>
+<li>知恵の輪のお知らせ文は <code>docs/chienowa-tachi-check.md</code></li>
+</ul>
+  <div class="foot">検版ハブ｜断ち代チェック 開発メモ。ツール本体・ハブと同じフォルダ構成（edit/・manual/・notes/）に置いてください。 ｜ © FUJIWARA PRINTING.inc</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+<script src="../assets/kenpan-nav.js"></script>
+</body>
+</html>

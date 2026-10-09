@@ -1,0 +1,3071 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>断ち代チェック — 天地小口の不足検出・補正</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- 共通部品は build-tachi.js で埋め込む（単体で動くように）。元は pdf-incr.js / edge-core.js -->
+<script>/* =====================================================================
+   pdf-incr.js — KENPAN 共通・PDF増分更新エンジン
+   ノド白ツール（nodo_core.js）の読み取り・追記部分をそのまま切り出したもの。
+   元PDFのバイト列は一切書き換えず、末尾に追記するだけで変更を加える。
+   依存なし。ブラウザ / Node 18+ で動作。
+
+   ※ 下の本体は nodo_core.js（ノド白 検証済み・EQUIOS通過済み）と同一のコード。
+     直すときは nodo_core.js と揃えること。末尾の「追加分」だけがこのファイル独自。
+   ===================================================================== */
+const KenpanPdf = (() => {
+"use strict";
+
+const MM = 72 / 25.4;
+
+/* ---------- バイト操作 ---------- */
+const enc = new TextEncoder();
+function bytes(s) { return enc.encode(s); }
+function latin(u8, s, e) { let r = ""; for (let i = s; i < e; i++) r += String.fromCharCode(u8[i]); return r; }
+function concat(list) {
+  let n = 0; for (const a of list) n += a.length;
+  const out = new Uint8Array(n); let o = 0;
+  for (const a of list) { out.set(a, o); o += a.length; }
+  return out;
+}
+function indexOfBytes(hay, needle, from) {
+  const n0 = needle[0];
+  for (let i = from; i <= hay.length - needle.length; i++) {
+    if (hay[i] !== n0) continue;
+    let ok = true;
+    for (let j = 1; j < needle.length; j++) if (hay[i + j] !== needle[j]) { ok = false; break; }
+    if (ok) return i;
+  }
+  return -1;
+}
+function lastIndexOfBytes(hay, needle, from) {
+  for (let i = Math.min(from, hay.length - needle.length); i >= 0; i--) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) { ok = false; break; }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+/* PDF文字列リテラル用のエスケープ（レイヤー名などに使用） */
+function pdfTextString(s) {
+  const u = [0xFE, 0xFF];
+  for (const ch of s) {
+    let c = ch.codePointAt(0);
+    if (c > 0xFFFF) {
+      c -= 0x10000;
+      const hi = 0xD800 + (c >> 10), lo = 0xDC00 + (c & 0x3FF);
+      u.push(hi >> 8, hi & 255, lo >> 8, lo & 255);
+    } else u.push(c >> 8, c & 255);
+  }
+  return "<" + u.map(b => b.toString(16).padStart(2, "0")).join("") + ">";
+}
+
+/* PDF文字列を読む（レイヤー名の照合に使う） */
+function readPdfString(u8, st, en) {
+  const raw = u8.subarray(st, en);
+  let out = [];
+  if (raw[0] === 0x3C) {                       // <hex>
+    let hex = "";
+    for (let i = 1; i < raw.length && raw[i] !== 0x3E; i++) {
+      const c = String.fromCharCode(raw[i]);
+      if (/[0-9a-fA-F]/.test(c)) hex += c;
+    }
+    if (hex.length % 2) hex += "0";
+    for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16));
+  } else if (raw[0] === 0x28) {                // (literal)
+    for (let i = 1; i < raw.length - 1; i++) {
+      if (raw[i] === 0x5C) {
+        const n = raw[i + 1];
+        const map = { 0x6E: 10, 0x72: 13, 0x74: 9, 0x62: 8, 0x66: 12 };
+        if (map[n] !== undefined) { out.push(map[n]); i++; }
+        else if (n >= 0x30 && n <= 0x37) {
+          let oct = "";
+          let j = i + 1;
+          while (j < raw.length && oct.length < 3 && raw[j] >= 0x30 && raw[j] <= 0x37) { oct += String.fromCharCode(raw[j]); j++; }
+          out.push(parseInt(oct, 8) & 255); i = j - 1;
+        } else { out.push(n); i++; }
+      } else out.push(raw[i]);
+    }
+  } else return "";
+  if (out[0] === 0xFE && out[1] === 0xFF) {
+    let s2 = "";
+    for (let i = 2; i + 1 < out.length; i += 2) s2 += String.fromCharCode((out[i] << 8) | out[i + 1]);
+    return s2;
+  }
+  return out.map(b => String.fromCharCode(b)).join("");
+}
+
+/* ---------- 展開（FlateDecode） ---------- */
+async function inflate(u8) {
+  for (const fmt of ["deflate", "deflate-raw"]) {
+    try {
+      const ds = new DecompressionStream(fmt);
+      const w = ds.writable.getWriter(); w.write(u8); w.close();
+      const chunks = []; const r = ds.readable.getReader();
+      for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
+      return concat(chunks);
+    } catch (e) { /* 次の形式を試す */ }
+  }
+  throw new Error("FlateDecode の展開に失敗しました");
+}
+
+/* PNGプレディクタの復元（xrefストリームで使用） */
+function unpredict(data, pred, colors, bpc, columns) {
+  if (pred < 10) return data;
+  const bpp = Math.ceil(colors * bpc / 8);
+  const rowLen = Math.ceil(colors * bpc * columns / 8);
+  const rows = Math.floor(data.length / (rowLen + 1));
+  const out = new Uint8Array(rows * rowLen);
+  let prev = new Uint8Array(rowLen);
+  for (let r = 0; r < rows; r++) {
+    const ft = data[r * (rowLen + 1)];
+    const row = data.subarray(r * (rowLen + 1) + 1, (r + 1) * (rowLen + 1));
+    const cur = new Uint8Array(rowLen);
+    for (let i = 0; i < rowLen; i++) {
+      const a = i >= bpp ? cur[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      let x = row[i];
+      switch (ft) {
+        case 0: break;
+        case 1: x += a; break;
+        case 2: x += b; break;
+        case 3: x += (a + b) >> 1; break;
+        case 4: {
+          const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          x += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c); break;
+        }
+        default: throw new Error("未対応のPNGフィルタ: " + ft);
+      }
+      cur[i] = x & 255;
+    }
+    out.set(cur, r * rowLen); prev = cur;
+  }
+  return out;
+}
+
+/* ---------- 字句・構文解析 ---------- */
+const WS = new Set([0x00, 0x09, 0x0A, 0x0C, 0x0D, 0x20]);
+const DELIM = new Set([0x28, 0x29, 0x3C, 0x3E, 0x5B, 0x5D, 0x7B, 0x7D, 0x2F, 0x25]);
+const isWS = c => WS.has(c), isDelim = c => DELIM.has(c);
+const isReg = c => !WS.has(c) && !DELIM.has(c);
+
+class Parser {
+  constructor(buf) { this.b = buf; }
+  skip(p) {
+    const b = this.b;
+    for (;;) {
+      while (p < b.length && isWS(b[p])) p++;
+      if (b[p] === 0x25) { while (p < b.length && b[p] !== 0x0A && b[p] !== 0x0D) p++; }
+      else return p;
+    }
+  }
+  /* 位置 p のオブジェクトを解析。{v, end} を返す */
+  parse(p) {
+    const b = this.b;
+    p = this.skip(p);
+    const c = b[p];
+    if (c === 0x2F) {                                   // 名前
+      let e = p + 1; while (e < b.length && isReg(b[e])) e++;
+      return { v: { t: "name", v: latin(b, p, e) }, end: e };
+    }
+    if (c === 0x28) return this.parseLiteral(p);        // 文字列
+    if (c === 0x3C && b[p + 1] === 0x3C) return this.parseDict(p);
+    if (c === 0x3C) {                                   // 16進文字列
+      let e = p + 1; while (e < b.length && b[e] !== 0x3E) e++;
+      return { v: { t: "str", s: p, e: e + 1 }, end: e + 1 };
+    }
+    if (c === 0x5B) {                                   // 配列
+      let q = p + 1; const items = [];
+      for (;;) {
+        q = this.skip(q);
+        if (b[q] === 0x5D) { q++; break; }
+        const r = this.parse(q); items.push(r.v); q = r.end;
+      }
+      return { v: { t: "arr", items, s: p, e: q }, end: q };
+    }
+    // 数値 / 参照 / キーワード
+    let e = p; while (e < b.length && isReg(b[e])) e++;
+    const tok = latin(b, p, e);
+    if (/^[+-]?[\d.]+$/.test(tok)) {
+      // "num gen R" の形か先読み
+      let q = this.skip(e);
+      const s2 = q; while (q < b.length && isReg(b[q])) q++;
+      const t2 = latin(b, s2, q);
+      if (/^\d+$/.test(t2)) {
+        let q2 = this.skip(q); const s3 = q2;
+        while (q2 < b.length && isReg(b[q2])) q2++;
+        const t3 = latin(b, s3, q2);
+        if (t3 === "R") return { v: { t: "ref", num: parseInt(tok, 10), gen: parseInt(t2, 10) }, end: q2 };
+      }
+      return { v: { t: "num", v: parseFloat(tok) }, end: e };
+    }
+    if (tok === "true" || tok === "false") return { v: { t: "bool", v: tok === "true" }, end: e };
+    if (tok === "null") return { v: { t: "null" }, end: e };
+    return { v: { t: "kw", v: tok }, end: e === p ? p + 1 : e };
+  }
+  parseLiteral(p) {
+    const b = this.b; let q = p + 1, depth = 1;
+    while (q < b.length && depth > 0) {
+      if (b[q] === 0x5C) { q += 2; continue; }
+      if (b[q] === 0x28) depth++;
+      else if (b[q] === 0x29) depth--;
+      q++;
+    }
+    return { v: { t: "str", s: p, e: q }, end: q };
+  }
+  parseDict(p) {
+    const b = this.b; let q = p + 2; const map = new Map();
+    for (;;) {
+      q = this.skip(q);
+      if (b[q] === 0x3E && b[q + 1] === 0x3E) { q += 2; break; }
+      if (q >= b.length) throw new Error("辞書の終端が見つかりません");
+      const k = this.parse(q); q = k.end;
+      const vs = this.skip(q);
+      const v = this.parse(vs); q = v.end;
+      if (k.v.t === "name") map.set(k.v.v, { v: v.v, s: vs, e: q });
+    }
+    const dict = { t: "dict", map, s: p, e: q };
+    // ストリームか判定
+    let r = this.skip(q);
+    if (latin(b, r, r + 6) === "stream") {
+      r += 6;
+      if (b[r] === 0x0D) r++;
+      if (b[r] === 0x0A) r++;
+      return { v: { t: "stream", dict, dataStart: r }, end: r };
+    }
+    return { v: dict, end: q };
+  }
+}
+
+/* ---------- ドキュメント ---------- */
+class Doc {
+  constructor(buf) { this.buf = buf; this.parser = new Parser(buf); this.cache = new Map(); }
+
+  static async load(buf) { const d = new Doc(buf); await d.readXref(); return d; }
+
+  async readXref() {
+    const b = this.buf;
+    const i = lastIndexOfBytes(b, bytes("startxref"), b.length - 1);
+    if (i < 0) throw new Error("startxref が見つかりません（PDFではない可能性があります）");
+    const m = /startxref\s+(\d+)/.exec(latin(b, i, Math.min(b.length, i + 60)));
+    if (!m) throw new Error("startxref を解釈できません");
+    this.entries = new Map();
+    this.trailer = null;
+    this.xrefStyle = null;
+    const seen = new Set();
+    let off = parseInt(m[1], 10);
+    while (off !== undefined && off !== null && !seen.has(off) && off >= 0 && off < b.length) {
+      seen.add(off);
+      const t = await this.readXrefSection(off);
+      if (!this.trailer) this.trailer = t.dict;
+      if (this.xrefStyle === null) this.xrefStyle = t.style;
+      const xs = t.dict.map.get("/XRefStm");
+      if (xs && xs.v.t === "num" && !seen.has(xs.v.v)) {
+        seen.add(xs.v.v);
+        try { await this.readXrefSection(xs.v.v); } catch (e) {}
+      }
+      const prev = t.dict.map.get("/Prev");
+      off = prev && prev.v.t === "num" ? prev.v.v : null;
+    }
+    if (!this.trailer) throw new Error("trailer が見つかりません");
+    if (this.trailer.map.has("/Encrypt")) throw new Error("暗号化されたPDFには対応していません");
+  }
+
+  async readXrefSection(off) {
+    const b = this.buf;
+    let p = this.parser.skip(off);
+    if (latin(b, p, p + 4) === "xref") {                 // 旧来の相互参照表
+      p += 4;
+      for (;;) {
+        p = this.parser.skip(p);
+        if (latin(b, p, p + 7) === "trailer") { p += 7; break; }
+        const h = /^(\d+)\s+(\d+)/.exec(latin(b, p, Math.min(b.length, p + 40)));
+        if (!h) throw new Error("xref表を解釈できません");
+        let start = parseInt(h[1], 10), count = parseInt(h[2], 10);
+        p = this.parser.skip(p + h[0].length);
+        for (let k = 0; k < count; k++) {
+          const line = latin(b, p, p + 20);
+          const mm2 = /^(\d{10})\s(\d{5})\s([nf])/.exec(line);
+          if (mm2) {
+            const num = start + k;
+            if (!this.entries.has(num) && mm2[3] === "n")
+              this.entries.set(num, { type: 1, offset: parseInt(mm2[1], 10) });
+            p += 20;
+            if (!/[\r\n]/.test(line[18] + line[19])) { // 区切りが18バイトの実装への保険
+              p -= 20; const nl = /\r\n|\r|\n/.exec(latin(b, p, p + 32));
+              p += (nl ? nl.index + nl[0].length : 20);
+            }
+          } else { p = this.parser.skip(p); k--; if (p >= b.length) throw new Error("xref表が壊れています"); }
+        }
+      }
+      const d = this.parser.parse(p).v;
+      return { dict: d.t === "stream" ? d.dict : d, style: "table" };
+    }
+    // 相互参照ストリーム
+    const o = this.parseIndirectAt(off);
+    if (!o || o.v.t !== "stream") throw new Error("相互参照ストリームが見つかりません");
+    const dict = o.v.dict;
+    const data = await this.streamData(o.v);
+    const W = dict.map.get("/W").v.items.map(x => x.v);
+    const size = dict.map.get("/Size").v.v;
+    let index = [0, size];
+    if (dict.map.has("/Index")) index = dict.map.get("/Index").v.items.map(x => x.v);
+    let pos = 0;
+    const rd = n => { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + data[pos++]; return v; };
+    for (let s = 0; s < index.length; s += 2) {
+      const start = index[s], count = index[s + 1];
+      for (let k = 0; k < count; k++) {
+        if (pos >= data.length) break;
+        const f1 = W[0] === 0 ? 1 : rd(W[0]), f2 = rd(W[1]), f3 = rd(W[2]);
+        const num = start + k;
+        if (!this.entries.has(num)) {
+          if (f1 === 1) this.entries.set(num, { type: 1, offset: f2 });
+          else if (f1 === 2) this.entries.set(num, { type: 2, stm: f2, idx: f3 });
+        }
+      }
+    }
+    return { dict, style: "stream" };
+  }
+
+  parseIndirectAt(off) {
+    const b = this.buf;
+    let p = this.parser.skip(off);
+    const h = /^(\d+)\s+(\d+)\s+obj/.exec(latin(b, p, Math.min(b.length, p + 40)));
+    if (!h) return null;
+    p += h[0].length;
+    const r = this.parser.parse(p);
+    return { num: parseInt(h[1], 10), v: r.v, end: r.end };
+  }
+
+  async streamData(st) {
+    const dict = st.dict;
+    let len = dict.map.get("/Length");
+    let L;
+    if (len && len.v.t === "num") L = len.v.v;
+    else if (len && len.v.t === "ref") L = (await this.get(len.v.num)).v.v;
+    else {
+      const e = indexOfBytes(this.buf, bytes("endstream"), st.dataStart);
+      L = e - st.dataStart;
+    }
+    let raw = this.buf.subarray(st.dataStart, st.dataStart + L);
+    const f = dict.map.get("/Filter");
+    const filters = !f ? [] : (f.v.t === "name" ? [f.v.v] : f.v.items.map(x => x.v));
+    for (const flt of filters) {
+      if (flt === "/FlateDecode") raw = await inflate(raw);
+      else if (flt === "/ASCIIHexDecode" || flt === "/ASCII85Decode" || flt === "/LZWDecode")
+        throw new Error("未対応のフィルタ: " + flt);
+      else return raw; // 画像系フィルタなどはそのまま
+    }
+    const dp = dict.map.get("/DecodeParms");
+    if (dp && dp.v.t === "dict") {
+      const g = k => dp.v.map.has(k) ? dp.v.map.get(k).v.v : null;
+      const pred = g("/Predictor");
+      if (pred && pred >= 10)
+        raw = unpredict(raw, pred, g("/Colors") || 1, g("/BitsPerComponent") || 8, g("/Columns") || 1);
+    }
+    return raw;
+  }
+
+  /* オブジェクト取得。{v, src} を返す（src は値が載っているバッファ） */
+  async get(num) {
+    if (this.cache.has(num)) return this.cache.get(num);
+    const e = this.entries.get(num);
+    let res = { v: { t: "null" }, src: this.buf };
+    if (e && e.type === 1) {
+      const o = this.parseIndirectAt(e.offset);
+      if (o && o.num === num) res = { v: o.v, src: this.buf };
+    } else if (e && e.type === 2) {
+      const stmObj = await this.get(e.stm);
+      if (stmObj.v.t === "stream") {
+        if (!stmObj.data) {
+          stmObj.data = await this.streamData(stmObj.v);
+          stmObj.parser = new Parser(stmObj.data);
+          const n = stmObj.v.dict.map.get("/N").v.v;
+          const first = stmObj.v.dict.map.get("/First").v.v;
+          const head = latin(stmObj.data, 0, first).trim().split(/\s+/).map(Number);
+          stmObj.offsets = new Map();
+          for (let i = 0; i < n; i++) stmObj.offsets.set(head[i * 2], first + head[i * 2 + 1]);
+        }
+        const off = stmObj.offsets.get(num);
+        if (off !== undefined) res = { v: stmObj.parser.parse(off).v, src: stmObj.data };
+      }
+    }
+    this.cache.set(num, res);
+    return res;
+  }
+
+  async resolve(v, src) {
+    if (v && v.t === "ref") { const o = await this.get(v.num); return { v: o.v, src: o.src }; }
+    return { v, src: src || this.buf };
+  }
+
+  async catalog() {
+    const r = this.trailer.map.get("/Root");
+    const o = await this.resolve(r.v);
+    return { num: r.v.t === "ref" ? r.v.num : null, dict: o.v, src: o.src };
+  }
+
+  /* ページ一覧（継承属性を解決） */
+  async pages() {
+    const cat = await this.catalog();
+    const pagesRef = cat.dict.map.get("/Pages").v;
+    const out = [];
+    const INHERIT = ["/Resources", "/MediaBox", "/CropBox", "/Rotate"];
+    const walk = async (ref, inh, depth) => {
+      if (depth > 64 || out.length > 20000) return;
+      const num = ref.t === "ref" ? ref.num : null;
+      const o = await this.resolve(ref);
+      const d = o.v.t === "stream" ? o.v.dict : o.v;
+      if (d.t !== "dict") return;
+      const inh2 = Object.assign({}, inh);
+      for (const k of INHERIT) if (d.map.has(k)) inh2[k] = { e: d.map.get(k), src: o.src };
+      const type = d.map.get("/Type");
+      const kids = d.map.get("/Kids");
+      if (kids && (!type || type.v.v === "/Pages")) {
+        const ka = (await this.resolve(kids.v, o.src)).v;
+        if (ka.t === "arr") for (const k of ka.items) await walk(k, inh2, depth + 1);
+      } else {
+        out.push({ num, dict: d, src: o.src, inh: inh2 });
+      }
+    };
+    await walk(pagesRef, {}, 0);
+    return out;
+  }
+}
+
+
+/* ---------- ページの箱 ---------- */
+async function boxOf(doc, page, key) {
+  let e = page.dict.map.get(key), src = page.src;
+  if (!e && page.inh[key]) { e = page.inh[key].e; src = page.inh[key].src; }
+  if (!e) return null;
+  const a = (await doc.resolve(e.v, src)).v;
+  if (a.t !== "arr") return null;
+  const v = [];
+  for (const it of a.items) {
+    const r = (await doc.resolve(it, src)).v;
+    v.push(r.t === "num" ? r.v : 0);
+  }
+  return [Math.min(v[0], v[2]), Math.min(v[1], v[3]), Math.max(v[0], v[2]), Math.max(v[1], v[3])];
+}
+
+async function pageGeom(doc, page) {
+  const media = (await boxOf(doc, page, "/MediaBox")) || [0, 0, 595.276, 841.89];
+  const crop = (await boxOf(doc, page, "/CropBox")) || media.slice();
+  let trim = await boxOf(doc, page, "/TrimBox"), src = "TrimBox";
+  if (!trim) { trim = await boxOf(doc, page, "/ArtBox"); src = "ArtBox"; }
+  if (!trim) { trim = (await boxOf(doc, page, "/CropBox")); src = "CropBox(代用)"; }
+  if (!trim) { trim = media.slice(); src = "MediaBox(代用)"; }
+  let rot = 0;
+  let e = page.dict.map.get("/Rotate") || (page.inh["/Rotate"] && page.inh["/Rotate"].e);
+  if (e) { const r = (await doc.resolve(e.v, page.src)).v; if (r.t === "num") rot = ((r.v % 360) + 360) % 360; }
+  return { media, crop, trim, trimSrc: src, rot };
+}
+
+
+/* ---------- 書き出し ---------- */
+class Writer {
+  constructor(doc) {
+    this.doc = doc;
+    this.parts = [];
+    this.offsets = new Map();
+    this.base = doc.buf.length;
+    this.pos = doc.buf.length;
+    const sz = doc.trailer.map.get("/Size");
+    this.next = sz && sz.v.t === "num" ? sz.v.v : 1;
+    let maxNum = 0; for (const k of doc.entries.keys()) maxNum = Math.max(maxNum, k);
+    this.next = Math.max(this.next, maxNum + 1);
+    if (doc.buf.length && doc.buf[doc.buf.length - 1] !== 0x0A) this.push(bytes("\n"));
+  }
+  push(u8) { this.parts.push(u8); this.pos += u8.length; }
+  alloc() { return this.next++; }
+  obj(num, body) {
+    this.offsets.set(num, this.pos);
+    this.push(bytes(num + " 0 obj\n"));
+    this.push(typeof body === "string" ? bytes(body) : body);
+    this.push(bytes("\nendobj\n"));
+  }
+  streamKeep(num, dict, src, data) {
+    this.offsets.set(num, this.pos);
+    const body = rebuildDict(dict, src,
+      { "/Length": String(data.length), "/Filter": null, "/DecodeParms": null });
+    this.push(bytes(num + " 0 obj\n"));
+    this.push(body);
+    this.push(bytes("\nstream\n"));
+    this.push(data);
+    this.push(bytes("\nendstream\nendobj\n"));
+  }
+  stream(num, dictStr, data) {
+    this.offsets.set(num, this.pos);
+    this.push(bytes(num + " 0 obj\n<< " + dictStr + " /Length " + data.length + " >>\nstream\n"));
+    this.push(data);
+    this.push(bytes("\nendstream\nendobj\n"));
+  }
+  finish() {
+    const doc = this.doc, tr = doc.trailer.map;
+    const rootRef = tr.get("/Root");
+    const rootStr = rootRef.v.t === "ref" ? rootRef.v.num + " 0 R" : "1 0 R";
+    const idEntry = tr.get("/ID");
+    const idStr = idEntry ? latin(this.overrideId || doc.buf, idEntry.s, idEntry.e) : null;
+    const nums = [...this.offsets.keys()].sort((a, b) => a - b);
+    const size = Math.max(...nums) + 1;
+    const startxref = this.pos;
+
+    if (doc.xrefStyle === "table") {
+      const groups = [];
+      for (const n of nums) {
+        const g = groups[groups.length - 1];
+        if (g && n === g.start + g.list.length) g.list.push(n);
+        else groups.push({ start: n, list: [n] });
+      }
+      let s = "xref\n";
+      for (const g of groups) {
+        s += g.start + " " + g.list.length + "\n";
+        for (const n of g.list)
+          s += String(this.offsets.get(n)).padStart(10, "0") + " 00000 n \n";
+      }
+      s += "trailer\n<< /Size " + size + " /Root " + rootStr + " /Prev " + this.prevOffset() +
+        (idStr ? " /ID " + idStr : "") + " >>\nstartxref\n" + startxref + "\n%%EOF\n";
+      this.push(bytes(s));
+    } else {
+      const num = this.alloc();
+      nums.push(num);
+      this.offsets.set(num, startxref);
+      nums.sort((a, b) => a - b);
+      const size2 = Math.max(...nums) + 1;
+      const groups = [];
+      for (const n of nums) {
+        const g = groups[groups.length - 1];
+        if (g && n === g.start + g.list.length) g.list.push(n);
+        else groups.push({ start: n, list: [n] });
+      }
+      const data = new Uint8Array(nums.length * 7);
+      let p = 0;
+      for (const g of groups) for (const n of g.list) {
+        const off = this.offsets.get(n);
+        data[p++] = 1;
+        data[p++] = (off >>> 24) & 255; data[p++] = (off >>> 16) & 255;
+        data[p++] = (off >>> 8) & 255; data[p++] = off & 255;
+        data[p++] = 0; data[p++] = 0;
+      }
+      const index = groups.map(g => g.start + " " + g.list.length).join(" ");
+      const dict = "/Type /XRef /Size " + size2 + " /Index [" + index + "] /W [1 4 2] /Root " +
+        rootStr + " /Prev " + this.prevOffset() + (idStr ? " /ID " + idStr : "");
+      this.push(bytes(num + " 0 obj\n<< " + dict + " /Length " + data.length + " >>\nstream\n"));
+      this.push(data);
+      this.push(bytes("\nendstream\nendobj\nstartxref\n" + startxref + "\n%%EOF\n"));
+    }
+    return concat([this.doc.buf, ...this.parts]);
+  }
+  prevOffset() {
+    const b = this.doc.buf;
+    const i = lastIndexOfBytes(b, bytes("startxref"), b.length - 1);
+    const m = /startxref\s+(\d+)/.exec(latin(b, i, Math.min(b.length, i + 60)));
+    return parseInt(m[1], 10);
+  }
+}
+
+/* 辞書を「指定キーだけ差し替えて」再構築（他のキーは元のバイト列をそのまま複製） */
+function rebuildDict(dict, src, replace, extra) {
+  const out = [bytes("<<")];
+  for (const [k, ent] of dict.map) {
+    if (Object.prototype.hasOwnProperty.call(replace, k)) continue;
+    out.push(bytes(" " + k + " "));
+    out.push(src.subarray(ent.s, ent.e));
+  }
+  for (const k in replace) if (replace[k] !== null) out.push(bytes(" " + k + " " + replace[k]));
+  if (extra) out.push(bytes(" " + extra));
+  out.push(bytes(" >>"));
+  return concat(out);
+}
+
+
+/* ---------- 追加分（pdf-incr.js 独自） ---------- */
+
+/* FlateDecode 用の圧縮。使えない環境では null を返す（呼び出し側で無圧縮にする） */
+async function deflate(u8) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter(); w.write(u8); w.close();
+    const chunks = []; const r = cs.readable.getReader();
+    for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
+    return concat(chunks);
+  } catch (e) { return null; }
+}
+
+/* 追記後のファイルの先頭が、元ファイルとバイト単位で一致しているか */
+function startsWith(out, orig) {
+  if (out.length < orig.length) return false;
+  for (let i = 0; i < orig.length; i++) if (out[i] !== orig[i]) return false;
+  return true;
+}
+
+return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, concat,
+         inflate, deflate, pdfTextString, readPdfString, startsWith, lastIndexOfBytes };
+})();
+
+</script>
+<script>/*!
+ * edge-core.js — KENPAN 共通モジュール（辺処理）
+ *
+ * 断ち代チェック（tachi-check.html）で使用。将来、ノド断ち代（nodo-dobu）・
+ * ノド白（nodo-shiro）の統合版からも同じ関数を呼べるよう、UI に依存しない
+ * 処理だけをここに置く。PDF の読み書きは pdf-incr.js（ノド白と同じ増分更新
+ * エンジン）に任せ、元ファイルのバイト列は一切書き換えない。
+ *
+ *  - ページとボックスの読み取り      readPages(buf)
+ *  - 辺の役割（天・地・小口・ノド）   sideRoles(pageIndex, opts)
+ *  - 辺ごとの絵柄広がりの実測       analyzeEdges(imageData, geom, opts)
+ *  - 断ち代を補う（反転／引き伸ばし） fillEdges(buf, jobs, opts)   … 増分更新
+ *  - 補正前に戻す                  revert(buf)                  … 追記部分の切り捨て
+ *  - 表示専用：CropBox を広げた複製  expandCropForView(buf, pages)
+ *
+ * 座標はすべて PDF のポイント（原点左下）。画像側はピクセル（原点左上）。
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.KenpanEdge = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const MM = 72 / 25.4;
+  const mm2pt = (mm) => mm * MM;
+  const pt2mm = (pt) => pt / MM;
+  const SIDES = ['top', 'bottom', 'left', 'right'];
+
+  const PDF = () => (typeof KenpanPdf !== 'undefined' ? KenpanPdf : require('./pdf-incr.js'));
+  const BASEKEY = '/KenpanEdgeBase';
+  const NODO_BASEKEY = '/NodoShiroBase';
+  const XO_NAME = '/KenpanEdge';
+  const RES_OC = '/OcKenpanEdge';
+  const DEFAULT_LAYER = '断ち代補正';
+  const MARK_BEGIN = '% >>>KENPAN_EDGE_V1_BEGIN';
+  const MARK_END = '% <<<KENPAN_EDGE_V1_END';
+  const MARK_GUARD = '% KENPAN_EDGE_V1_GUARD';
+
+  /* ---------- ボックス ---------- */
+
+  const toBox = (a) => (a ? { l: a[0], b: a[1], r: a[2], t: a[3] } : null);
+  function intersect(a, b) {
+    return { l: Math.max(a.l, b.l), b: Math.max(a.b, b.b), r: Math.min(a.r, b.r), t: Math.min(a.t, b.t) };
+  }
+  async function boxesOf(K, doc, page) {
+    const media = toBox(await K.boxOf(doc, page, '/MediaBox')) || { l: 0, b: 0, r: 595.276, t: 841.89 };
+    const crop = intersect(toBox(await K.boxOf(doc, page, '/CropBox')) || media, media);
+    const trimRaw = toBox(await K.boxOf(doc, page, '/TrimBox'));
+    const bleedRaw = toBox(await K.boxOf(doc, page, '/BleedBox'));
+    const g = await K.pageGeom(doc, page);
+    return {
+      media, crop,
+      trim: trimRaw ? intersect(trimRaw, media) : null,
+      bleed: bleedRaw ? intersect(bleedRaw, media) : null,
+      hasTrim: !!trimRaw, hasBleed: !!bleedRaw, rotate: g.rot,
+    };
+  }
+  async function catNum(K, doc, key) {
+    const cat = await doc.catalog();
+    const e = cat.dict.map.get(key);
+    return e && e.v.t === 'num' ? e.v.v : null;
+  }
+
+  /**
+   * ページ一覧とボックス。補正済みなら base（補正前のファイル長）も返す。
+   * @returns {{pages:[{index,boxes}], base:number|null}}
+   */
+  async function readPages(buf) {
+    const K = PDF();
+    const doc = await K.Doc.load(buf);
+    const pages = await doc.pages();
+    const out = [];
+    for (let i = 0; i < pages.length; i++) out.push({ index: i, direct: pages[i].num === null, boxes: await boxesOf(K, doc, pages[i]) });
+    return { pages: out, base: await catNum(K, doc, BASEKEY) };
+  }
+
+  /**
+   * 断ち代の外枠（実際に絵柄が必要な範囲）。BleedBox が無ければ既定値で作る。
+   */
+  function effectiveBleed(boxes, defaultBleedPt) {
+    const { trim, media } = boxes;
+    const b = boxes.bleed && boxes.hasBleed
+      ? boxes.bleed
+      : { l: trim.l - defaultBleedPt, b: trim.b - defaultBleedPt, r: trim.r + defaultBleedPt, t: trim.t + defaultBleedPt };
+    return intersect(b, media);
+  }
+
+  /* ---------- 辺の役割 ---------- */
+
+  /**
+   * @param {number} pageIndex 0 始まり
+   * @param {{mode:'book'|'sheet', binding:'right'|'left', startNombre:number}} opts
+   * @returns {{top,bottom,left,right}} 各値 'ten'|'chi'|'koguchi'|'nodo'
+   */
+  function sideRoles(pageIndex, opts) {
+    if (opts.mode === 'sheet') return { top: 'ten', bottom: 'chi', left: 'koguchi', right: 'koguchi' };
+    const nombre = (opts.startNombre || 1) + pageIndex;
+    const odd = Math.abs(nombre) % 2 === 1;
+    // 右綴じ：奇数ページは見開きの左側 → 小口が左
+    // 左綴じ：奇数ページは見開きの右側 → 小口が右
+    const koguchiLeft = opts.binding === 'right' ? odd : !odd;
+    return {
+      top: 'ten',
+      bottom: 'chi',
+      left: koguchiLeft ? 'koguchi' : 'nodo',
+      right: koguchiLeft ? 'nodo' : 'koguchi',
+    };
+  }
+
+  /* ---------- 実測 ---------- */
+
+  /* 長さが min 未満の区間を、隣の区間に吸収する（いちばん短いものから順に）。
+     near=true のときは値が近い方の隣へ（段差の区切り用）、それ以外は両隣と一緒にまとめる */
+  function absorb(runs, min, near) {
+    runs = runs.map((r) => Object.assign({}, r));
+    for (;;) {
+      if (runs.length <= 1) return runs;
+      let k = -1, best = Infinity;
+      runs.forEach((r, i) => { const L = r.e - r.s + 1; if (L < min && L < best) { best = L; k = i; } });
+      if (k < 0) return runs;
+      const r = runs[k], L = runs[k - 1], R = runs[k + 1];
+      let to;
+      if (!L) to = R; else if (!R) to = L;
+      else if (near) to = Math.abs(L.v - r.v) <= Math.abs(R.v - r.v) ? L : R;
+      else to = (L.e - L.s) >= (R.e - R.s) ? L : R;
+      to.s = Math.min(to.s, r.s); to.e = Math.max(to.e, r.e);
+      runs.splice(k, 1);
+      // 同じ値の隣どうしをつなぐ
+      for (let i = runs.length - 1; i > 0; i--) if (runs[i].v === runs[i - 1].v) { runs[i - 1].e = runs[i].e; runs.splice(i, 1); }
+    }
+  }
+
+  function percentile(sorted, p) {
+    if (!sorted.length) return NaN;
+    const i = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
+    return sorted[i];
+  }
+
+  /**
+   * レンダリング画像から、各辺で絵柄が仕上がり線の外へどこまで出ているかを測る。
+   *
+   * @param {{data:Uint8ClampedArray,width:number,height:number}} img RGBA
+   * @param {{view:{l,b,r,t}, scale:number, trim:{l,b,r,t}, bleed:{l,b,r,t}}} geom
+   *        view = 画像に描かれている範囲(pt)、scale = px/pt
+   * @param {{whiteTol:number, tolPt:number, probePt:number, minInkRatio:number, shortRatio:number}} o
+   * @returns 辺ごとの結果
+   */
+  function analyzeEdges(img, geom, o) {
+    const { data, width: W, height: H } = img;
+    const { view, scale: s, trim, bleed } = geom;
+    const whiteTol = o.whiteTol ?? 2;          // 0〜255。2 ≒ 1%：真っ白（0%）以外はすべて絵柄とみなす
+    const tolPt = o.tolPt ?? mm2pt(0.2);
+    const probePt = o.probePt ?? mm2pt(0.4);
+    const minInkRatio = o.minInkRatio ?? 0.03;
+    const gapPt = o.gapPt ?? mm2pt(0.3);        // 網点の隙間とみなす白の幅
+    const minRunPt = o.minRunPt ?? mm2pt(5);     // これより短い「足りない／足りている」区間は前後に吸収（dtp-preflight の MIN_RUN_MM=5 に合わせる）
+    const minSegPt = o.minSegPt ?? mm2pt(5);     // 段差で分ける区間の最小の長さ
+    const stepPt = o.stepPt ?? mm2pt(0.5);       // これ以上違えば別の区間として補う
+    // 写真の明るい部分（ハイライト）の誤検知よけ：前後が足りている短い区間で、仕上がり線の内側が明るいものは
+    // 写真の一部とみなして不足にしない
+    const lightAsPhoto = o.lightAsPhoto ?? true;
+    const lightMaxPt = o.lightMaxPt ?? mm2pt(15);   // この長さ以下の区間だけ
+    const lightInk = o.lightInk ?? 26;              // 内側の平均の濃さがこれ未満（≒10%）なら明るい
+
+    const px = (x) => (x - view.l) * s;
+    const py = (y) => (view.t - y) * s;
+    const inkOf = (x, y) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+      const i = (y * W + x) * 4;
+      const a = data[i + 3];
+      if (a < 8) return 0;
+      return Math.max(255 - data[i], 255 - data[i + 1], 255 - data[i + 2]) * (a / 255);
+    };
+    const inked = (x, y) => inkOf(x, y) > whiteTol;
+    // 仕上がり線の内側を 3px 平均で見る（網点・アンチエイリアス対策）
+    const inkedAround = (x, y, dx, dy) => {
+      let c = 0;
+      for (let k = -1; k <= 1; k++) if (inked(x + dx * k, y + dy * k)) c++;
+      return c >= 2;
+    };
+
+    const res = {};
+    for (const side of SIDES) {
+      const horiz = side === 'top' || side === 'bottom';
+      const needPt = side === 'top' ? bleed.t - trim.t : side === 'bottom' ? trim.b - bleed.b : side === 'left' ? trim.l - bleed.l : bleed.r - trim.r;
+      if (needPt <= tolPt) { res[side] = { status: 'nobleed', needPt }; continue; }
+      if (!insideView(view, bleed, side)) { res[side] = { status: 'outside', needPt }; continue; }
+
+      // 走査方向：a = 辺に沿う軸、d = 外向きの単位ベクトル（ピクセル）
+      const a0 = Math.ceil(horiz ? px(trim.l) : py(trim.t));
+      const a1 = Math.floor(horiz ? px(trim.r) : py(trim.b));
+      const edgePx = side === 'top' ? py(trim.t) : side === 'bottom' ? py(trim.b) : side === 'left' ? px(trim.l) : px(trim.r);
+      const out = side === 'top' || side === 'left' ? -1 : 1; // ピクセル座標での外向き
+      const needPx = Math.round(needPt * s);
+      const probePx = Math.max(2, Math.round(probePt * s));
+      const edgeIdx = Math.round(edgePx);
+      const firstOut = out < 0 ? edgeIdx - 1 : edgeIdx; // 仕上がり線のすぐ外の画素
+      const probe = edgeIdx - out * probePx;
+
+      // --- 列ごとに、仕上がり線の外へ絵柄がどこまで出ているか（px）を測る ---
+      // 網点・写真の明るい部分は、点と点の間に白い隙間がある。隙間が gapPx 以下なら絵柄が続いているとみなし、
+      // 両隣の列も合わせて見る（横方向の隙間も埋める）。これで網点のある断ち代を「足りている」と判定できる
+      const gapPx = Math.max(2, Math.round(gapPt * s));
+      const n = a1 - a0 + 1;
+      const ext = new Float32Array(n);       // 外へ出ている幅（px）。Infinity = 仕上がり際が白（補う必要なし）
+      const sub = new Float32Array(n);       // 今ある絵柄の端（仕上がり線から外へ、px、1画素より細かく）。補正のクリップ専用。NaN = 測れない列
+      const inside = new Float32Array(n);    // 仕上がり線の内側（0.4〜2mm）の平均の濃さ
+      const inN = Math.max(2, Math.round(mm2pt(2) * s));
+      // firstOut 画素の内側の境目が、仕上がり線から外へ何px ずれているか
+      const offPx = out > 0 ? edgeIdx - edgePx : edgePx - edgeIdx;
+      const covs = new Float32Array(n);      // 端の画素の塗られ具合（0〜1）
+
+      let inkCols = 0;
+      for (let i = 0; i < n; i++) {
+        const a = a0 + i;
+        const P = (d, aa) => (horiz ? [aa, d] : [d, aa]);
+        const [qx, qy] = P(probe, a);
+        let sum = 0;
+        for (let k = 0; k < inN; k += 2) { const [x, y] = P(probe - out * k, a); sum += inkOf(x, y); }
+        inside[i] = sum / Math.ceil(inN / 2);
+        if (!inkedAround(qx, qy, horiz ? 1 : 0, horiz ? 0 : 1)) { ext[i] = Infinity; sub[i] = NaN; continue; }
+        inkCols++;
+        let last = -1, gap = 0;
+        for (let k = 0; k < needPx + 2; k++) {
+          const d = firstOut + out * k;
+          let hit = false;
+          for (let j = -1; j <= 1 && !hit; j++) { const [x, y] = P(d, a + j); hit = inked(x, y); }
+          if (hit) { last = k; gap = 0; } else if (++gap > gapPx) break;
+        }
+        ext[i] = last + 1;
+        // 端の画素の塗られ具合（アンチエイリアスの濃さ ÷ 1つ内側の画素の濃さ）で、端を1画素より細かく求める。
+        // 判定（ext）には使わない。補正で「元の絵柄の端」からクリップするためだけに使う（重ねない・隙間を作らない）
+        const colInk = (d) => { let m = 0; for (let j = -1; j <= 1; j++) { const [x, y] = P(d, a + j); m = Math.max(m, inkOf(x, y)); } return m; };
+        const dl = firstOut + out * last;
+        const cov = Math.min(1, Math.max(0, colInk(dl) / Math.max(1, colInk(dl - out))));
+        covs[i] = cov;
+        sub[i] = last + offPx;      // 端の画素の内側の境目。下で塗られ具合を足す
+      }
+      // 端の画素の塗られ具合を足す。辺の多くの列で中間の濃さがあれば、アンチエイリアスで描かれた端なのでそのまま使う。
+      // 中間の濃さがほとんど無い辺（画像の端など、アンチエイリアスなしで「画素の中心が入れば塗る」描かれ方）は、
+      // 塗り切られた画素の端が「その画素の中ほど〜次の画素の中ほど」のどこかにあるので、隙間を作らないよう内側の 0.5 をとる
+      {
+        let mid = 0, cnt = 0;
+        for (let i = 0; i < n; i++) if (!isNaN(sub[i])) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
+        const aa = cnt > 0 && mid / cnt >= 0.2;
+        for (let i = 0; i < n; i++) if (!isNaN(sub[i])) sub[i] = Math.max(0, sub[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i]));
+      }
+
+      const inkRatio = n ? inkCols / n : 0;
+      if (inkRatio < minInkRatio) { res[side] = { status: 'margin', needPt, inkRatio }; continue; }
+
+      // --- 足りている／足りないの区間に分ける（短い区間は前後に吸収して、細かく割らない） ---
+      const needLim = needPx - tolPt * s;
+      const isShort = (v) => v !== Infinity && v < needLim;
+      const minRunPx = Math.max(3, Math.round(minRunPt * s));
+      let runs = [];
+      for (let i = 0; i < n; i++) {
+        const v = isShort(ext[i]);
+        const r = runs[runs.length - 1];
+        if (r && r.v === v) r.e = i; else runs.push({ v, s: i, e: i });
+      }
+      runs = absorb(runs, minRunPx);
+
+      // --- 写真の明るい部分の誤検知を外す：前後が足りている短い区間で、内側が明るいもの ---
+      let lightDropped = 0;
+      if (lightAsPhoto) {
+        const lim = Math.round(lightMaxPt * s);
+        runs.forEach((r, k) => {
+          if (!r.v || r.e - r.s + 1 > lim) return;
+          const L = runs[k - 1], R = runs[k + 1];
+          if ((L && L.v) || (R && R.v) || (!L && !R)) return;      // 隣が「足りている」区間であること
+          let sum = 0; for (let i = r.s; i <= r.e; i++) sum += inside[i];
+          if (sum / (r.e - r.s + 1) < lightInk) { r.v = false; r.light = true; lightDropped++; }
+        });
+        if (lightDropped) {   // 同じ値の隣どうしをつなぐ
+          const m = [];
+          for (const r of runs) { const q = m[m.length - 1]; if (q && q.v === r.v) q.e = r.e; else m.push(Object.assign({}, r)); }
+          runs = m;
+        }
+      }
+
+      // --- 足りない区間の中を、足りなさの程度（段差）で分ける ---
+      const stepPx = Math.max(2, stepPt * s);
+      const segsPx = [];
+      for (const r of runs) {
+        if (!r.v) continue;
+        // 1mm 幅の中央値でならしてから段差で区切る
+        const w = Math.max(1, Math.round(mm2pt(0.5) * s));
+        const lv = [];
+        for (let i = r.s; i <= r.e; i++) {
+          const win = [];
+          for (let j = Math.max(r.s, i - w); j <= Math.min(r.e, i + w); j++) if (ext[j] !== Infinity) win.push(ext[j]);
+          win.sort((x, y) => x - y);
+          lv.push(win.length ? win[win.length >> 1] : needPx);
+        }
+        let parts = [];
+        for (let i = 0; i < lv.length; i++) {
+          const b = Math.round(lv[i] / stepPx);
+          const pr = parts[parts.length - 1];
+          if (pr && pr.v === b) pr.e = r.s + i; else parts.push({ v: b, s: r.s + i, e: r.s + i });
+        }
+        parts = absorb(parts, Math.max(minRunPx, Math.round(minSegPt * s)), true);
+        for (const q of parts) {
+          const vals = [];
+          for (let i = q.s; i <= q.e; i++) if (ext[i] !== Infinity) vals.push(ext[i]);
+          vals.sort((x, y) => x - y);
+          const lo = vals.length ? vals[Math.floor(0.03 * (vals.length - 1))] : 0;
+          const med = vals.length ? vals[vals.length >> 1] : 0;
+          segsPx.push({ s: q.s, e: q.e, lo, med });
+        }
+      }
+      const toPt = (i) => (horiz ? (a0 + i) / s + view.l : view.t - (a0 + i) / s);   // 画素 i の始まりの境目（pt）
+      // 区間の両端（画素の境目の番号、小数あり）：辺の端に接していれば仕上がり線の端まで。
+      // 「足りている」区間との境目は2px広げる（測定は両隣の列も見ているので、境目に髪の毛ほどの白が残らないように）。
+      // 隣も「足りない」区間なら広げずに境目でぴったり接する（広げると、その幅が二重に描かれて透明効果で濃くなる）
+      const tEnd = (t) => (t <= 0 ? (horiz ? trim.l : trim.t) : t >= n ? (horiz ? trim.r : trim.b) : toPt(t));
+      const ord = (u, v) => [Math.min(u, v), Math.max(u, v)];
+      const segments = segsPx.map((q, j) => {
+        const P = segsPx[j - 1], N = segsPx[j + 1];
+        const t0 = q.s === 0 ? 0 : P && P.e + 1 === q.s ? q.s : Math.max(0, q.s - 2.5);
+        const t1 = q.e === n - 1 ? n : N && q.e + 1 === N.s ? q.e + 1 : Math.min(n, q.e + 1 + 2.5);
+        const [lo, hi] = ord(tEnd(t0), tEnd(t1));
+        return {
+          a0: lo, a1: hi, lenPt: hi - lo,
+          core: ord(tEnd(q.s), tEnd(q.e + 1)),                  // 実際に足りない列の範囲（軸の当てはめに使う）
+          extPt: q.med / s,                                     // この区間の今ある断ち代（中央値）
+          keepPt: Math.max(0, q.lo / s - 1 / s - mm2pt(0.05)),  // 下の shapeSegments で軸から決め直す
+          atStart: q.s === 0, atEnd: q.e === n - 1,
+        };
+      });
+      // 元の絵柄の端（edge）と反転の軸（axis）を、1画素より細かく測った端の位置（sub）から決める
+      {
+        const A = [], D = [];
+        for (let i = 0; i < n; i++) { A.push(toPt(i + 0.5)); D.push(sub[i] / s); }
+        shapeSegments(segments, horiz ? A : A.reverse(), horiz ? D : D.reverse(), needPt, 1 / s);
+      }
+      const finite = []; for (let i = 0; i < n; i++) if (ext[i] !== Infinity) finite.push(ext[i] / s);
+      finite.sort((x, y) => x - y);
+      const shortLen = segments.reduce((t, g) => t + g.lenPt, 0);
+      const worst = segments.length ? Math.min(...segments.map((g) => g.extPt)) : null;
+      res[side] = {
+        status: segments.length ? 'short' : 'ok',
+        needPt, inkRatio, lightDropped,
+        shortRatio: shortLen / ((horiz ? trim.r - trim.l : trim.t - trim.b) || 1),   // 足りない区間の長さの割合
+        partial: segments.length > 0 && shortLen < 0.97 * (horiz ? trim.r - trim.l : trim.t - trim.b),
+        minPt: percentile(finite, 0.05),
+        medianPt: percentile(finite, 0.5),
+        shortMedianPt: worst,                                    // 一番足りない区間の断ち代
+        keepPt: segments.length ? Math.min(...segments.map((g) => g.keepPt)) : 0,
+        segments,
+      };
+    }
+    return res;
+  }
+
+  /**
+   * 足りない区間ごとに「元の絵柄の端の折れ線（edge）」と「反転の軸（axis）」を決める（analyzeEdges・refineEdges 共通）。
+   *  A[] = 辺に沿う座標（pt・小さい順）、D[] = その位置の元の絵柄の端（仕上がり線から外へ pt、NaN = 測れない）
+   *  pxPt = 測った画像の1画素（pt）
+   *  ・edge：近くの最小をとった下側の包絡線を 0.5mm ごとに。隙間よりわずかな重なりの側に倒す
+   *  ・axis：端の並びに直線を当てはめ（斜めの端にも合う）、3% 点まで内側へ寄せ、さらに 1画素＋0.05mm 内側。
+   *    接している「足りない」区間がまとめて1本の直線に乗る（ずれ 0.15mm 以内）なら同じ軸にする（斜めの端が段差で区切られても継ぎ目が出ない）
+   */
+  function shapeSegments(segments, A, D, needPt, pxPt) {
+    const n = A.length;
+    if (!n || !segments.length) return;
+    const F = Float64Array.from(D);       // 測れない列は近くの列で埋める
+    { let v = NaN; for (let i = 0; i < n; i++) { if (isNaN(D[i])) F[i] = v; else v = D[i]; }
+      v = NaN; for (let i = n - 1; i >= 0; i--) { if (!isNaN(D[i])) v = D[i]; else F[i] = isNaN(F[i]) ? (isNaN(v) ? 0 : v) : isNaN(v) ? F[i] : Math.min(F[i], v); } }
+    const maxD = needPt + 2 * pxPt;
+    const idx = (a) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (A[m] < a) lo = m + 1; else hi = m; } return lo; };
+    const stepPt = mm2pt(0.5);
+    const envAt = (a) => {
+      let m = Infinity;
+      for (let i = Math.max(0, idx(a - stepPt / 2 - pxPt) - 1); i < n && A[i] <= a + stepPt / 2 + pxPt; i++) m = Math.min(m, F[i]);
+      if (m === Infinity) m = F[Math.min(n - 1, idx(a))];
+      return Math.max(0, Math.min(m, maxD));
+    };
+    const margin = pxPt + mm2pt(0.05);
+    const fit = (list) => {
+      const xs = [], ys = [];
+      for (const g of list) for (let i = idx(g.core[0]); i < n && A[i] <= g.core[1]; i++) if (!isNaN(D[i])) { xs.push(A[i]); ys.push(Math.min(D[i], maxD)); }
+      if (xs.length < 2) return null;
+      const mx = xs.reduce((t, v) => t + v, 0) / xs.length, my = ys.reduce((t, v) => t + v, 0) / ys.length;
+      let sxx = 0, sxy = 0; for (let i = 0; i < xs.length; i++) { sxx += (xs[i] - mx) ** 2; sxy += (xs[i] - mx) * (ys[i] - my); }
+      const m = sxx > 0 ? sxy / sxx : 0;
+      const r = ys.map((y, i) => y - (my + m * (xs[i] - mx))).sort((x, y) => x - y);
+      const absr = r.map(Math.abs).sort((x, y) => x - y);
+      return { ref: mx, o: my + percentile(r, 0.03) - margin, m, resid: percentile(absr, 0.97) };
+    };
+    const order = segments.map((g, i) => i).sort((i, j) => segments[i].core[0] - segments[j].core[0]);
+    for (let j = 0; j < order.length;) {
+      let k = j; while (k + 1 < order.length && Math.abs(segments[order[k]].core[1] - segments[order[k + 1]].core[0]) < 1e-6) k++;
+      const grp = order.slice(j, k + 1).map((i) => segments[i]);
+      const L = grp.length > 1 ? fit(grp) : null;
+      for (const g of grp) {
+        const line = (L && L.resid <= mm2pt(0.15) ? L : fit([g])) || { ref: g.a0, o: Math.max(0, g.extPt - margin), m: 0 };
+        g.axis = { ref: line.ref, o: line.o, m: line.m };
+        const at = (a) => line.o + line.m * (a - line.ref);
+        g.keepPt = Math.max(0, Math.min(at(g.a0), at(g.a1)));
+        const pts = [];
+        for (let a = g.a0; ; a += stepPt) { const aa = Math.min(a, g.a1); pts.push([aa, envAt(aa)]); if (aa >= g.a1) break; }
+        // 一直線に並ぶ点は省く（内容ストリームを小さく。ずれ 0.001mm 未満）
+        const simp = [pts[0]];
+        for (let i = 1; i < pts.length - 1; i++) {
+          const p = simp[simp.length - 1], q = pts[i + 1], [aa, d] = pts[i];
+          const dl = p[1] + (q[1] - p[1]) * (aa - p[0]) / ((q[0] - p[0]) || 1);
+          if (Math.abs(d - dl) > 0.003) simp.push(pts[i]);
+        }
+        if (pts.length > 1) simp.push(pts[pts.length - 1]);
+        g.edge = simp;
+
+      }
+      j = k + 1;
+    }
+  }
+
+  /**
+   * 1画素より細かく、元の絵柄の端の位置を列ごとに測る（refineEdges 用）。analyzeEdges と同じ数え方
+   * （0%以外は絵柄・網点の隙間 0.3mm 以下は続いているとみなす）で、端の画素の塗られ具合を足す。
+   * img は辺の帯（仕上がり線の 1mm ほど内側〜断ち代の外端）だけを描いた画像でよい。
+   * @returns {{A:number[], D:number[]}} 辺に沿う座標（小さい順）と、元の絵柄の端（仕上がり線から外へ pt、NaN = 内側が白）
+   */
+  function measureEdgeSamples(img, geom, side, o) {
+    o = o || {};
+    const { data, width: W, height: H } = img;
+    const { view, scale: s, trim, bleed } = geom;
+    const whiteTol = o.whiteTol ?? 2, probePt = o.probePt ?? mm2pt(0.4), gapPt = o.gapPt ?? mm2pt(0.3);
+    const horiz = side === 'top' || side === 'bottom';
+    const px = (x) => (x - view.l) * s, py = (y) => (view.t - y) * s;
+    const inkOf = (x, y) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+      const i = (y * W + x) * 4, al = data[i + 3];
+      return al < 8 ? 0 : Math.max(255 - data[i], 255 - data[i + 1], 255 - data[i + 2]) * (al / 255);
+    };
+    const needPt = side === 'top' ? bleed.t - trim.t : side === 'bottom' ? trim.b - bleed.b : side === 'left' ? trim.l - bleed.l : bleed.r - trim.r;
+    const edgePx = side === 'top' ? py(trim.t) : side === 'bottom' ? py(trim.b) : side === 'left' ? px(trim.l) : px(trim.r);
+    const out = side === 'top' || side === 'left' ? -1 : 1;
+    const edgeIdx = Math.round(edgePx), firstOut = out < 0 ? edgeIdx - 1 : edgeIdx, offPx = out > 0 ? edgeIdx - edgePx : edgePx - edgeIdx;
+    const probe = edgeIdx - out * Math.max(2, Math.round(probePt * s));
+    const needPx = Math.round(needPt * s), gapPx = Math.max(2, Math.round(gapPt * s));
+    const a0 = Math.max(0, Math.ceil(horiz ? px(trim.l) : py(trim.t))), a1 = Math.min((horiz ? W : H) - 1, Math.floor(horiz ? px(trim.r) : py(trim.b)));
+    const P = (d, aa) => (horiz ? [aa, d] : [d, aa]);
+    const A = [], D = [], covs = [];
+    for (let a = a0; a <= a1; a++) {
+      let c = 0; for (let k = -1; k <= 1; k++) { const [x, y] = P(probe, a + k); if (inkOf(x, y) > whiteTol) c++; }
+      A.push(horiz ? (a + 0.5) / s + view.l : view.t - (a + 0.5) / s);
+      if (c < 2) { D.push(NaN); covs.push(0); continue; }
+      let last = -1, gap = 0;
+      for (let k = 0; k < needPx + 2; k++) {
+        const d = firstOut + out * k; let hit = false;
+        for (let j = -1; j <= 1 && !hit; j++) { const [x, y] = P(d, a + j); hit = inkOf(x, y) > whiteTol; }
+        if (hit) { last = k; gap = 0; } else if (++gap > gapPx) break;
+      }
+      const colInk = (d) => { let m = 0; for (let j = -1; j <= 1; j++) { const [x, y] = P(d, a + j); m = Math.max(m, inkOf(x, y)); } return m; };
+      const dl = firstOut + out * last;
+      const cov = Math.min(1, Math.max(0, colInk(dl) / Math.max(1, colInk(dl - out))));
+      covs.push(cov); D.push(last + offPx);
+    }
+    let mid = 0, cnt = 0;
+    for (let i = 0; i < D.length; i++) if (!isNaN(D[i])) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
+    const aa = cnt > 0 && mid / cnt >= 0.2;
+    for (let i = 0; i < D.length; i++) if (!isNaN(D[i])) D[i] = Math.max(0, D[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i])) / s;
+    if (!horiz) { A.reverse(); D.reverse(); }
+    return { A, D };
+  }
+
+  /** 補正のための辺の帯（pt）。refineEdges に渡す画像はこの範囲を描けばよい（仕上がり線の 1mm 内側〜断ち代の外端） */
+  function stripRect(side, trim, bleed) {
+    const i = mm2pt(1);
+    if (side === 'top') return { l: trim.l, r: trim.r, b: trim.t - i, t: bleed.t };
+    if (side === 'bottom') return { l: trim.l, r: trim.r, b: bleed.b, t: trim.b + i };
+    if (side === 'left') return { l: bleed.l, r: trim.l + i, b: trim.b, t: trim.t };
+    return { l: trim.r - i, r: bleed.r, b: trim.b, t: trim.t };
+  }
+
+  /**
+   * 元の絵柄の端を、高い解像度で描いた辺の帯から測り直す（判定は変えない。補正の edge・axis だけを決め直す）。
+   * 200dpi の判定画像では端が ±0.03mm 程度しか分からず、透明効果のある絵柄では髪の毛ほどの重なりが濃い線に見えるため。
+   *   edges = analyzeEdges の結果、img = stripRect の範囲を scale(px/pt) で描いた RGBA、view = その範囲
+   */
+  function refineEdges(edges, side, img, geom, o) {
+    const e = edges[side];
+    if (!e || e.status !== 'short' || !e.segments || !e.segments.length) return false;
+    const { A, D } = measureEdgeSamples(img, geom, side, o);
+    if (!A.length) return false;
+    shapeSegments(e.segments, A, D, e.needPt, 1 / geom.scale);
+    e.keepPt = Math.min(...e.segments.map((g) => g.keepPt));
+    e.refined = geom.scale * 72;     // 測り直した解像度（dpi）
+    return true;
+  }
+
+  function insideView(view, bleed, side) {
+    const e = 0.01;
+    if (side === 'top') return bleed.t <= view.t + e;
+    if (side === 'bottom') return bleed.b >= view.b - e;
+    if (side === 'left') return bleed.l >= view.l - e;
+    return bleed.r <= view.r + e;
+  }
+
+  /* ---------- 断ち代を補う（反転／引き伸ばし・増分更新） ---------- */
+
+  const f4 = (v) => (Math.abs(v) < 1e-9 ? '0' : (+v.toFixed(4)).toString());
+
+  /**
+   * 辺ごとの描画命令。ページ自身の内容（Form XObject）を変形して、断ち代の範囲だけに描く。
+   *  - 'mirror'  仕上がり線を軸に内側の絵柄を反転コピー
+   *  - 'stretch' 仕上がり線のすぐ内側の細い帯（srcPt 幅）を外側へ引き伸ばす
+   * 変換：x' = c(1+k) − k·x （c = 仕上がり線、反転は k = 1、引き伸ばしは k = 断ち代幅 / srcPt）
+   * 角は縦横それぞれの k を組み合わせる。
+   */
+  /**
+   * 断ち代の描画命令。辺ごとに区間（segs）があり、区間ごとに「今ある断ち代の端（keep）」を軸にして
+   * その外側だけを補う。区間ごとに足りない量が違っていても、それぞれに合わせて補える。
+   *   segs[side] = [{a0, a1, keepPt}]  a0〜a1 は辺に沿う座標（天地＝x、左右＝y）
+   */
+  function edgeOps(how, T, B, srcPt, keep, segs, exact) {
+    keep = keep || {}; segs = segs || {};
+    const span = { top: [T.l, T.r], bottom: [T.l, T.r], left: [T.b, T.t], right: [T.b, T.t] };
+    const full = { top: B.t - T.t, bottom: T.b - B.b, left: T.l - B.l, right: B.r - T.r };
+    // 仕上がり線からの距離 d を、辺 k の外向きの座標に直す
+    const outC = (k, d) => (k === 'top' ? T.t + d : k === 'bottom' ? T.b - d : k === 'left' ? T.l - d : T.r + d);
+    const S2 = {};
+    for (const k of SIDES) {
+      if (!how[k]) { S2[k] = []; continue; }
+      const list = segs[k] && segs[k].length ? segs[k] : [{ a0: span[k][0], a1: span[k][1], keepPt: keep[k] || 0 }];
+      S2[k] = list.map((g) => {
+        const a0 = Math.max(span[k][0], g.a0), a1 = Math.min(span[k][1], g.a1);
+        const lim = Math.max(0, full[k] - 0.01);
+        // 軸（仕上がり線からの距離。斜めなら辺に沿って変わる）。区間情報が古い形なら keepPt の水平な軸
+        const ax = g.axis || { ref: a0, o: Math.max(0, g.keepPt || 0), m: 0 };
+        const axisD = (aa) => Math.min(ax.o + ax.m * (aa - ax.ref), lim);
+        // 元の絵柄の端（ここから外だけに描く）。無ければ軸から
+        // exact でないページ（透明効果なし）は軸から描く＝元の絵柄に少し重ねる
+        let edge = exact && g.edge && g.edge.length >= 2 ? g.edge.map(([aa, d]) => [Math.min(Math.max(aa, a0), a1), Math.min(Math.max(d, axisD(aa)), full[k])])
+          : [[a0, Math.max(0, axisD(a0))], [a1, Math.max(0, axisD(a1))]];
+        const width = full[k] - Math.min(axisD(a0), axisD(a1));
+        return { k, a0, a1, axisD, line: (aa) => ax.o + ax.m * (aa - ax.ref), edge, kf: how[k] === 'stretch' ? Math.max(1, width / srcPt) : 1,
+          atStart: g.a0 <= span[k][0] + 0.01, atEnd: g.a1 >= span[k][1] - 0.01, ax };
+      });
+      // 同じ軸で接している区間（斜めの端が段差で区切られたもの）は1つの多角形にまとめる。
+      // 別々に描くと、接している境目の1画素が両方に塗られて濃くなることがある
+      const merged = [];
+      for (const g of S2[k]) {
+        const p = merged[merged.length - 1];
+        if (p && Math.abs(p.a1 - g.a0) < 1e-6 && p.ax.o === g.ax.o && p.ax.m === g.ax.m && p.ax.ref === g.ax.ref && p.kf === g.kf) {
+          p.edge = p.edge.concat(g.edge.slice(1)); p.a1 = g.a1; p.atEnd = g.atEnd;
+        } else merged.push(Object.assign({}, g));
+      }
+      S2[k] = merged;
+    }
+
+    let s = '';
+    // 多角形 pts で切り抜いて、行列 M でページの複製を描く
+    const draw = (pts, M) => {
+      if (pts.length < 3) return;
+      let area = 0; for (let i = 0; i < pts.length; i++) { const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % pts.length]; area += x0 * y1 - x1 * y0; }
+      if (Math.abs(area) < 1e-6) return;
+      s += 'q ' + pts.map(([x, y], i) => `${f4(x)} ${f4(y)} ${i ? 'l' : 'm'}`).join(' ') + ` h W n ${M.map(f4).join(' ')} cm ${XO_NAME} Do Q\n`;
+    };
+    const rectPts = (xa, ya, xb, yb) => {
+      const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = Math.min(ya, yb), y1 = Math.max(ya, yb);
+      return x1 - x0 <= 1e-6 || y1 - y0 <= 1e-6 ? [] : [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    };
+    // 軸 c(a) = C + m·a で折り返す（k 倍）。天地：y' = (1+k)c(x) − k·y、左右：x' = (1+k)c(y) − k·x
+    // 斜めの軸も「辺に垂直な向き」に折り返すので、軸の上の点は動かず、継ぎ目がずれない
+    const mat = (horiz, C, m, kf) => (horiz ? [1, (1 + kf) * m, 0, -kf, 0, (1 + kf) * C] : [-kf, 0, (1 + kf) * m, 1, (1 + kf) * C, 0]);
+    const segMat = (g) => {
+      const horiz = g.k === 'top' || g.k === 'bottom';
+      // 外向きの座標で axis(a) = outC(k, o + m(a−ref)) を C + m'·a の形に
+      const c0 = outC(g.k, g.line(0)), c1 = outC(g.k, g.line(1));
+
+      return mat(horiz, c0, c1 - c0, g.kf);
+    };
+    // 各区間：元の絵柄の端（折れ線）〜断ち代の外端 だけを描く（元の絵柄と重ねない）
+    for (const k of SIDES) for (const g of S2[k]) {
+      const horiz = k === 'top' || k === 'bottom';
+      const P = (aa, d) => (horiz ? [aa, outC(k, d)] : [outC(k, d), aa]);
+      const pts = g.edge.map(([aa, d]) => P(aa, d));
+      pts.push(P(g.a1, full[k]), P(g.a0, full[k]));
+      draw(pts, segMat(g));
+    }
+    // 角：どの部分も「1回だけ」描く（二重に描くと透明効果で濃くなる）。v=天地側、h=左右側の区間。
+    //   eV/eH = 角での元の絵柄の端、aV/aH = 角での軸（角の中は水平・垂直な軸で折り返す）
+    //   ・左右側の続き（左右の元の端より外 × 仕上がり線〜天地の元の端）… 左右の区間だけが描く
+    //   ・天地側の続き（左右の元の端〜仕上がり線 × 天地の元の端より外）… 天地の区間だけが描く
+    //   ・外側の角（両方の元の端より外）… 縦横とも折り返して1回
+    //   ・残り（両方の元の端の内側）は元の絵柄のまま
+    const endSeg = (k, atEnd) => S2[k].find((g) => (atEnd ? g.atEnd : g.atStart)) || null;
+    const edgeEnd = (g, atEnd) => (atEnd ? g.edge[g.edge.length - 1][1] : g.edge[0][1]);
+    const corner = (gv, vEnd, gh, hEnd, kh, kv) => {
+      const xo = kh === 'left' ? B.l : B.r, xt = kh === 'left' ? T.l : T.r;
+      const yo = kv === 'top' ? B.t : B.b, yt = kv === 'top' ? T.t : T.b;
+      const cx = kh === 'left' ? T.l : T.r, cy = kv === 'top' ? T.t : T.b;   // 角の位置（辺に沿う座標）
+      const vM = gv && mat(true, outC(kv, gv.axisD(cx)), 0, gv.kf);
+      const hM = gh && mat(false, outC(kh, gh.axisD(cy)), 0, gh.kf);
+      if (gv && gh) {
+        const eV = outC(kv, edgeEnd(gv, vEnd)), eH = outC(kh, edgeEnd(gh, hEnd));
+        draw(rectPts(xo, yt, eH, eV), hM);                                    // 左右側の続き
+        draw(rectPts(eH, eV, xt, yo), vM);                                    // 天地側の続き
+        draw(rectPts(xo, eV, eH, yo), [hM[0], 0, 0, vM[3], hM[4], vM[5]]);    // 外側の角（縦横とも折り返す＝点対称）
+      } else if (gv) {
+        // 片方だけ：その区間を角まで延ばす（斜めの端・軸もそのまま延長して、元の絵柄と重ねず継ぎ目も出さない）
+        const d0 = edgeEnd(gv, vEnd), d1 = Math.min(Math.max(d0 + gv.ax.m * (xo - xt), gv.line(xo)), full[kv]);
+        draw([[xt, outC(kv, d0)], [xo, outC(kv, d1)], [xo, yo], [xt, yo]], segMat(gv));
+      } else if (gh) {
+        const d0 = edgeEnd(gh, hEnd), d1 = Math.min(Math.max(d0 + gh.ax.m * (yo - yt), gh.line(yo)), full[kh]);
+        draw([[outC(kh, d0), yt], [outC(kh, d1), yo], [xo, yo], [xo, yt]], segMat(gh));
+      }
+
+    };
+    // 天地の区間は左から右（atStart=左端）、左右の区間は下から上（atStart=下端）
+    corner(endSeg('top', false), false, endSeg('left', true), true, 'left', 'top');
+    corner(endSeg('top', true), true, endSeg('right', true), true, 'right', 'top');
+    corner(endSeg('bottom', false), false, endSeg('left', false), false, 'left', 'bottom');
+    corner(endSeg('bottom', true), true, endSeg('right', false), false, 'right', 'bottom');
+    return s;
+  }
+
+  /**
+   * ページが透明効果（乗算などの描画モード・不透明度・ソフトマスク）を使っているか。リソースを Form の中まで（4段まで）見る。
+   * 使っていれば、反転コピーは元の絵柄の端からぴったり描く（少しでも重なると濃く見える）。
+   * 使っていなければ、これまでどおり軸から描いて元の絵柄に少し重ねる（重なっても見えず、表示のアンチエイリアスで継ぎ目に白い筋が出るのを防げる）。
+   * ページの /Group（透明グループ）は InDesign の書き出しでは透明効果が無くても付くので見ない
+   */
+  async function usesTransparency(doc, res) {
+    const seen = new Set();
+    const num = (d, k) => { const e = d.map.get(k); return e && e.v.t === 'num' ? e.v.v : null; };
+    const scan = async (rd, src, depth) => {
+      if (!rd || depth > 4) return false;
+      const sub = async (key) => { const e = rd.map.get(key); if (!e) return null; const r = await doc.resolve(e.v, src); return r.v.t === 'dict' ? r : null; };
+      const gs = await sub('/ExtGState');
+      if (gs) for (const [, e] of gs.v.map) {
+        const r = await doc.resolve(e.v, gs.src); if (r.v.t !== 'dict') continue;
+        const bm = r.v.map.get('/BM');
+        const bmv = !bm ? '/Normal' : bm.v.t === 'name' ? bm.v.v : bm.v.t === 'arr' && bm.v.items[0] && bm.v.items[0].t === 'name' ? bm.v.items[0].v : '/Normal';
+        if (bmv !== '/Normal' && bmv !== '/Compatible') return true;
+        const ca = num(r.v, '/ca'), CA = num(r.v, '/CA');
+        if ((ca !== null && ca < 1) || (CA !== null && CA < 1)) return true;
+        const sm = r.v.map.get('/SMask'); if (sm && !(sm.v.t === 'name' && sm.v.v === '/None')) return true;
+      }
+      const xo = await sub('/XObject');
+      if (xo) for (const [, e] of xo.v.map) {
+        if (e.v.t !== 'ref' || seen.has(e.v.num)) continue; seen.add(e.v.num);
+        const ob = await doc.get(e.v.num); if (ob.v.t !== 'stream') continue;
+        const d = ob.v.dict, st = d.map.get('/Subtype');
+        if (d.map.has('/SMask')) return true;
+        const sid = d.map.get('/SMaskInData'); if (sid && sid.v.t === 'num' && sid.v.v > 0) return true;
+        if (st && st.v.v === '/Form') {
+          const r2 = d.map.get('/Resources');
+          if (r2) { const rr = await doc.resolve(r2.v, ob.src); if (rr.v.t === 'dict' && await scan(rr.v, rr.src, depth + 1)) return true; }
+        }
+      }
+      return false;
+    };
+    return res.dict ? scan(res.dict, res.src, 0) : false;
+  }
+
+  /** ページのリソース辞書（継承を解決）。{dict, src, ent} */
+
+  async function pageResources(doc, page) {
+    let ent = page.dict.map.get('/Resources'), src = page.src;
+    if (!ent && page.inh['/Resources']) { ent = page.inh['/Resources'].e; src = page.inh['/Resources'].src; }
+    if (!ent) return { dict: null, src, ent: null };
+    const r = await doc.resolve(ent.v, src);
+    return { dict: r.v.t === 'dict' ? r.v : null, src: r.src, ent, entSrc: src };
+  }
+
+  /**
+   * 補正前に戻す：追記部分を切り捨てる（元ファイルとバイト単位で一致）。
+   * 断ち代チェックの追記が最後でない（後からノド白などが追記された）場合は null。
+   */
+  async function revert(buf) {
+    const K = PDF();
+    const doc = await K.Doc.load(buf);
+    const L = await catNum(K, doc, BASEKEY);
+    if (!(L > 0 && L < buf.length)) return null;
+    const nodo = await catNum(K, doc, NODO_BASEKEY);
+    if (nodo !== null && nodo >= L) return null;        // 断ち代チェックの後にノド白が追記されている
+    const cut = buf.subarray(0, L);
+    const tail = K.latin(cut, Math.max(0, cut.length - 40), cut.length);
+    if (!/%%EOF\s*$/.test(tail)) return null;
+    try { await K.Doc.load(cut); } catch (e) { return null; }
+    return cut.slice();
+  }
+
+  /** 構文解析した値を PDF の文字列に戻す（辞書・配列・文字列は元のバイト列をそのまま） */
+  function valText(K, v, src) {
+    if (!v) return 'null';
+    if (v.t === 'ref') return v.num + ' ' + v.gen + ' R';
+    if (v.t === 'num') return String(v.v);
+    if (v.t === 'name') return v.v;
+    if (v.t === 'bool') return v.v ? 'true' : 'false';
+    if (v.t === 'null') return 'null';
+    if (v.s !== undefined && v.e !== undefined) return K.latin(src, v.s, v.e);
+    return 'null';
+  }
+  /** 配列（参照なら解決）の要素を文字列で */
+  async function arrItems(K, doc, ent, src) {
+    if (!ent) return [];
+    const r = await doc.resolve(ent.v, src);
+    return r.v.t === 'arr' ? r.v.items.map((it) => valText(K, it, r.src)) : [];
+  }
+  /**
+   * カタログの /OCProperties に、追加するレイヤーを「足す」。
+   * 既存のレイヤー（非表示の指示レイヤーなど）とその表示状態はそのまま残す。
+   */
+  async function mergeOCProperties(K, doc, cat, ocgNum) {
+    const me = ocgNum + ' 0 R';
+    const asMe = `<< /Event /Print /Category [/Print] /OCGs [${me}] >>`;
+    const ent = cat.dict.map.get('/OCProperties');
+    if (!ent) return `<< /OCGs [${me}] /D << /Order [${me}] /ON [${me}] /AS [${asMe}] >> >>`;
+    const ocp = await doc.resolve(ent.v, cat.src);
+    if (ocp.v.t !== 'dict') return `<< /OCGs [${me}] /D << /Order [${me}] /ON [${me}] /AS [${asMe}] >> >>`;
+    const out = [];
+    for (const [k, e] of ocp.v.map) if (k !== '/OCGs' && k !== '/D') out.push(k + ' ' + valText(K, e.v, ocp.src));
+    const ocgs = await arrItems(K, doc, ocp.v.map.get('/OCGs'), ocp.src);
+    out.push('/OCGs [' + ocgs.concat(me).join(' ') + ']');
+    let d = [], order = [], on = [], as = [];
+    const dEnt = ocp.v.map.get('/D');
+    if (dEnt) {
+      const dd = await doc.resolve(dEnt.v, ocp.src);
+      if (dd.v.t === 'dict') {
+        for (const [k, e] of dd.v.map) if (!['/Order', '/ON', '/AS'].includes(k)) d.push(k + ' ' + valText(K, e.v, dd.src));
+        order = await arrItems(K, doc, dd.v.map.get('/Order'), dd.src);
+        on = await arrItems(K, doc, dd.v.map.get('/ON'), dd.src);
+        as = await arrItems(K, doc, dd.v.map.get('/AS'), dd.src);
+      }
+    }
+    d.push('/Order [' + order.concat(me).join(' ') + ']', '/ON [' + on.concat(me).join(' ') + ']', '/AS [' + as.concat(asMe).join(' ') + ']');
+    out.push('/D << ' + d.join(' ') + ' >>');
+    return '<< ' + out.join(' ') + ' >>';
+  }
+
+  /**
+   * 断ち代を補う。元のバイト列は残し、末尾に追記するだけ（ノド白ツールと同じ方式）。
+   * @param {Uint8Array} buf
+   * @param {[{pageIndex, sides:{top,bottom,left,right:'mirror'|'stretch'|''}, trim, bleed, keep?:{top,bottom,left,right:pt}}]} jobs
+   *        keep = 今ある断ち代の幅。これより外側（足りない分）だけを補う。省略時は仕上がり線から補う
+   *        segs = 辺ごとの区間 [{a0,a1,keepPt}]（部分的な不足用）。あれば keep より優先
+   * @param {{srcPt?:number, useOcg?:boolean, layerName?:string}} [o]  useOcg 既定 true（ノド白と同じくレイヤーに入れる）
+   * @returns {{data:Uint8Array, base:Uint8Array, warnings:string[], applied:number}}
+   *          base = 追記の土台にしたファイル（補正済みを入れた場合は補正前に戻したもの）
+   */
+  async function fillEdges(buf, jobs, o) {
+    const K = PDF();
+    const srcPt = Math.max(mm2pt(0.02), (o && o.srcPt) || mm2pt(0.1));
+    // 既に補正済みなら一旦戻してから（二重適用の防止）
+    const back = await revert(buf);
+    if (back) buf = back;
+
+    const doc = await K.Doc.load(buf);
+    const pages = await doc.pages();
+    const cat = await doc.catalog();
+    if (cat.num === null) throw new Error('カタログが直接オブジェクトのため処理できません');
+    const w = new K.Writer(doc);
+    const warnings = [];
+    let applied = 0;
+    const useOcg = !(o && o.useOcg === false);
+    const layerName = (o && o.layerName) || DEFAULT_LAYER;
+    const exactPages = [];
+    let ocgNum = null;
+    if (useOcg) {
+      // ノド白と同じ設定のレイヤー（表示・印刷とも ON）
+      ocgNum = w.alloc();
+      w.obj(ocgNum, '<< /Type /OCG /Name ' + K.pdfTextString(layerName) +
+        ' /Intent [/View /Design] /Usage << /View << /ViewState /ON >> /Print << /PrintState /ON /Subtype /Print >> >> >>');
+    }
+
+    for (const job of jobs) {
+      const how = {};
+      for (const k of SIDES) how[k] = job.sides[k] === true ? 'mirror' : (job.sides[k] || '');
+      if (!SIDES.some((k) => how[k])) continue;
+      const pno = job.pageIndex + 1;
+      const page = pages[job.pageIndex];
+      if (!page) { warnings.push(`p.${pno}: ページが存在しません`); continue; }
+      if (page.num === null) { warnings.push(`p.${pno}: 直接埋め込みページのため処理できません`); continue; }
+
+      // 元の内容ストリームを集める（Form XObject の中身にする）
+      const cEnt = page.dict.map.get('/Contents');
+      const refs = !cEnt ? [] : cEnt.v.t === 'ref' ? [cEnt.v] : cEnt.v.t === 'arr' ? cEnt.v.items.filter((x) => x.t === 'ref') : [];
+      let parts;
+      try {
+        parts = [];
+        for (const r of refs) {
+          const so = await doc.get(r.num);
+          if (so.v.t !== 'stream') continue;
+          parts.push(await doc.streamData(so.v), K.bytes('\n'));
+        }
+      } catch (e) { warnings.push(`p.${pno}: 内容を読めないため処理できません（${e.message}）`); continue; }
+      if (!parts.length) { warnings.push(`p.${pno}: 内容が空のためスキップ`); continue; }
+      const content = K.concat(parts);
+
+      const g = await K.pageGeom(doc, page);
+      const m = g.media;
+      const res = await pageResources(doc, page);
+      const resStr = res.ent ? K.latin(res.entSrc, res.ent.s, res.ent.e) : '<< >>';
+
+      // (1) ページ自身の複製（Form XObject）。画像などは元のオブジェクトを参照するだけ
+      const formNum = w.alloc();
+      const z = await K.deflate(content);
+      w.stream(formNum,
+        `/Type /XObject /Subtype /Form /FormType 1 /BBox [${m.map(f4).join(' ')}] /Matrix [1 0 0 1 0 0] /Resources ${resStr}` +
+        (z ? ' /Filter /FlateDecode' : ''), z || content);
+
+      // (2) 元の内容を q … Q で包み、その後ろに断ち代の描画を足す
+      // 透明効果のあるページは、反転コピーを元の絵柄の端からぴったり描く（o.exact で強制できる）
+      const exact = o && typeof o.exact === 'boolean' ? o.exact : await usesTransparency(doc, res);
+      if (exact) exactPages.push(pno);
+
+      const guardNum = w.alloc();
+      w.stream(guardNum, '', K.bytes('q\n' + MARK_GUARD + '\n'));
+      const drawNum = w.alloc();
+      w.stream(drawNum, '', K.bytes('Q\n' + MARK_BEGIN + '\n' + (useOcg ? '/OC ' + RES_OC + ' BDC\n' : '') +
+        edgeOps(how, job.trim, job.bleed, srcPt, job.keep, job.segs, exact) + (useOcg ? 'EMC\n' : '') + MARK_END + '\n'));
+
+      // (3) ページ専用のリソース辞書（/XObject に1つ足すだけ、他は元のバイト列を複製）
+      // 既に同じ名前があれば差し替え（重複キーを作らない）
+      const mergeSub = async (key, add) => {
+        let inner = '';
+        if (res.dict && res.dict.map.has(key)) {
+          const sub = await doc.resolve(res.dict.map.get(key).v, res.src);
+          if (sub.v.t === 'dict') {
+            const kv = [];
+            for (const [k, ent] of sub.v.map) if (!(k in add)) kv.push(k + ' ' + K.latin(sub.src, ent.s, ent.e));
+            inner = kv.join(' ') + ' ';
+          }
+        }
+        return `<< ${inner}${Object.entries(add).map(([k, v]) => k + ' ' + v).join(' ')} >>`;
+      };
+      const resNum = w.alloc();
+      const xoAdd = { [XO_NAME]: formNum + ' 0 R' };
+      const repl = { '/XObject': await mergeSub('/XObject', xoAdd) };
+      if (useOcg) repl['/Properties'] = await mergeSub('/Properties', { [RES_OC]: ocgNum + ' 0 R' });
+      w.obj(resNum, res.dict ? K.rebuildDict(res.dict, res.src, repl) : K.rebuildDict({ t: 'dict', map: new Map() }, doc.buf, repl));
+
+      // (4) ページ辞書：/Contents と /Resources だけ差し替え
+      const contents = `[${guardNum} 0 R ${refs.map((r) => r.num + ' 0 R').join(' ')} ${drawNum} 0 R]`;
+      w.obj(page.num, K.rebuildDict(page.dict, page.src, { '/Contents': contents, '/Resources': resNum + ' 0 R' }));
+      applied++;
+    }
+    if (!applied) throw new Error('補正できるページがありませんでした' + (warnings.length ? '（' + warnings[0] + '）' : ''));
+
+    // カタログに補正前のファイル長を記録（補正前に戻すときに使う）
+    const catRepl = { [BASEKEY]: String(buf.length) };
+    if (useOcg) catRepl['/OCProperties'] = await mergeOCProperties(K, doc, cat, ocgNum);
+    w.obj(cat.num, K.rebuildDict(cat.dict, cat.src, catRepl));
+    const data = w.finish();
+    if (!K.startsWith(data, buf)) throw new Error('内部エラー：元データの一致確認に失敗しました');
+    return { data, base: buf, warnings, applied, exactPages };
+
+
+  }
+
+  /**
+   * 表示専用：仕上がり外が CropBox で隠れているページだけ CropBox を MediaBox に広げた複製。
+   * 解析のためのレンダリングにだけ使い、保存には使わない。
+   */
+  async function expandCropForView(buf, pageIndexes) {
+    const K = PDF();
+    const doc = await K.Doc.load(buf);
+    const pages = await doc.pages();
+    const w = new K.Writer(doc);
+    let n = 0;
+    for (const i of pageIndexes) {
+      const page = pages[i];
+      if (!page || page.num === null) continue;
+      const g = await K.pageGeom(doc, page);
+      w.obj(page.num, K.rebuildDict(page.dict, page.src, { '/CropBox': '[' + g.media.map(f4).join(' ') + ']' }));
+      n++;
+    }
+    return n ? w.finish() : buf;
+  }
+
+  /* ---------- dtp-preflight（BLEED_GAP）形式への書き出し ----------
+     5月に作った preflight.py の report.json と同じ形の gaps を返す。チェックシステムを復活させるときに
+     このツールの判定結果をそのまま流し込めるようにしておく。
+       page     : 0始まり
+       edge     : left / right / top / bottom
+       start_mm / end_mm : 左右の辺は仕上がりの上端から下向き、天地の辺は仕上がりの左端から右向き（fitz と同じ向き）
+       shortage_mm : 実際に足りない量（preflight.py は辺の断ち代全体を入れていた。ここは実測の不足量）
+     pages = [{index, boxes:{trim}, edges:analyzeEdges() の結果}]、targetSides(index) で対象の辺を絞れる（ノド除外など） */
+  function toBleedGaps(pages, targetSides) {
+    const gaps = [];
+    for (const pg of pages) {
+      if (!pg.edges || !pg.boxes || !pg.boxes.trim) continue;
+      const T = pg.boxes.trim;
+      const sides = targetSides ? targetSides(pg.index) : SIDES;
+      for (const edge of sides) {
+        const e = pg.edges[edge];
+        if (!e || e.status !== 'short') continue;
+        const horiz = edge === 'top' || edge === 'bottom';
+        for (const g of e.segments || []) {
+          const s0 = horiz ? g.a0 - T.l : T.t - g.a1, s1 = horiz ? g.a1 - T.l : T.t - g.a0;
+          const r1 = (v) => Math.round(v * 10) / 10;
+          gaps.push({
+            page: pg.index, edge,
+            start_mm: r1(pt2mm(s0)), end_mm: r1(pt2mm(s1)), length_mm: r1(pt2mm(s1 - s0)),
+            shortage_mm: r1(pt2mm(Math.max(0, e.needPt - g.extPt))),
+            trim_extent_mm: r1(pt2mm(horiz ? T.r - T.l : T.t - T.b)),
+          });
+        }
+      }
+    }
+    return gaps;
+  }
+
+  return { mm2pt, pt2mm, SIDES, toBleedGaps, readPages, effectiveBleed, sideRoles, analyzeEdges, refineEdges, stripRect, fillEdges, revert, expandCropForView, BASEKEY, DEFAULT_LAYER };
+});
+</script>
+<style>
+/* ---------- light (default 紙色 / 断ち代=桔梗色) ---------- */
+:root{
+  --bg:#eef0fa; --panel:#ffffff; --panel2:#e7e9f6; --line:#ddd5c4;
+  --ink:#2b2419; --ink-dim:#6f6557; --ink-faint:#9a8f7c;
+  --amber:#5457c9; --amber-bg:#e9eafb;          /* 変数名は他ツールと共通（中身はツールごとの色） */
+  --err:#c8362a; --err-bg:#f9e8e6;
+  --ok:#2e7d46; --ok-bg:#e7f2ea;
+  --stage:#eceefa; --shadow:0 1px 4px rgba(60,45,20,.10);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+}
+/* ---------- dark (下版チェッカー系) ---------- */
+[data-theme="dark"]{
+  --bg:#14110e; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#a39682; --ink-faint:#7a6f5e;
+  --amber:#8d90f2; --amber-bg:#22233f;
+  --err:#e5604f; --err-bg:#3a1d18;
+  --ok:#4fae6e; --ok-bg:#15301f;
+  --stage:#0f0d0a; --shadow:0 2px 10px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+     font-size:14px;transition:background .2s,color .2s}
+.app{display:flex;flex-direction:column;height:100vh}
+.hidden{display:none!important}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:11px;white-space:nowrap}
+.mk{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;color:var(--amber)}
+.brand b{font-weight:700;font-size:16px;letter-spacing:.02em}
+.brand span{color:var(--ink-faint);font-size:12px}
+.sp{flex:1}
+.tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+button,.btn{font-family:var(--ui);font-size:13px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:7px;padding:7px 12px;transition:.15s}
+button:hover,.btn:hover{border-color:var(--amber);background:var(--amber-bg)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.icobtn{padding:7px 10px}
+.pdfbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:13px;font-weight:700;
+  color:#fff;background:#7c3aed;border:1px solid #7c3aed;border-radius:7px;
+  padding:7px 12px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em}
+.pdfbtn:hover{filter:brightness(1.08);border-color:#7c3aed;background:#7c3aed}
+.pdfbtn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.pdfbtn svg{width:15px;height:15px}
+
+/* ---------- body ---------- */
+.main{flex:1;display:flex;min-height:0;position:relative}
+.kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
+.col{display:flex;flex-direction:column;min-height:0}
+.left{flex:0 0 224px;border-right:1px solid var(--line);background:var(--panel);overflow:auto}
+.center{flex:1;background:var(--stage);position:relative;display:flex;flex-direction:column;overflow:hidden}
+.viewstage{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+.right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.right-fixed{flex:0 0 auto}
+.right-scroll{flex:1;min-height:0;overflow:auto}
+.colhd{height:34px;line-height:34px;padding:0 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--panel);z-index:3;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.colhd.sub{border-top:1px solid var(--line)}
+.colhd .sp{flex:1}
+.colhd label{display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;letter-spacing:0}
+
+/* ---------- page list ---------- */
+.plist{overflow:auto;flex:1}
+.prow{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid var(--line);
+  cursor:pointer;font-size:13px}
+.prow:hover{background:var(--panel2)}
+.prow.sel{background:var(--amber-bg)}
+.pno{font-family:var(--mono);color:var(--ink-dim);min-width:34px}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:var(--ink-faint)}
+.dot.ok{background:var(--ok)} .dot.ng{background:var(--err)}
+.dot.busy{background:var(--amber);animation:tpulse 1s ease-in-out infinite}
+@keyframes tpulse{50%{opacity:.3}}
+.prow .lbl{flex:1;color:var(--ink-dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .lbl.ng{color:var(--err)} .prow .lbl.ok{color:var(--ok)}
+.empty-msg{padding:24px 16px;color:var(--ink-faint);text-align:center;font-size:13px}
+
+/* ---------- drop / empty ---------- */
+.drop{margin:auto;max-width:520px;text-align:center;padding:40px}
+.dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
+  background:var(--panel);transition:.18s;cursor:pointer}
+.dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
+.dropzone h2{margin:.4em 0 .2em;font-size:18px}
+.dropzone p{margin:.2em 0;color:var(--ink-dim);font-size:13px}
+.dropmk{width:56px;height:56px;margin:0 auto 14px;border-radius:8px;background:var(--amber-bg);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--amber);opacity:.9}
+.dropmk svg{width:30px;height:30px}
+.dropveil{position:absolute;inset:0;z-index:50;display:none;align-items:center;justify-content:center;pointer-events:none;
+  background:color-mix(in srgb,var(--amber) 12%,transparent);border:3px dashed var(--amber);border-radius:10px;margin:6px}
+.dropveil.show{display:flex}
+.dropveil div{background:var(--panel);color:var(--amber);font-weight:700;font-size:15px;padding:14px 22px;border-radius:10px;box-shadow:var(--shadow)}
+
+/* ---------- viewer ---------- */
+.canvaswrap{flex:1;position:relative;overflow:auto;cursor:grab}
+.canvaswrap.grabbing{cursor:grabbing}
+/* 拡大したとき左（上）にもスクロールできるよう、中央寄せは justify-content ではなく margin:auto で行う。
+   justify-content:center だと、はみ出した左側がスクロール範囲の外に出て戻れなくなる */
+.cw-scroll{width:max-content;min-width:100%;min-height:100%;padding:36px 30px 110px;box-sizing:border-box;
+  display:flex;align-items:flex-start}
+.viewer{position:relative;flex-shrink:0;margin:0 auto;display:flex;gap:24px;align-items:flex-start}
+.pane .cap{font-size:11.5px;font-weight:700;color:var(--ink-dim);letter-spacing:.04em}
+.pane .cap.after{color:var(--ok)}
+.viewer:not(.cmp) .pane .cap{display:none}
+/* 並べて表示は2ウインドウ（下版差分チェッカーと同じ）。左右それぞれがスクロールし、位置と倍率は連動 */
+.canvaswrap.cmpmode{overflow:hidden;cursor:default}
+.canvaswrap.cmpmode .cw-scroll{width:100%;min-width:0;height:100%;padding:0}
+.viewer.cmp{width:100%;height:100%;margin:0;gap:0}
+.viewer.cmp .pane{flex:1 1 0;min-width:0;height:100%;display:flex;flex-direction:column}
+.viewer.cmp .pane + .pane{border-left:3px solid var(--line)}
+.viewer.cmp .cap{flex:0 0 auto;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--line);line-height:1.4}
+.viewer.cmp .pscroll{flex:1;min-height:0;overflow:auto;cursor:grab}
+.viewer.cmp .pin{width:max-content;min-width:100%;min-height:100%;padding:24px 24px 100px;box-sizing:border-box;display:flex;align-items:flex-start}
+.viewer.cmp .pbox{margin:0 auto}
+.canvaswrap.grabbing .pscroll{cursor:grabbing}
+.pbox{position:relative;line-height:0}
+.pbox canvas{display:block;box-shadow:var(--shadow);background:#fff}
+.pbox svg{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.zoomctl{position:absolute;right:14px;bottom:12px;z-index:5;display:flex;align-items:center;gap:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:4px 6px;box-shadow:var(--shadow)}
+.zoomctl button{font-size:14px;line-height:1;min-width:30px;height:28px;padding:0 6px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:6px;cursor:pointer;font-family:var(--mono)}
+.zoomctl button.txt{font-size:11px;min-width:auto;padding:0 9px;font-family:var(--ui)}
+.zoomctl button.on{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
+.zoomctl button.off{color:var(--ink-faint)}
+.zoomctl .zlab{font-size:10.5px;color:var(--ink-faint);padding:0 2px 0 4px;white-space:nowrap}
+.zoomctl button.eye{display:inline-flex;align-items:center;gap:5px}
+.zoomctl button.eye .eico{width:14px;height:14px;display:inline-block;background:currentColor;
+  -webkit-mask:var(--eye) center/contain no-repeat;mask:var(--eye) center/contain no-repeat}
+.zoomctl button.eye.on{--eye:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E")}
+.zoomctl button.eye.off{--eye:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.9 17.9A10 10 0 0 1 12 19c-7 0-11-7-11-7a18 18 0 0 1 5.1-5.9M9.9 5.2A9 9 0 0 1 12 5c7 0 11 7 11 7a18 18 0 0 1-2.2 3.2M1 1l22 22'/%3E%3C/svg%3E")}
+.zoomctl .sw{width:14px;height:8px;border-radius:1px;flex-shrink:0}
+.zoomctl .sw-trim{height:0;border-top:2px dashed var(--amber)}
+.zoomctl .sw-band{background:linear-gradient(90deg,var(--err) 0 50%,var(--ok) 50% 100%)}
+.zoomctl button.eye.off .sw{opacity:.35}
+.zoomctl .est{font-size:9.5px;font-weight:400;padding:1px 5px;border-radius:4px;background:var(--amber-bg);color:var(--amber)}
+.zoomctl button.eye.off .est{background:var(--panel2);color:var(--ink-faint)}
+.segb{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.segb button{display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 6px;font-size:12.5px;font-weight:700;color:var(--ink-dim);line-height:1.35}
+.segb button small{font-size:10px;font-weight:400;opacity:.85}
+.segb button.on{background:var(--amber);border-color:var(--amber);color:#fff}
+[data-theme="dark"] .segb button.on{color:#15163a}
+.zoomctl #zoomhint{font-size:11px;color:var(--ink-dim);font-family:var(--mono);min-width:42px;text-align:center}
+.zoomctl .zsep{width:1px;align-self:stretch;background:var(--line);margin:3px 1px}
+.vbar{display:none;align-items:center;gap:14px;color:var(--ink-dim);font-size:11px;flex-wrap:wrap;
+  flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);padding:7px 14px}
+.vbar.show{display:flex}
+.vbar .li{display:flex;align-items:center;gap:5px}
+.vbar .ll{width:14px;height:6px;border-radius:1px;flex-shrink:0}
+.vbar .hint{color:var(--ink-faint)}
+.vbar .grow{flex:1}
+
+/* ---------- 上部ツールバー（下版差分チェッカーと同じ形） ---------- */
+.setbar{position:relative;flex:0 0 auto;z-index:60}
+.toolbar{display:flex;align-items:center;gap:9px;padding:8px 14px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--panel)}
+.grp{display:flex;align-items:center;gap:6px}
+.glabel{font-size:11px;color:var(--ink-faint);letter-spacing:.06em}
+.modes{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.modes button{background:transparent;border:0;border-radius:0;color:var(--ink-dim);font-size:12px;padding:6px 10px;border-right:1px solid var(--line)}
+.modes button:last-child{border-right:0}
+.modes button:hover:not(:disabled){color:var(--ink);background:var(--amber-bg)}
+.modes button.on{background:var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .modes button.on{color:#15163a}
+.modes button:disabled{opacity:.4}
+.sep{width:1px;height:24px;background:var(--line)}
+.val{font-family:var(--mono);font-size:11px;color:var(--amber);min-width:34px}
+button.btn.icon{padding:6px 9px;font-family:var(--mono);min-width:32px}
+.pginput{width:52px;font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 6px;text-align:center}
+.pginput:focus{outline:none;border-color:var(--amber)}
+.settoggle{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.settoggle svg{width:15px;height:15px;opacity:.85}
+.settoggle .caret{font-size:10px;color:var(--ink-faint)}
+.settoggle.act{border-color:var(--amber);color:var(--ink)}
+.tspacer{flex:1 1 auto;min-width:8px}
+.toolbar .hint{font-size:11px;color:var(--ink-faint)}
+.settings{position:absolute;left:0;right:0;top:100%;z-index:60;display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;align-items:stretch;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--panel2);box-shadow:0 14px 30px rgba(0,0,0,.22)}
+.settings.collapsed{display:none}
+.settings .btn{padding:5px 10px;font-size:12px}
+select.sel{font-family:var(--ui);font-size:11.5px;padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--ink)}
+.toolsec{border:1px solid var(--line);border-radius:8px;padding:5px 10px 7px;background:var(--panel);display:flex;flex-direction:column;gap:5px}
+.secttl{font-size:9.5px;color:var(--amber);font-weight:700;letter-spacing:.06em}
+.secbody{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.secbody .glabel{font-size:10.5px;letter-spacing:.02em}
+.secbody .pginput{width:58px;padding:4px 5px}
+.schk{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-dim);cursor:pointer}
+.schk input{accent-color:var(--amber)}
+
+/* ---------- スワイプ ---------- */
+.pbox .swc{position:absolute;left:0;top:0}
+.swline{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--amber);z-index:3;cursor:ew-resize;line-height:1}
+.swline::before{content:"";position:absolute;top:0;bottom:0;left:-9px;width:16px}
+.swh{position:absolute;top:50%;left:-15px;width:28px;height:28px;margin-top:-14px;border-radius:50%;background:var(--amber);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:var(--shadow);user-select:none}
+.swlab{position:absolute;bottom:8px;z-index:3;font-size:11px;font-weight:700;line-height:1.4;padding:2px 8px;border-radius:5px;background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--ink-dim)}
+.swlab.l{left:8px} .swlab.r{right:8px;color:var(--ok)}
+.canvaswrap.swiping{cursor:ew-resize}
+
+/* ---------- page bar ---------- */
+.pgbar{display:none;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);flex:0 0 auto;font-size:12px}
+.pgbar.show{display:flex}
+.pgbar button{min-width:30px;height:28px;padding:0 8px;font-size:12px}
+.pgbar input{width:52px;text-align:center;padding:5px 4px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel2);color:var(--ink);font-family:var(--mono);font-size:12px}
+.pgbar input:focus{outline:none;border-color:var(--amber)}
+.pgbar #pgTotal{color:var(--ink-dim);font-family:var(--mono)}
+.pgbar .sp{flex:1}
+.pgbar .hint{color:var(--ink-faint);font-size:11px}
+
+/* ---------- 右カラム ---------- */
+.rsec{padding:12px 13px 14px}
+.rfld{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}
+.rfld label{font-size:11px;color:var(--ink-dim);font-weight:500}
+.rfld small{font-size:10px;color:var(--ink-faint)}
+.rfr{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+select.rin,input.rin{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel2);color:var(--ink);font-size:12px;font-family:var(--mono)}
+select.rin{font-family:var(--ui)}
+select.rin:focus,input.rin:focus{outline:none;border-color:var(--amber);background:var(--panel)}
+select.rin:disabled{opacity:.45}
+details.adv{margin-top:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+details.adv summary{cursor:pointer;font-size:11.5px;color:var(--ink-dim);padding:7px 9px;user-select:none}
+details.adv[open] summary{border-bottom:1px solid var(--line)}
+details.adv .advin{padding:9px 9px 2px}
+details.adv .rin{background:var(--panel)}
+.btn-primary{width:100%;justify-content:center;display:flex;align-items:center;gap:6px;
+  border-color:var(--amber);background:var(--amber);color:#fff;font-weight:700;margin-top:11px}
+.btn-primary:hover{filter:brightness(1.06);border-color:var(--amber);background:var(--amber)}
+[data-theme="dark"] .btn-primary{color:#15163a}
+.btn-sub{width:100%;margin:2px 0 9px;font-size:12px}
+.rchk{margin:0 0 9px;padding:8px 9px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;align-items:flex-start;gap:8px}
+.rchk input{margin-top:2px;cursor:pointer;width:14px;height:14px;flex-shrink:0;accent-color:var(--amber)}
+.rchk label{font-size:11.5px;color:var(--ink-dim);cursor:pointer;line-height:1.5}
+.rchk label small{display:block;font-size:10px;color:var(--ink-faint);margin-top:1px}
+.busy{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:10px;
+  background:var(--panel);border:1px solid var(--amber);color:var(--ink);border-radius:999px;padding:8px 16px 8px 12px;
+  box-shadow:var(--shadow);font-size:13px;font-weight:700;white-space:nowrap}
+.busy .spin{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--amber-bg);border-top-color:var(--amber);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.busy .spin{animation:none}}
+.busy .bbar{width:110px;height:4px;border-radius:2px;background:var(--amber-bg);overflow:hidden}
+.busy .bbar i{display:block;height:100%;width:0;background:var(--amber);transition:width .15s}
+.jumpsec{position:sticky;top:0;z-index:4;background:var(--panel);padding:10px 13px;border-bottom:1px solid var(--line)}
+.jump{display:flex;align-items:center;gap:6px}
+.right-scroll .colhd{position:static}
+.jump .jcount{flex:1;display:flex;align-items:center;gap:6px;text-align:left;font-weight:700;font-size:12.5px;
+  color:var(--err);background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 35%,transparent)}
+.jump .jcount b{font-family:var(--mono);font-size:15px}
+.jump .jcount small{margin-left:auto;font-weight:400;font-size:10.5px;opacity:.85}
+.jump .jcount.done{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+.jump .jnav{min-width:34px;padding:7px 8px;font-size:12px}
+.jump .jpos{font-family:var(--mono);font-size:11px;color:var(--ink-dim);min-width:44px;text-align:center}
+.step{margin-top:10px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+.step .stt{font-size:11.5px;color:var(--ink-dim);line-height:1.6;margin-bottom:8px}
+.step .stt b{color:var(--ink)}
+.step .sbtns{display:flex;gap:6px}
+.step .sbtns button{flex:1;font-size:12px;padding:7px 8px}
+.step .sbtns .go{border-color:var(--amber);background:var(--amber);color:#fff;font-weight:700}
+.step .sbtns .go:hover{filter:brightness(1.06);background:var(--amber)}
+[data-theme="dark"] .step .sbtns .go{color:#15163a}
+.rnote{font-size:10.5px;color:var(--ink-faint);margin-top:6px;line-height:1.6}
+/* 操作はすべて「このページ」のカードの下に集める（目線を散らさない） */
+.acts{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.acts .bulk{width:100%;font-size:12px;padding:7px 8px;border-color:var(--amber);color:var(--amber);background:var(--panel);font-weight:700}
+.acts .bulk:hover{background:var(--amber-bg)}
+.acts .undoall{align-self:flex-end;border:0;background:none;padding:2px 0;font-size:11px;color:var(--ink-faint);text-decoration:underline;text-underline-offset:2px}
+.acts .undoall:hover{color:var(--err);background:none}
+.acts hr{border:0;border-top:1px dashed var(--line);margin:2px 0 0}
+/* 確認の進み具合（不足ページ数の下・上部に固定） */
+.jprog{margin-top:7px;font-size:11.5px;color:var(--ink-dim);line-height:1.55}
+.jprog b{color:var(--ink)} .jprog.done b{color:var(--ok)}
+/* すべて確認したら保存ボタンを目立たせる */
+.pdfbtn.ready:not(:disabled){animation:readyPulse 1.6s ease-in-out 3;box-shadow:0 0 0 3px rgba(124,58,237,.28)}
+@keyframes readyPulse{50%{box-shadow:0 0 0 7px rgba(124,58,237,.12)}}
+@media (prefers-reduced-motion:reduce){.pdfbtn.ready:not(:disabled){animation:none}}
+
+.rl{display:flex;flex-direction:column;gap:3px}
+.ri{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:7px;border:1px solid transparent}
+.ri.ng{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 30%,transparent)}
+.ri.fixed{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.rdot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--ink-faint)}
+.rdot.ok{background:var(--ok)} .rdot.ng{background:var(--err)}
+.rlbl{font-size:12px;font-weight:700;min-width:30px}
+.rsub{font-size:11px;color:var(--ink-dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rval{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;flex-shrink:0;font-family:var(--mono)}
+.ri.ng .rval{color:var(--err)} .ri.fixed .rval{color:var(--ok)}
+.runit{font-size:10px;color:var(--ink-faint);margin-left:2px;font-weight:400}
+.ri select{font-family:var(--ui);font-size:11px;padding:3px 4px;border:1px solid var(--err);color:var(--err);
+  background:var(--panel);border-radius:5px;flex-shrink:0}
+.al{padding:9px 10px;border-radius:8px;font-size:11.5px;border:1px solid;line-height:1.6;margin-bottom:8px}
+.al b{font-size:12.5px}
+.al button{margin-top:7px;font-size:11.5px;padding:5px 10px}
+.ali{background:var(--amber-bg);color:var(--amber);border-color:color-mix(in srgb,var(--amber) 35%,transparent)}
+.ale{background:var(--err-bg);color:var(--err);border-color:color-mix(in srgb,var(--err) 35%,transparent)}
+.alo{background:var(--ok-bg);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+
+/* ---- フィードバック（他ツールと同形） ---- */
+.fbbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--ui);font-size:13px;font-weight:700;
+  color:#fff;background:var(--amber);border:1px solid var(--amber);border-radius:7px;
+  padding:7px 12px;cursor:pointer;transition:.14s;white-space:nowrap;letter-spacing:.01em}
+.fbbtn:hover{filter:brightness(1.08);background:var(--amber)}
+.fbbtn svg{width:15px;height:15px}
+[data-theme="dark"] .fbbtn{color:#15163a}
+.fbmodal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+  background:rgba(20,15,8,.55);backdrop-filter:blur(3px)}
+.fbmodal.show{display:flex}
+.fbcard{width:min(460px,92vw);max-height:90vh;overflow-y:auto;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.fbcard h3{margin:0 0 4px;font-size:15px;font-weight:700}
+.fbcard .fbsub{margin:0 0 16px;font-size:11.5px;color:var(--ink-dim);line-height:1.6}
+.fbfield{margin-bottom:13px}
+.fbfield label{display:block;font-size:11.5px;font-weight:600;color:var(--ink-dim);margin-bottom:5px}
+.fbfield label .req{color:var(--err);margin-left:3px}
+.fbfield select,.fbfield input,.fbfield textarea{width:100%;font-family:var(--ui);font-size:13px;color:var(--ink);
+  background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;resize:vertical;box-sizing:border-box}
+.fbfield textarea{min-height:64px;line-height:1.5}
+.fbfield .fbhint{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:4px;word-break:break-all}
+.fbrow2{display:flex;gap:9px}
+.fbrow2 .fbfield{flex:1;margin-bottom:13px}
+.fbverdict{display:flex;gap:7px}
+.fbverdict button{flex:1;font-family:var(--ui);font-size:12px;color:var(--ink-dim);background:var(--panel2);
+  border:1px solid var(--line);border-radius:7px;padding:8px 4px;cursor:pointer;transition:.12s;line-height:1.35}
+.fbverdict button:hover{border-color:var(--amber)}
+.fbverdict button.on{background:var(--amber);color:#fff;border-color:var(--amber);font-weight:700}
+.fbverdict button .vm{display:block;font-size:10px;font-weight:400;opacity:.85}
+.fbactions{display:flex;gap:9px;margin-top:18px}
+.fbactions button{flex:1;font-family:var(--ui);font-size:13px;border-radius:8px;padding:10px;cursor:pointer;transition:.12s}
+.fbactions .fbcancel{background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim)}
+.fbactions .fbcancel:hover{color:var(--ink)}
+.fbactions .fbsend{background:var(--amber);border:1px solid var(--amber);color:#fff;font-weight:700}
+[data-theme="dark"] .fbactions .fbsend{color:#15163a}
+.fbactions .fbsend:hover{filter:brightness(1.06)}
+.fbactions .fbsend:disabled{opacity:.5;cursor:not-allowed}
+.fbnote{margin-top:12px;font-size:11px;line-height:1.6;padding:9px 11px;border-radius:8px;
+  background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+.fbnote.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <header>
+    <div class="brand">
+      <span class="mk" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M3 3h18v18H3z" stroke-dasharray="2.2 2.2" stroke-width="1.4"/></svg>
+      </span>
+      <b>断ち代チェック</b><span>天地小口の不足検出・補正 <small style="opacity:.6;font-size:11px">rev.2026-10-01</small></span>
+    </div>
+    <div class="sp"></div>
+    <div class="tools">
+      <button class="icobtn" id="btnTheme" title="明暗切替">◐</button>
+      <button id="btnUndo" disabled title="直前の補正操作を取り消す（⌘/Ctrl＋Z）">↶ 戻す</button>
+      <button id="btnReset" disabled>リセット</button>
+      <button id="btnOpen" class="btn" title="PDFを開く">PDFを選択</button>
+      <input type="file" id="file" accept="application/pdf" class="hidden">
+      <button class="pdfbtn" id="btnSave" disabled title="補正したPDFを保存（元のデータは変えずに末尾へ追記したもの）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>
+        <span>補正済みPDFを保存</span>
+      </button>
+      <button class="fbbtn" id="fbOpen" title="この判定・補正についてのフィードバックを送信（判定の正誤・気づいた点）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>フィードバック</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 表示切替 | ページ | 詳細設定（下版差分チェッカーと同じ並び） -->
+  <div class="setbar">
+    <div class="toolbar">
+      <div class="grp">
+        <span class="glabel">表示</span>
+        <div class="modes" id="modes">
+          <button data-m="before" class="on" title="補正前を表示（1）">補正前</button>
+          <button data-m="after" disabled title="補正後を表示（2）">補正後</button>
+          <button data-m="swipe" disabled title="仕切り線の左が補正前・右が補正後。線をドラッグして見比べる（3）">スワイプ</button>
+          <button data-m="compare" disabled title="補正前と補正後を並べて表示（4）">並べて</button>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <span class="glabel">ページ</span>
+        <button class="btn icon" id="pgFirst" title="最初のページ" disabled>«</button>
+        <button class="btn icon" id="pgPrev" title="前のページ（←）" disabled>‹</button>
+        <input id="pgInput" class="pginput" type="number" min="1" value="1" title="ページ番号を入力してEnter" disabled>
+        <span class="val" id="pgTotal">/ –</span>
+        <button class="btn icon" id="pgNext" title="次のページ（→）" disabled>›</button>
+        <button class="btn icon" id="pgLast" title="最後のページ" disabled>»</button>
+      </div>
+      <div class="sep"></div>
+      <button class="btn settoggle" id="settingsToggle" title="判定・補正の詳細設定を開閉" aria-expanded="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>詳細設定</span><span class="caret" id="setCaret">▸</span>
+      </button>
+      <div class="tspacer"></div>
+      <span class="hint" id="pgProgress"></span>
+    </div>
+
+    <div class="settings collapsed" id="settingsPanel">
+      <div class="toolsec">
+        <div class="secttl">ページの向き</div>
+        <div class="secbody">
+          <span class="glabel">先頭ページのノンブル</span>
+          <input type="number" id="optStart" class="pginput" value="1" step="1" title="抜き出しPDFで偶数ページから始まるときに変更（小口の左右が入れ替わります）">
+        </div>
+      </div>
+      <div class="toolsec">
+        <div class="secttl">判定</div>
+        <div class="secbody">
+          <span class="glabel">必要な断ち代</span><input type="number" id="optBleed" class="pginput" value="3" step="0.5" min="0.5" title="BleedBox が無いPDFで使う値"><span class="glabel">mm</span>
+          <span class="glabel">許容誤差</span><input type="number" id="optTol" class="pginput" value="0.2" step="0.1" min="0" title="これ以下の不足は問題なしとする"><span class="glabel">mm</span>
+          <span class="glabel">不足とみなす最小の長さ</span><input type="number" id="optMinLen" class="pginput" value="5" step="1" min="1" title="これより短い不足（または足りている区間）は前後に含めて、細かく分けない"><span class="glabel">mm</span>
+          <span class="glabel">段差とみなす差</span><input type="number" id="optStep" class="pginput" value="0.5" step="0.1" min="0.2" title="同じ辺の中で、足りない量がこれ以上違う区間は分けて補う"><span class="glabel">mm</span>
+        </div>
+        <div class="secbody">
+          <span class="glabel">白とみなす濃さ</span>
+          <select id="optWhite" class="sel" title="これ以下の薄い色は白（紙）とみなす"><option value="2" selected>0%だけ（標準）</option><option value="6">2%以下</option><option value="10">4%以下</option></select>
+          <span class="glabel">解析の解像度</span>
+          <select id="optDpi" class="sel"><option value="150">150 dpi</option><option value="200" selected>200 dpi</option><option value="300">300 dpi</option></select>
+          <label class="schk" title="前後が足りている15mm以下の短い不足で、仕上がり線の内側が明るい（10%未満）ものは、写真のハイライトとみなして不足にしません"><input type="checkbox" id="optLight" checked>明るい部分の短い不足は写真の一部とみなす</label>
+          <button class="btn" id="btnRerun" disabled>設定を反映して再チェック</button>
+        </div>
+      </div>
+      <div class="toolsec">
+        <div class="secttl">補正</div>
+        <div class="secbody">
+          <span class="glabel">引き伸ばす元の幅</span><input type="number" id="optSrc" class="pginput" value="0.1" step="0.05" min="0.05" title="絵柄の端のこの幅を外へ伸ばす（引き伸ばし時）"><span class="glabel">mm</span>
+        </div>
+        <div class="secbody">
+          <label class="schk"><input type="checkbox" id="optOcg" checked>補った部分をレイヤー「断ち代補正」に入れる</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main" id="mainArea">
+    <div class="dropveil" id="dropveil"><div>ドロップしてPDFを開く</div></div>
+
+    <!-- 左: ページ一覧 -->
+    <div class="col left">
+      <div class="colhd">ページ<span class="sp"></span><label class="hidden" id="onlyNgWrap"><input type="checkbox" id="onlyNg">不足のみ</label></div>
+      <div class="plist" id="plist"><div class="empty-msg">PDF未読込</div></div>
+    </div>
+
+    <!-- 中央: プレビュー -->
+    <div class="col center">
+      <div class="viewstage">
+        <div class="busy hidden" id="busy" role="status" aria-live="polite"><span class="spin" aria-hidden="true"></span><span id="busyTxt">チェック中…</span><span class="bbar"><i id="busyBar"></i></span></div>
+        <div class="canvaswrap" id="canvaswrap">
+          <div class="cw-scroll">
+            <div class="drop" id="drop">
+              <div class="dropzone" id="dropzone">
+                <div class="dropmk" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M3 3h18v18H3z" stroke-dasharray="2.2 2.2" stroke-width="1.3"/></svg>
+                </div>
+                <h2>PDFをドラッグ＆ドロップ</h2>
+                <p>またはクリックして選択（このPDFは外部に送信されません）</p>
+                <p style="margin-top:14px;color:var(--ink-faint)">ページごとに天・地・小口の断ち代を実測し、足りない辺を知らせます。<br>足りない辺は、内側の絵柄の「反転」か「引き伸ばし」で補えます。</p>
+                <p style="margin-top:8px;color:var(--ink-faint)">保存はノド白ツールと同じく、元のデータを変えずに末尾へ追記する方式です。<br>補正したPDFをもう一度入れると、補正前に戻すこともできます。</p>
+              </div>
+            </div>
+            <div class="viewer hidden" id="viewer">
+              <div class="pane" id="paneA"><div class="cap" id="capA">補正前</div><div class="pscroll" id="psA"><div class="pin"><div class="pbox" id="boxA"><canvas id="pdfC"></canvas><svg id="ovS" aria-hidden="true"></svg>
+                <canvas id="pdfS" class="swc hidden"></canvas><svg id="ovS3" class="swc hidden" aria-hidden="true"></svg>
+                <div class="swline hidden" id="swline"><span class="swh" title="ドラッグして補正前／補正後を見比べる">⇔</span></div>
+                <span class="swlab l hidden" id="swlabL">補正前</span><span class="swlab r hidden" id="swlabR">補正後</span></div></div></div></div>
+              <div class="pane hidden" id="paneB"><div class="cap after">補正後</div><div class="pscroll" id="psB"><div class="pin"><div class="pbox" id="boxB"><canvas id="pdfC2"></canvas><svg id="ovS2" aria-hidden="true"></svg></div></div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="zoomctl hidden" id="zoomctl">
+          <span class="zlab">重ね表示</span>
+          <button class="txt eye on" id="ovTrim" aria-pressed="true" title="仕上がり線（断裁される位置）を青い点線で重ねて表示します。クリックで表示／非表示"><span class="eico"></span><span class="sw sw-trim"></span>仕上がり線<span class="est">表示中</span></button>
+          <button class="txt eye on" id="ovBand" aria-pressed="true" title="断ち代が足りない所を赤、補正した所を緑、ノド（対象外）を灰色で重ねて表示します。絵柄をそのまま見たいときは非表示に"><span class="eico"></span><span class="sw sw-band"></span>不足箇所<span class="est">表示中</span></button>
+          <span class="zsep"></span>
+          <button id="zOut" title="縮小">−</button>
+          <span id="zoomhint">100%</span>
+          <button id="zIn" title="拡大">＋</button>
+          <button class="txt" id="zFit" title="全体表示">全体</button>
+        </div>
+      </div>
+      <div class="vbar" id="vbar">
+        <span class="li"><span class="ll" style="height:0;border-top:1.5px dashed var(--amber)"></span>仕上がり線（断裁位置）</span>
+        <span class="li"><span class="ll" style="background:var(--err)"></span>断ち代が足りない所</span>
+        <span class="li"><span class="ll" style="background:var(--ok)"></span>補正した所</span>
+        <span class="li"><span class="ll" style="background:#8a9097;opacity:.6"></span>ノド（対象外）</span>
+        <span class="hint">ホイールでズーム・ドラッグでパン・←→でページ移動・1〜4で表示切替</span>
+        <span class="grow"></span>
+        <span id="sbinfo" class="hint">—</span>
+      </div>
+    </div>
+
+    <!-- 右: 設定・結果 -->
+    <div class="col right">
+      <div class="right-fixed">
+        <div class="colhd">判定設定</div>
+        <div class="rsec">
+          <div class="rfld"><label>種類</label>
+            <select id="selMode" class="rin"><option value="book">本文（綴じあり）— ノドは対象外</option><option value="sheet">ペラもの・表紙 — 4辺すべて</option></select>
+          </div>
+          <div class="rfr">
+            <div class="rfld"><label>綴じ</label>
+              <select id="selBind" class="rin"><option value="right">右綴じ</option><option value="left">左綴じ</option></select>
+            </div>
+            <div class="rfld"><label>補い方</label>
+              <select id="selMethod" class="rin"><option value="mirror">反転</option><option value="stretch">引き伸ばし</option></select>
+            </div>
+          </div>
+          <div class="rfld"><label>進め方</label>
+            <div class="segb" id="segFlow">
+              <button type="button" data-v="bulk" class="on">まとめて補う<small>不足の辺を一斉に</small></button>
+              <button type="button" data-v="step">1ページずつ<small>確認しながら補う</small></button>
+            </div>
+          </div>
+          <button class="btn-primary" id="btnFix" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+            <span id="btnFixLbl">断ち代を補う</span>
+          </button>
+          <div class="rnote" id="fixNote">PDFを開くと自動でチェックします。不足のある辺は最初から「補う」設定になっています。</div>
+        </div>
+      </div>
+
+      <div class="right-scroll">
+        <div class="jumpsec hidden" id="jumpSec"></div>
+        <div class="colhd sub hidden" id="pageHd">このページ</div>
+        <div class="rsec hidden" id="pageSec"><div class="rl" id="sideList"></div></div>
+        <div class="colhd sub hidden" id="sumHd">全体</div>
+        <div class="rsec hidden" id="sumSec"><div id="sumBox"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="kp-strip">© FUJIWARA PRINTING.inc</div>
+</div>
+
+<!-- ============ フィードバック機能（他ツールと同形） ============ -->
+<div class="fbmodal" id="fbModal">
+  <div class="fbcard">
+    <h3>フィードバックを送信</h3>
+    <p class="fbsub">この判定・補正について気づいた点を送ってください。判定の正誤を集めて、判定ロジックの改良に使います。<br>※表示中のページの画像（判定の重ね表示を含む）を添付します。PDFファイル全体は送信されません。</p>
+    <div class="fbfield">
+      <label>判定結果は正しかった？<span class="req">*</span></label>
+      <div class="fbverdict" id="fbVerdict">
+        <button type="button" data-v="correct">正しい<span class="vm">妥当な判定</span></button>
+        <button type="button" data-v="false_positive">誤検知<span class="vm">足りているのに不足</span></button>
+        <button type="button" data-v="missed">見逃し<span class="vm">不足なのにOK</span></button>
+      </div>
+    </div>
+    <div class="fbrow2">
+      <div class="fbfield">
+        <label>種別</label>
+        <select id="fbCategory">
+          <option value="">（選択しない）</option>
+          <option value="断ち代の判定">断ち代の判定（天・地・小口）</option>
+          <option value="小口・ノドの左右">小口・ノドの左右</option>
+          <option value="補正の仕上がり">補正の仕上がり（反転・引き伸ばし）</option>
+          <option value="保存・元に戻す">保存・元に戻す</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+      <div class="fbfield">
+        <label>ページ</label>
+        <input id="fbPage" type="text" placeholder="例: p1">
+      </div>
+    </div>
+    <div class="fbfield">
+      <label>ファイル名</label>
+      <input id="fbFile" type="text" placeholder="自動入力されます" readonly>
+      <div class="fbhint" id="fbFileHint"></div>
+    </div>
+    <div class="fbfield">
+      <label>自由コメント</label>
+      <textarea id="fbComment" placeholder="例：p3の小口は余白なのに不足と出た など"></textarea>
+    </div>
+    <div class="fbfield">
+      <label>お名前・担当（必須）</label>
+      <input id="fbReporter" type="text" name="name" autocomplete="name" placeholder="例：制作部 中田">
+    </div>
+    <div class="fbfield">
+      <label>メールアドレス（必須・対応のご連絡用）</label>
+      <input id="fbEmail" type="email" name="email" autocomplete="email" inputmode="email" placeholder="例：tanaka@fujiwara-i.com">
+      <span style="display:block;font-size:10.5px;opacity:.7;margin-top:3px">社内アドレス（@fujiwara-i.com）のみ。一度入れると次回から自動で入ります。</span>
+    </div>
+    <div class="fbactions">
+      <button type="button" class="fbcancel" id="fbCancel">キャンセル</button>
+      <button type="button" class="fbsend" id="fbSend">送信する</button>
+    </div>
+    <div class="fbnote" id="fbNote" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const E = window.KenpanEdge;
+const $ = (id) => document.getElementById(id);
+const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
+// 和文フォント（CID）の表示に CMap が必要
+const openPdf = (bytes) => pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, cMapUrl: PDFJS_BASE + 'cmaps/', cMapPacked: true, standardFontDataUrl: PDFJS_BASE + 'standard_fonts/' }).promise;
+const SIDES = ['top', 'bottom', 'left', 'right'];
+const ROLE_NAME = { ten: '天', chi: '地', koguchi: '小口', nodo: 'ノド' };
+const SHEET_NAME = { top: '天', bottom: '地', left: '左', right: '右' };
+const METHOD_NAME = { mirror: '反転', stretch: '引き伸ばし' };
+
+const S = {
+  file: null, bytes: null, jsDoc: null, pages: [], cur: 0,
+  outBytes: null, outJsDoc: null, baseLen: 0, warnings: [], revertable: false,
+  view: 'before', swipeX: 0.5, ovTrim: true, ovBand: true, flow: 'bulk', zoom: 1, busy: false, onlyNg: false, viewBox: null,
+  applied: new Set(),   // 補正済みPDFに含めたページ（index）
+};
+
+/* ---------- テーマ（他ツールと同じ） ---------- */
+$('btnTheme').onclick = () => {
+  const r = document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  drawOverlay();
+};
+
+/* ---------- 設定 ---------- */
+function opts() {
+  return {
+    mode: $('selMode').value, binding: $('selBind').value, method: $('selMethod').value,
+    startNombre: parseInt($('optStart').value, 10) || 1,
+    defaultBleedPt: E.mm2pt(Math.max(0.5, parseFloat($('optBleed').value) || 3)),
+    tolPt: E.mm2pt(Math.max(0, parseFloat($('optTol').value) || 0)),
+    whiteTol: parseInt($('optWhite').value, 10),
+    lightAsPhoto: $('optLight').checked,
+    minRunPt: E.mm2pt(Math.max(1, parseFloat($('optMinLen').value) || 5)),
+    stepPt: E.mm2pt(Math.max(0.2, parseFloat($('optStep').value) || 0.5)),
+    dpi: parseInt($('optDpi').value, 10),
+    srcPt: E.mm2pt(Math.max(0.05, parseFloat($('optSrc').value) || 0.1)),
+    useOcg: $('optOcg').checked,
+  };
+}
+$('selMode').onchange = () => { $('selBind').disabled = $('selMode').value === 'sheet'; resetOutput(); refresh(); };
+$('selBind').onchange = () => { resetOutput(); refresh(); };
+$('optStart').oninput = () => { resetOutput(); refresh(); };
+$('optSrc').onchange = () => { resetOutput(); refresh(); };
+$('optOcg').onchange = () => { resetOutput(); refresh(); };
+$('segFlow').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || S.flow === b.dataset.v) return;
+  S.flow = b.dataset.v;
+  [...$('segFlow').children].forEach((x) => x.classList.toggle('on', x === b));
+  refresh();
+});
+const stepMode = () => S.flow === 'step';
+
+/* ---------- 処理中の表示 ---------- */
+function showBusy(text, p) {
+  $('busy').classList.remove('hidden'); $('busyTxt').textContent = text;
+  $('busyBar').parentElement.classList.toggle('hidden', p == null);
+  if (p != null) $('busyBar').style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%';
+}
+const hideBusy = () => $('busy').classList.add('hidden');
+
+/* ---------- 戻す（補正操作の履歴） ---------- */
+let undoStack = [];
+function pushHistory(label) {
+  undoStack.push({ label, applied: [...S.applied], dec: S.pages.map((pg) => pg.decision || ''), after: S.pages.map((pg) => pg.after), fix: S.pages.map((pg) => Object.assign({}, pg.fix)) });
+  if (undoStack.length > 50) undoStack.shift();
+  updateUndo();
+}
+function updateUndo() {
+  const h = undoStack[undoStack.length - 1];
+  $('btnUndo').disabled = !h || S.busy;
+  $('btnUndo').title = h ? `「${h.label}」を取り消す（⌘/Ctrl＋Z）` : '直前の補正操作を取り消す（⌘/Ctrl＋Z）';
+}
+async function undo() {
+  const h = undoStack[undoStack.length - 1];
+  if (!h || S.busy) return;
+  undoStack.pop();
+  await guarded(async () => {
+    S.applied = new Set(h.applied);
+    S.pages.forEach((pg, i) => { pg.decision = h.dec[i]; pg.after = h.after[i]; pg.fix = h.fix[i]; });
+    await rebuildOutput([]);      // 補正後の判定は記録から戻すので再チェック不要
+    renderView();
+  }, true);
+}
+$('btnUndo').onclick = () => undo();
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/INPUT|TEXTAREA/.test(e.target.tagName) && !$('fbModal').classList.contains('show')) {
+    e.preventDefault(); undo();
+  }
+});
+// 補い方を切り替えたら、補う予定の辺をまとめて切り替える（「補わない」にした辺はそのまま）
+$('selMethod').onchange = () => {
+  resetOutput();
+  const m = $('selMethod').value;
+  S.pages.forEach((pg) => { for (const k of SIDES) if (pg.fix[k]) pg.fix[k] = m; });
+  refresh();
+};
+['optBleed', 'optTol', 'optWhite', 'optMinLen', 'optStep', 'optDpi', 'optLight'].forEach((id) => $(id).addEventListener('change', () => {
+  if (!S.pages.length) return;
+  $('btnRerun').disabled = false; $('btnRerun').textContent = '設定を反映して再チェック（変更あり）';
+}));
+$('btnRerun').onclick = () => { $('btnRerun').disabled = true; $('btnRerun').textContent = '設定を反映して再チェック'; analyzeAll(); };
+$('onlyNg').onchange = () => { S.onlyNg = $('onlyNg').checked; renderList(); };
+
+/* ---------- 読み込み ---------- */
+$('btnOpen').onclick = () => $('file').click();
+$('dropzone').onclick = () => $('file').click();
+$('file').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) load(f); };
+$('btnReset').onclick = () => resetAll();
+(() => {
+  const appEl = $('app'), dz = $('dropzone');
+  let depth = 0;
+  const isFileDrag = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  appEl.addEventListener('dragenter', (e) => { if (!isFileDrag(e)) return; e.preventDefault(); depth++; $('dropveil').classList.add('show'); dz.classList.add('hot'); });
+  appEl.addEventListener('dragover', (e) => { if (isFileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  appEl.addEventListener('dragleave', (e) => { if (!isFileDrag(e)) return; depth = Math.max(0, depth - 1); if (!depth) { $('dropveil').classList.remove('show'); dz.classList.remove('hot'); } });
+  appEl.addEventListener('drop', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); depth = 0; $('dropveil').classList.remove('show'); dz.classList.remove('hot');
+    const f = e.dataTransfer.files[0]; if (f) load(f);
+  });
+})();
+
+async function load(file) {
+  if (S.busy) return;
+  if (!window.pdfjsLib) { alert('PDF表示部品（pdf.js）を読み込めませんでした。ネットワークに接続した状態で開き直してください。'); return; }
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { alert('PDFファイルを選んでください。'); return; }
+  resetAll(true);
+  S.file = file;
+  S.bytes = new Uint8Array(await file.arrayBuffer());
+  try {
+    const info = await E.readPages(S.bytes);
+    const o = opts();
+    S.pages = info.pages.map((p) => ({
+      index: p.index, boxes: p.boxes, direct: p.direct,
+      bleed: p.boxes.trim ? E.effectiveBleed(p.boxes, o.defaultBleedPt) : null, fix: {}, before: null, after: null, state: 'wait',
+    }));
+    S.revertable = !!info.base;
+    S.jsDoc = await openPdf(await viewBytes(S.bytes));
+  } catch (err) {
+    console.error(err);
+    alert(/暗号化/.test(err.message || '') ? 'このPDFにはパスワード（権限）が設定されています。権限ロック解除ツールで解除してから入れてください。' : 'PDFを開けませんでした（' + (err.message || err) + '）');
+    resetAll(); return;
+  }
+  $('drop').classList.add('hidden'); $('viewer').classList.remove('hidden');
+  $('zoomctl').classList.remove('hidden'); $('vbar').classList.add('show'); setPageCtl(true);
+  $('btnReset').disabled = false;
+  $('pgTotal').textContent = '/ ' + S.pages.length; $('pgInput').max = S.pages.length;
+  S.cur = 0; S.zoom = 1;
+  await renderView();
+  analyzeAll();
+}
+const contains = (a, b) => a.l <= b.l + 0.01 && a.b <= b.b + 0.01 && a.r >= b.r - 0.01 && a.t >= b.t - 0.01;
+// 仕上がり外が CropBox で隠れていると測れないので、そのページだけ表示範囲を MediaBox に広げた複製で表示・解析する（保存には使わない）
+async function viewBytes(bytes) {
+  const idx = S.pages.filter((pg) => pg.bleed && !contains(pg.boxes.crop, pg.bleed)).map((pg) => pg.index);
+  return idx.length ? E.expandCropForView(bytes, idx) : bytes;
+}
+
+function resetAll(keepUI) {
+  resetOutput();
+  if (S.jsDoc) { S.jsDoc.destroy(); S.jsDoc = null; }
+  Object.assign(S, { file: null, bytes: null, pages: [], cur: 0, busy: false, revertable: false, viewBox: null });
+  if (keepUI) return;
+  $('drop').classList.remove('hidden'); $('viewer').classList.add('hidden');
+  $('zoomctl').classList.add('hidden'); $('vbar').classList.remove('show'); setPageCtl(false); $('pgTotal').textContent = '/ –';
+  $('btnReset').disabled = true; $('btnFix').disabled = true; $('btnRerun').disabled = true; hideBusy();
+  $('plist').innerHTML = '<div class="empty-msg">PDF未読込</div>';
+  ['pageHd', 'pageSec', 'sumHd', 'sumSec', 'onlyNgWrap', 'jumpSec'].forEach((id) => $(id).classList.add('hidden'));
+  $('btnFixLbl').textContent = '断ち代を補う';
+  $('fixNote').textContent = 'PDFを開くと自動でチェックします。不足のある辺は最初から「補う」設定になっています。';
+}
+function clearOut() {
+  S.outBytes = null; S.warnings = []; S.baseLen = 0;
+  if (S.outJsDoc) { S.outJsDoc.destroy(); S.outJsDoc = null; }
+  $('btnSave').disabled = true;
+  document.querySelectorAll('#modes button').forEach((b) => { if (b.dataset.m !== 'before') b.disabled = true; });
+}
+// 補正をすべて取り消す（設定を変えたときなど）
+function resetOutput() {
+  clearOut();
+  undoStack = []; if ($('btnUndo')) updateUndo();
+  S.applied = new Set();
+  S.pages.forEach((pg) => { pg.after = null; pg.decision = ''; });
+  if (S.view !== 'before') { S.view = 'before'; if (S.pages.length) renderView(); }
+  document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('on', b.dataset.m === 'before'));
+}
+
+/* ---------- 解析 ---------- */
+async function analyzeOne(jsDoc, pg, o, refine = true) {
+  const page = await jsDoc.getPage(pg.index + 1);
+  const scale = o.dpi / 72;
+  const vp = page.getViewport({ scale, rotation: 0 });
+  const cv = document.createElement('canvas');
+  cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await page.render({ canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
+  const [x1, y1, x2, y2] = page.view;
+  const view = { l: Math.min(x1, x2), b: Math.min(y1, y2), r: Math.max(x1, x2), t: Math.max(y1, y2) };
+  const edges = E.analyzeEdges(ctx.getImageData(0, 0, cv.width, cv.height), { view, scale, trim: pg.boxes.trim, bleed: pg.bleed }, o);
+  cv.width = cv.height = 0;
+  // 不足の辺は、辺の帯だけを高い解像度（1200dpi）で描いて元の絵柄の端を測り直す（判定は変えない。補正の切り抜き位置と軸だけ）。
+  // 200dpi では端が ±0.03mm ほどしか分からず、乗算・不透明度の絵柄では髪の毛ほどの重なりが濃い線に見えるため（NOTES 4章）
+  if (refine) for (const k of SIDES) {
+    if (edges[k].status !== 'short') continue;
+    try { await refineSide(page, view, pg, edges, k, o); } catch (err) { console.warn('refine', k, err); }
+  }
+  page.cleanup();
+  return { edges, view };
+}
+const REFINE_DPI = 1200, REFINE_MAXPX = 16000;   // 帯の長い方がこれを超えるときは解像度を下げる（ブラウザのキャンバスの上限）
+async function refineSide(page, view, pg, edges, k, o) {
+  const R = E.stripRect(k, pg.boxes.trim, pg.bleed);
+  const longPt = Math.max(R.r - R.l, R.t - R.b);
+  const sc = Math.min(REFINE_DPI / 72, REFINE_MAXPX / longPt);
+  const x = Math.floor((R.l - view.l) * sc), y = Math.floor((view.t - R.t) * sc);
+  const W = Math.ceil((R.r - view.l) * sc) - x, H = Math.ceil((view.t - R.b) * sc) - y;
+  if (W < 2 || H < 2) return;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  const vp = page.getViewport({ scale: sc, rotation: 0 });
+  await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -x, -y], annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
+  E.refineEdges(edges, k, ctx.getImageData(0, 0, W, H),
+    { view: { l: view.l + x / sc, t: view.t - y / sc, r: view.l + (x + W) / sc, b: view.t - (y + H) / sc }, scale: sc, trim: pg.boxes.trim, bleed: pg.bleed }, o);
+  cv.width = cv.height = 0;
+}
+
+async function analyzeAll() {
+  S.busy = true; resetOutput();
+  const o = opts();
+  S.pages.forEach((pg) => { pg.bleed = pg.boxes.trim ? E.effectiveBleed(pg.boxes, o.defaultBleedPt) : null; pg.before = null; pg.fix = {}; pg.state = 'wait'; pg.error = null; });
+  refresh();
+  for (const pg of S.pages) {
+    pg.state = 'busy'; renderRow(pg);
+    showBusy(`チェック中… ${pg.index + 1} / ${S.pages.length} ページ`, pg.index / S.pages.length);
+    if (pg.boxes.trim) {
+      try {
+        pg.before = await analyzeOne(S.jsDoc, pg, o);
+        for (const k of SIDES) pg.fix[k] = pg.before.edges[k].status === 'short' ? o.method : '';
+      } catch (err) { console.error(err); pg.error = String(err.message || err); }
+    }
+    pg.state = 'done'; renderRow(pg);
+    $('pgProgress').textContent = `チェック中 ${pg.index + 1} / ${S.pages.length}`;
+    if (pg.index === S.cur) { renderSide(); drawOverlay(); }
+    renderSummary();
+    if (pg.index % 6 === 0) await new Promise(requestAnimationFrame);
+  }
+  $('pgProgress').textContent = '';
+  hideBusy();
+  S.busy = false;
+  refresh();
+}
+
+/* ---------- 判定の読み方 ---------- */
+const rolesOf = (pg) => E.sideRoles(pg.index, opts());
+const targetSides = (pg) => { const r = rolesOf(pg); return SIDES.filter((k) => r[k] !== 'nodo'); };
+function shortSides(pg) {
+  const a = pg.before; if (!a || !a.edges) return [];
+  return targetSides(pg).filter((k) => a.edges[k].status === 'short');
+}
+const checkedSides = (pg) => shortSides(pg).filter((k) => pg.fix[k]);
+const fixedOk = (pg, k) => !!(S.applied.has(pg.index) && pg.after && pg.after.edges && pg.fix[k] && pg.after.edges[k].status !== 'short');
+const ngPages = () => S.pages.filter((pg) => shortSides(pg).length);
+const undecided = (pg) => !pg.decision && checkedSides(pg).length > 0;
+const sideName = (pg, k) => (opts().mode === 'sheet' ? SHEET_NAME[k] : ROLE_NAME[rolesOf(pg)[k]]);
+// 部分的な不足の書き方：「一部」「2か所」など
+function segNote(e, short) {
+  const g = e.segments || [];
+  if (g.length > 1) return short ? `（${g.length}か所）` : `${g.length}か所・${mm1(Math.min(...g.map((x) => e.needPt - x.extPt)))}〜${mm1(Math.max(...g.map((x) => e.needPt - x.extPt)))}mm 不足`;
+  if (e.partial) return short ? '（一部）' : `一部 ${Math.round(E.pt2mm(g[0].lenPt))}mm の区間`;
+  return '';
+}
+const mm1 = (pt) => (pt == null || isNaN(pt) ? '—' : E.pt2mm(pt).toFixed(1));
+
+/* ---------- 左：ページ一覧 ---------- */
+function rowInfo(pg) {
+  if (pg.state === 'busy') return { dot: 'busy', cls: '', txt: 'チェック中…' };
+  if (pg.state === 'wait') return { dot: '', cls: '', txt: '—' };
+  if (!pg.boxes.trim) return { dot: '', cls: '', txt: 'TrimBoxなし' };
+  if (pg.error || !pg.before) return { dot: '', cls: '', txt: '解析できず' };
+  const sh = shortSides(pg);
+  if (!sh.length) return { dot: 'ok', cls: 'ok', txt: 'OK' };
+  if (pg.decision === 'skipped') return { dot: '', cls: '', txt: '見送り・' + sh.map((k) => sideName(pg, k)).join('・') + ' 不足' };
+  const done = sh.filter((k) => fixedOk(pg, k));
+  if (done.length) {
+    const left = sh.filter((k) => !fixedOk(pg, k));
+    return left.length ? { dot: 'ng', cls: 'ng', txt: '補正済・' + left.map((k) => sideName(pg, k)).join('・') + ' 不足' } : { dot: 'ok', cls: 'ok', txt: '補正済' };
+  }
+  return { dot: 'ng', cls: 'ng', txt: sh.map((k) => `${sideName(pg, k)} ${mm1(pg.before.edges[k].shortMedianPt)}${segNote(pg.before.edges[k], true)}`).join('・') + ' 不足' };
+}
+function rowHTML(pg) {
+  const i = rowInfo(pg);
+  return `<span class="pno">p.${pg.index + 1}</span><span class="dot ${i.dot}"></span><span class="lbl ${i.cls}">${i.txt}</span>`;
+}
+function renderList() {
+  const box = $('plist'); box.innerHTML = '';
+  if (!S.pages.length) { box.innerHTML = '<div class="empty-msg">PDF未読込</div>'; return; }
+  for (const pg of S.pages) {
+    if (S.onlyNg && !shortSides(pg).length) continue;
+    const d = document.createElement('div');
+    d.className = 'prow' + (pg.index === S.cur ? ' sel' : ''); d.id = 'row' + pg.index;
+    d.innerHTML = rowHTML(pg);
+    d.onclick = () => goPage(pg.index);
+    box.appendChild(d);
+  }
+  if (!box.children.length) box.innerHTML = '<div class="empty-msg">該当するページはありません</div>';
+}
+function renderRow(pg) { const d = $('row' + pg.index); if (d) d.innerHTML = rowHTML(pg); }
+
+/* ---------- 右：このページ／全体 ---------- */
+function renderSide() {
+  const pg = S.pages[S.cur]; if (!pg) return;
+  $('pageHd').classList.remove('hidden'); $('pageSec').classList.remove('hidden');
+  const o = opts(), roles = rolesOf(pg);
+  $('pageHd').textContent = `このページ（p.${pg.index + 1}` + (o.mode === 'book' ? `・ノンブル ${o.startNombre + pg.index}・小口${roles.left === 'koguchi' ? '左' : '右'}）` : '）');
+  const list = $('sideList'); list.innerHTML = '';
+  const msg = (t) => { list.innerHTML = `<div class="rnote" style="margin:0">${t}</div>`; };
+  if (!pg.boxes.trim) return msg('TrimBox（仕上がりサイズ）が設定されていないため判定できません。');
+  if (pg.error) return msg('解析できませんでした：' + esc(pg.error));
+  if (!pg.before) return msg('チェック中です…');
+  const order = o.mode === 'book' ? ['top', 'bottom', roles.left === 'koguchi' ? 'left' : 'right', roles.left === 'nodo' ? 'left' : 'right'] : SIDES;
+  for (const k of order) {
+    const e = pg.before.edges[k], nm = sideName(pg, k);
+    const row = document.createElement('div'); row.className = 'ri';
+    if (roles[k] === 'nodo') {
+      row.innerHTML = `<span class="rdot"></span><span class="rlbl" style="color:var(--ink-faint)">${nm}</span><span class="rsub">対象外</span>`;
+    } else if (e.status === 'short') {
+      if (fixedOk(pg, k)) {
+        row.className = 'ri fixed';
+        row.innerHTML = `<span class="rdot ok"></span><span class="rlbl">${nm}</span><span class="rsub">${METHOD_NAME[pg.fix[k]]}で補正${(e.segments || []).length > 1 ? `（${e.segments.length}か所）` : e.partial ? '（一部）' : `（${mm1(Math.max(0, e.needPt - e.shortMedianPt))}mm）`}</span><span class="rval">${mm1(Math.min(pg.after.edges[k].medianPt, e.needPt))}<span class="runit">mm</span></span>`;
+      } else {
+        row.className = 'ri ng';
+        row.innerHTML = `<span class="rdot ng"></span><span class="rlbl">${nm}</span><span class="rval">${mm1(e.shortMedianPt)}<span class="runit">/ ${mm1(e.needPt)}mm</span></span><span class="rsub" title="${esc(segNote(e) || '')}">${segNote(e) || `あと ${mm1(Math.max(0, e.needPt - e.shortMedianPt))}mm`}</span>`;
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', nm + 'の補い方'); sel.disabled = S.applied.has(pg.index) || S.busy;
+        sel.innerHTML = '<option value="mirror">反転</option><option value="stretch">引き伸ばし</option><option value="">補わない</option>';
+        sel.value = pg.fix[k] || '';
+        sel.onchange = () => { pg.fix[k] = sel.value; renderSummary(); renderStep(); };
+        row.appendChild(sel);
+      }
+    } else if (e.status === 'ok') {
+      row.innerHTML = `<span class="rdot ok"></span><span class="rlbl">${nm}</span><span class="rsub">OK</span><span class="rval">${mm1(Math.min(e.medianPt, e.needPt))}<span class="runit">mm</span></span>`;
+    } else {
+      const t = { margin: '仕上がり際が白（余白）', nobleed: '断ち代の設定なし', outside: '表示範囲外で測れません' }[e.status] || '—';
+      row.innerHTML = `<span class="rdot"></span><span class="rlbl">${nm}</span><span class="rsub">${t}</span>`;
+    }
+    list.appendChild(row);
+  }
+  renderStep();
+}
+/* 1ページずつ確認：このページを補う／見送る／取り消す */
+function renderStep() { renderStepBox(); renderActions(); }
+function renderStepBox() {
+  const old = $('stepBox'); if (old) old.remove();
+
+  const pg = S.pages[S.cur];
+  if (!pg || !pg.before || !shortSides(pg).length) return;
+  if (!stepMode() && !S.applied.has(pg.index)) return;      // まとめてモードでは、補正済みページの「元に戻す」だけ出す
+  const box = document.createElement('div'); box.className = 'step'; box.id = 'stepBox';
+  const btn = (label, cls, fn, dis) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.disabled = !!dis || S.busy; b.onclick = fn; return b; };
+  const row = document.createElement('div'); row.className = 'sbtns';
+  const left = S.pages.filter(undecided).length;
+  const nextLbl = left ? '次の未確認へ ▶' : '次の不足へ ▶';
+  let t;
+  if (S.applied.has(pg.index)) {
+    t = '<b>このページは補正しました。</b>上の「スワイプ」「並べて」で補正前と見比べられます。';
+    row.append(btn('このページを元に戻す', '', () => stepUndo(pg)), btn(stepMode() ? nextLbl : '次の不足へ ▶', 'go', () => jumpNg(1, true)));
+  } else if (pg.decision === 'skipped') {
+    t = '<b>このページは補わずに見送りました。</b>';
+    row.append(btn('やっぱり補う', '', () => stepApply(pg), !checkedSides(pg).length), btn(nextLbl, 'go', () => jumpNg(1, true)));
+  } else {
+    const n = checkedSides(pg).length;
+    t = n ? `このページの <b>${n} 辺</b>を、上の設定で補います。` : '補う辺がありません（すべて「補わない」）。';
+    row.append(btn('補わずに次へ', '', () => { pushHistory(`p.${pg.index + 1} を見送る`); pg.decision = 'skipped'; renderRow(pg); jumpNg(1, true); refresh(); }),
+               btn('このページを補う', 'go', () => stepApply(pg), !n));
+  }
+  box.innerHTML = `<div class="stt">${t}</div>`; box.appendChild(row);
+  $('pageSec').appendChild(box);
+}
+function renderSummary() {
+  if (!S.pages.length) return;
+  $('sumHd').classList.remove('hidden'); $('sumSec').classList.remove('hidden');
+  const box = $('sumBox'); box.innerHTML = '';
+  const add = (cls, html) => { const d = document.createElement('div'); d.className = 'al ' + cls; d.innerHTML = html; box.appendChild(d); return d; };
+  const o = opts();
+  if (S.revertable && !S.outBytes) {
+    const d = add('ali', '<b>このPDFは断ち代チェックで補正済みです</b><br>補正前のデータがそのまま中に残っているので、元に戻せます。');
+    const b = document.createElement('button'); b.textContent = '補正前に戻して保存';
+    b.onclick = async () => {
+      const back = await E.revert(S.bytes);
+      if (!back) { d.innerHTML = '補正の後に別の処理（ノド白など）が加えられているため、ここでは戻せません。'; return; }
+      saveBlob(back, S.file.name.replace(/(_断ち代補正)?\.pdf$/i, '') + '_補正前.pdf');
+    };
+    d.appendChild(b);
+  }
+  if (S.busy && !S.pages.every((pg) => pg.state === 'done')) {
+    const n = S.pages.filter((pg) => pg.state === 'done').length;
+    add('ali', `<b>チェック中です… ${n} / ${S.pages.length} ページ</b><br>終わるまでお待ちください。終わったページから左の一覧で確認できます。`);
+    $('btnFix').disabled = true; return;
+  }
+  const shortPages = ngPages();
+  const js = $('jumpSec'); js.innerHTML = ''; js.classList.toggle('hidden', !shortPages.length);
+  if (shortPages.length) {
+    // 件数（クリックで次の不足ページへ）と前後ジャンプ。右カラム上部に固定
+    const pos = shortPages.findIndex((pg) => pg.index === S.cur);
+    const allDone = shortPages.every((pg) => pg.decision || !checkedSides(pg).length || S.applied.has(pg.index));
+    const j = document.createElement('div'); j.className = 'jump';
+    j.innerHTML = `<button class="jcount${allDone && S.applied.size ? ' done' : ''}" title="クリックで次の不足ページへ">不足 <b>${shortPages.length}</b> ページ<small>${pos >= 0 ? '表示中' : '次へジャンプ'}</small></button>` +
+      `<button class="jnav" title="前の不足ページ">◀</button><span class="jpos">${pos >= 0 ? pos + 1 : '—'} / ${shortPages.length}</span><button class="jnav" title="次の不足ページ">▶</button>`;
+    const [bc, bp, bn] = j.querySelectorAll('button');
+    bc.onclick = () => jumpNg(1, false); bp.onclick = () => jumpNg(-1, false); bn.onclick = () => jumpNg(1, false);
+    js.appendChild(j);
+    // 確認の進み具合をここ（上部に固定）に出す。下の「全体」はスクロールしないと見えないため
+    if (stepMode() || S.outBytes) {
+      const appliedN = shortPages.filter((pg) => S.applied.has(pg.index)).length;
+      const skippedN = shortPages.filter((pg) => pg.decision === 'skipped').length;
+      const left = shortPages.length - appliedN - skippedN;
+      const p = document.createElement('div'); p.className = 'jprog' + (!left ? ' done' : '');
+      p.innerHTML = stepMode()
+        ? `<b>確認 ${appliedN + skippedN} / ${shortPages.length} ページ</b>（補正 ${appliedN}・見送り ${skippedN}${left ? `・未確認 ${left}` : ''}）` + (!left && appliedN ? '<br>すべて確認しました。ヘッダーの「補正済みPDFを保存」で保存してください。' : '')
+        : `<b>補正 ${appliedN} / ${shortPages.length} ページ</b>` + (appliedN ? '<br>ヘッダーの「補正済みPDFを保存」で保存してください。' : '');
+      js.appendChild(p);
+    }
+  }
+  {
+    const shortP = ngPages();
+    const allDone = shortP.length && shortP.every((pg) => pg.decision || !checkedSides(pg).length || S.applied.has(pg.index));
+    $('btnSave').classList.toggle('ready', !!(S.outBytes && allDone));
+  }
+  const shortCount = shortPages.reduce((n, pg) => n + shortSides(pg).length, 0);
+  const todo = S.pages.reduce((n, pg) => n + checkedSides(pg).length, 0);
+  const rest = S.pages.filter(undecided);
+  const restSides = rest.reduce((n, pg) => n + checkedSides(pg).length, 0);
+  const sub = [`全 ${S.pages.length} ページ`, o.mode === 'book' ? `${o.binding === 'right' ? '右綴じ' : '左綴じ'}・ノドは対象外` : '4辺すべてが対象'];
+  const noTrim = S.pages.filter((pg) => !pg.boxes.trim).length;
+  const rotated = S.pages.filter((pg) => pg.boxes.rotate).length;
+  if (noTrim) sub.push(`TrimBoxなし ${noTrim} ページ（判定不可）`);
+  if (rotated) sub.push(`回転指定あり ${rotated} ページ（回転前の向きで判定）`);
+
+
+  if (S.outBytes) {
+    const fixed = S.pages.reduce((n, pg) => n + checkedSides(pg).filter((k) => fixedOk(pg, k)).length, 0);
+    const appliedSides = S.pages.filter((pg) => S.applied.has(pg.index)).reduce((n, pg) => n + checkedSides(pg).length, 0);
+    const remain = stepMode() ? appliedSides - fixed : shortCount - fixed;
+    const kb = ((S.outBytes.length - S.baseLen) / 1024).toFixed(1);
+    add(remain ? 'ale' : 'alo', `<b>${fixed} 辺を補正しました</b>${remain ? `（${remain} 辺は不足のまま）` : ''}<br>補正後のPDFをもう一度チェックし${remain ? '直しました。' : '、不足がないことを確認済みです。'}<br>${sub.join('／')}`);
+    add('ali', `補正は、今ある断ち代は残して<b>足りない分だけ</b>を足しています。`);
+    add('ali', `元のデータは1バイトも変えず、末尾に <b>${kb}KB</b> 追記しただけです（ノド白ツールと同じ方式）。${opts().useOcg ? '補った部分はレイヤー「断ち代補正」に入っています。' : ''}保存したPDFをこのツールに入れ直すと、補正前に戻せます。` +
+      (S.warnings.length ? `<br>処理できなかったページ：${esc(S.warnings.join('／'))}` : ''));
+    $('fixNote').textContent = stepMode()
+      ? '「このページ」の下のボタンで1ページずつ補います。残りを一度に補うボタンもその下にあります。設定を変えると補正はやり直しになります。'
+      : 'ヘッダーの「補正済みPDFを保存」で保存してください。設定を変えると補正はやり直しになります。';
+  } else if (shortCount && stepMode()) {
+    add('ale', `<b>${shortPages.length} ページ・${shortCount} 辺で断ち代が不足</b><br>${sub.join('／')}`);
+    $('fixNote').textContent = '「このページ」の下のボタンで、1ページずつ見ながら補います。▶ で次の不足ページへ進めます。';
+  } else if (shortCount) {
+    add('ale', `<b>${shortPages.length} ページ・${shortCount} 辺で断ち代が不足</b><br>${sub.join('／')}`);
+    $('fixNote').textContent = '今ある断ち代は残し、足りない分だけを補います（反転：絵柄の端で折り返してコピー／引き伸ばし：端の色を外へ延ばす）。元の絵柄・画質・色は変わりません。';
+  } else {
+    add('alo', `<b>断ち代の不足はありません</b><br>${sub.join('／')}`);
+    $('fixNote').textContent = '補正が必要な辺はありません。';
+  }
+  $('onlyNgWrap').classList.toggle('hidden', !shortCount || S.pages.length < 2);
+  if (stepMode()) {
+    // 1ページずつのときは、上のボタンは隠して「このページ」の下（renderActions）に出す
+    $('btnFix').disabled = !restSides || S.busy;
+    $('btnFix').classList.add('hidden');
+    if (!S.busy) $('btnFixLbl').textContent = restSides ? `残りをまとめて補う（${rest.length}ページ・${restSides}辺）` : '残りをまとめて補う';
+  } else {
+    $('btnFix').classList.remove('hidden');
+    $('btnFix').disabled = !restSides || S.busy;
+    if (!S.busy) $('btnFixLbl').textContent = restSides ? `断ち代を補う（${restSides} 辺）` : '断ち代を補う';
+  }
+  renderActions();
+}
+/* 「このページ」のカードの下にまとめる操作：残りをまとめて補う（1ページずつのとき）／補正をすべて取り消す */
+function renderActions() {
+  const old = $('actBox'); if (old) old.remove();
+  if ($('pageSec').classList.contains('hidden') || !S.pages.length) return;
+  const rest = S.pages.filter(undecided);
+  const restSides = rest.reduce((n, pg) => n + checkedSides(pg).length, 0);
+  const showBulk = stepMode() && restSides > 0, showUndo = !!S.outBytes;
+  if (!showBulk && !showUndo) return;
+  const box = document.createElement('div'); box.className = 'acts'; box.id = 'actBox';
+  if (showBulk) {
+    const b = document.createElement('button'); b.className = 'bulk'; b.disabled = S.busy;
+    b.textContent = `残り ${rest.length} ページ（${restSides} 辺）をまとめて補う`;
+    b.title = '未確認のページを、それぞれの辺の設定でまとめて補います';
+    b.onclick = () => $('btnFix').click();
+    box.appendChild(b);
+  }
+  if (showUndo) {
+    if (showBulk) box.appendChild(document.createElement('hr'));
+    const u = document.createElement('button'); u.className = 'undoall'; u.disabled = S.busy;
+    u.textContent = '補正をすべて取り消す';
+    u.title = 'すべてのページの補正を取り消します（ヘッダーの「戻す」でやり直せます）';
+    u.onclick = () => undoAll();
+    box.appendChild(u);
+  }
+  $('pageSec').appendChild(box);
+}
+function refresh() { renderList(); renderSide(); renderSummary(); drawOverlay(); }
+
+
+/* ---------- 中央：プレビュー ----------
+   表示は 補正前／補正後／並べる（左＝補正前・右＝補正後）。並べるときは2枚を同じ倍率で描く */
+let renderTasks = [], renderSeq = 0;
+const hasAfter = (pg) => !!(pg && S.outJsDoc && pg.after && S.applied.has(pg.index));
+function viewMode(pg) {
+  if (!hasAfter(pg)) return 'before';
+  return ['after', 'swipe', 'compare'].includes(S.view) ? S.view : 'before';
+}
+async function renderInto(doc, index, cv, scale, seq) {
+  const page = await doc.getPage(index + 1);
+  if (seq !== renderSeq) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const vp1 = page.getViewport({ scale: 1, rotation: 0 });
+  const vp = page.getViewport({ scale: scale * dpr, rotation: 0 });
+  const off = document.createElement('canvas'); off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
+  const octx = off.getContext('2d'); octx.fillStyle = '#fff'; octx.fillRect(0, 0, off.width, off.height);
+  const task = page.render({ canvasContext: octx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE });
+  renderTasks.push(task);
+  try { await task.promise; } catch (e) { return null; }
+  if (seq !== renderSeq) return null;
+  cv.width = off.width; cv.height = off.height;
+  cv.getContext('2d').drawImage(off, 0, 0);
+  cv.style.width = vp1.width * scale + 'px'; cv.style.height = vp1.height * scale + 'px';
+  const [x1, y1, x2, y2] = page.view;
+  return { vp1, view: { l: Math.min(x1, x2), b: Math.min(y1, y2), r: Math.max(x1, x2), t: Math.max(y1, y2) } };
+}
+async function renderView() {
+  const pg = S.pages[S.cur]; if (!pg || !S.jsDoc) return;
+  const seq = ++renderSeq;
+  renderTasks.forEach((t) => { try { t.cancel(); } catch (e) {} }); renderTasks = [];
+  const mode = viewMode(pg), avail = hasAfter(pg);
+  document.querySelectorAll('#modes button').forEach((b) => {
+    b.disabled = b.dataset.m !== 'before' && !avail;
+    b.classList.toggle('on', b.dataset.m === mode);
+  });
+  const cmp = mode === 'compare', sw = mode === 'swipe';
+  const wasCmp = $('viewer').classList.contains('cmp');
+  $('viewer').classList.toggle('cmp', cmp); $('paneB').classList.toggle('hidden', !cmp);
+  $('canvaswrap').classList.toggle('cmpmode', cmp);
+  if (wasCmp !== cmp) { $('canvaswrap').scrollLeft = $('canvaswrap').scrollTop = 0; for (const p of [$('psA'), $('psB')]) p.scrollLeft = p.scrollTop = 0; }
+  ['pdfS', 'ovS3', 'swline', 'swlabL', 'swlabR'].forEach((id) => $(id).classList.toggle('hidden', !sw));
+  const page = await (mode === 'after' ? S.outJsDoc : S.jsDoc).getPage(pg.index + 1);
+  if (seq !== renderSeq) return;
+  const vp1 = page.getViewport({ scale: 1, rotation: 0 });
+  const wrap = $('canvaswrap');
+  const availW = cmp ? (wrap.clientWidth - 3) / 2 - 48 : wrap.clientWidth - 60;
+  const availH = cmp ? wrap.clientHeight - 30 - 124 : wrap.clientHeight - 150;
+  const fit = Math.max(0.05, Math.min(availW / vp1.width, availH / vp1.height));
+  const scale = fit * S.zoom;
+  const jobs = [renderInto(mode === 'after' ? S.outJsDoc : S.jsDoc, pg.index, $('pdfC'), scale, seq)];
+  if (cmp) jobs.push(renderInto(S.outJsDoc, pg.index, $('pdfC2'), scale, seq));
+  if (sw) jobs.push(renderInto(S.outJsDoc, pg.index, $('pdfS'), scale, seq));
+  const res = await Promise.all(jobs);
+  if (seq !== renderSeq || !res[0]) return;
+  S.fit = fit; S.pw = vp1.width; S.ph = vp1.height; S.viewBox = res[0].view;
+  $('capA').textContent = '補正前';
+  $('zoomhint').textContent = Math.round(S.zoom * 100) + '%';
+  $('pgInput').value = pg.index + 1;
+  const b = pg.boxes, T = b.trim;
+  $('sbinfo').textContent = ({ before: '', after: '補正後／', swipe: 'スワイプ（左：補正前・右：補正後）／', compare: '左：補正前・右：補正後／' })[mode] +
+    (T ? `仕上がり ${E.pt2mm(T.r - T.l).toFixed(1)}×${E.pt2mm(T.t - T.b).toFixed(1)}mm／${b.hasBleed ? 'BleedBoxあり' : 'BleedBoxなし（既定値で判定）'}` : 'TrimBoxなし');
+  drawOverlay();
+}
+function drawOverlay() {
+  const pg = S.pages[S.cur], mode = viewMode(pg);
+  drawOverlayInto($('ovS'), $('pdfC'), mode === 'after' ? 'after' : 'before');
+  if (mode === 'compare') drawOverlayInto($('ovS2'), $('pdfC2'), 'after'); else $('ovS2').innerHTML = '';
+  if (mode === 'swipe') drawOverlayInto($('ovS3'), $('pdfC'), 'after'); else $('ovS3').innerHTML = '';
+  applySwipe();
+}
+function drawOverlayInto(svg, cv, which) {
+  const pg = S.pages[S.cur], v = S.viewBox;
+  if (!pg || !v || !pg.boxes.trim || (!S.ovTrim && !S.ovBand)) { svg.innerHTML = ''; return; }
+  const W = v.r - v.l, H = v.t - v.b;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio', 'none');
+  const cs = getComputedStyle(document.documentElement);
+  const C = { acc: cs.getPropertyValue('--amber').trim(), err: cs.getPropertyValue('--err').trim(), ok: cs.getPropertyValue('--ok').trim() };
+  const X = (x) => (x - v.l).toFixed(2), Y = (y) => (v.t - y).toFixed(2);
+  const rect = (l, b, r, t, a) => `<rect x="${X(l)}" y="${Y(t)}" width="${(r - l).toFixed(2)}" height="${(t - b).toFixed(2)}" ${a}/>`;
+  const T = pg.boxes.trim, B = pg.bleed, roles = rolesOf(pg);
+  const px = W / (parseFloat(cv.style.width) || W);   // 画面1pxあたりのpt
+  let s = '';
+  if (S.ovTrim) s += rect(T.l, T.b, T.r, T.t, `fill="none" stroke="${C.acc}" stroke-width="${px * 1.2}" stroke-dasharray="${px * 6} ${px * 4}"`);
+  const strip = (k) => k === 'top' ? [T.l, T.t, T.r, B.t] : k === 'bottom' ? [T.l, B.b, T.r, T.b] : k === 'left' ? [B.l, T.b, T.l, T.t] : [T.r, T.b, B.r, T.t];
+  const edges = pg.before && pg.before.edges;
+  if (S.ovBand && edges) for (const k of SIDES) {
+    const [l, b, r, t] = strip(k);
+    if (roles[k] === 'nodo') { s += rect(l, b, r, t, `fill="#8a9097" fill-opacity=".22"`); continue; }
+    if (edges[k].status !== 'short') continue;
+    const done = which === 'after' && fixedOk(pg, k);
+    const col = done ? C.ok : C.err;
+    const m = px * 4;   // 断ち代の外側に目印（全体表示でも見えるように）
+    const horiz = k === 'top' || k === 'bottom';
+    // 足りない区間だけに帯を描く
+    for (const g of (edges[k].segments || [])) {
+      const [sl, sb, sr, st] = horiz ? [g.a0, b, g.a1, t] : [l, g.a0, r, g.a1];
+      s += rect(sl, sb, sr, st, `fill="${col}" fill-opacity="${done ? .14 : .3}" stroke="${col}" stroke-width="${px}"`);
+      const mk = k === 'top' ? [g.a0, B.t, g.a1, B.t + m] : k === 'bottom' ? [g.a0, B.b - m, g.a1, B.b] : k === 'left' ? [B.l - m, g.a0, B.l, g.a1] : [B.r, g.a0, B.r + m, g.a1];
+      s += rect(...mk, `fill="${col}"`);
+    }
+  }
+  svg.innerHTML = s;
+}
+function goPage(i) {
+  if (i < 0 || i >= S.pages.length) return;
+  S.cur = i;
+  document.querySelectorAll('.prow.sel').forEach((d) => d.classList.remove('sel'));
+  const row = $('row' + i); if (row) { row.classList.add('sel'); row.scrollIntoView({ block: 'nearest' }); }
+  renderSide(); renderSummary(); renderView();
+}
+$('pgPrev').onclick = () => goPage(S.cur - 1);
+$('pgNext').onclick = () => goPage(S.cur + 1);
+$('pgFirst').onclick = () => goPage(0);
+$('pgLast').onclick = () => goPage(S.pages.length - 1);
+function setPageCtl(on) { ['pgFirst', 'pgPrev', 'pgInput', 'pgNext', 'pgLast'].forEach((id) => ($(id).disabled = !on)); }
+/* 詳細設定のドロワー（下版差分チェッカーと同じ：外側クリック・Escで閉じる） */
+function setSettingsOpen(open) {
+  $('settingsPanel').classList.toggle('collapsed', !open);
+  $('settingsToggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('settingsToggle').classList.toggle('act', open);
+  $('setCaret').textContent = open ? '▾' : '▸';
+}
+$('settingsToggle').onclick = (e) => { e.stopPropagation(); setSettingsOpen($('settingsPanel').classList.contains('collapsed')); };
+document.addEventListener('mousedown', (e) => {
+  if ($('settingsPanel').classList.contains('collapsed')) return;
+  if ($('settingsPanel').contains(e.target) || $('settingsToggle').contains(e.target)) return;
+  setSettingsOpen(false);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('settingsPanel').classList.contains('collapsed')) setSettingsOpen(false); });
+$('pgInput').onchange = () => goPage((parseInt($('pgInput').value, 10) || 1) - 1);
+document.addEventListener('keydown', (e) => {
+  if (!S.pages.length || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) || $('fbModal').classList.contains('show')) return;
+  if (e.key === 'ArrowLeft') { goPage(S.cur - 1); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { goPage(S.cur + 1); e.preventDefault(); }
+});
+/* ズーム。他ツールと同じくホイールだけで拡大縮小（カーソル位置を中心に）。
+   すぐに表示サイズだけ変えて、少し止まったら描き直してくっきりさせる */
+let zoomT = null;
+function setZoom(z, cx, cy) {
+  z = Math.min(8, Math.max(0.25, z));
+  const vw = $('viewer');
+  if (!S.fit || vw.classList.contains('hidden')) { S.zoom = z; renderView(); return; }
+  // 基準にするスクロール枠と中身：2ウインドウならカーソルのある側
+  const cmp = vw.classList.contains('cmp');
+  let w = $('canvaswrap'), box = vw;
+  if (cmp) {
+    const inB = cx != null && $('psB').getBoundingClientRect().left <= cx;
+    w = inB ? $('psB') : $('psA'); box = inB ? $('boxB') : $('boxA');
+  }
+  const r0 = box.getBoundingClientRect();
+  if (cx == null) { const wr = w.getBoundingClientRect(); cx = wr.left + wr.width / 2; cy = wr.top + wr.height / 2; }
+  const fx = (cx - r0.left) / r0.width, fy = (cy - r0.top) / r0.height;
+  S.zoom = z;
+  const sc = S.fit * S.zoom;
+  for (const c of [$('pdfC'), $('pdfC2'), $('pdfS')]) { c.style.width = S.pw * sc + 'px'; c.style.height = S.ph * sc + 'px'; }
+  $('zoomhint').textContent = Math.round(S.zoom * 100) + '%';
+  drawOverlay();
+  const r1 = box.getBoundingClientRect();
+  w.scrollLeft += (r1.left + fx * r1.width) - cx; w.scrollTop += (r1.top + fy * r1.height) - cy;
+  if (cmp) syncScroll(w);
+  clearTimeout(zoomT); zoomT = setTimeout(renderView, 160);
+}
+$('zIn').onclick = () => setZoom(S.zoom * 1.25);
+$('zOut').onclick = () => setZoom(S.zoom / 1.25);
+$('zFit').onclick = () => setZoom(1);
+$('canvaswrap').addEventListener('wheel', (e) => {
+  if (!S.pages.length || $('viewer').classList.contains('hidden')) return;
+  e.preventDefault();
+  const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;          // 行単位のマウスにも対応
+  setZoom(S.zoom * Math.exp(-Math.max(-60, Math.min(60, d)) * 0.004), e.clientX, e.clientY);
+}, { passive: false });
+(() => {   // ドラッグでパン
+  const w = $('canvaswrap'); let d = null;
+  let sw = false;
+  w.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || $('viewer').classList.contains('hidden')) return;
+    // スワイプ中は、仕切り線の近く（±14px）をつかむと線を動かす。それ以外はパン
+    if (!$('swline').classList.contains('hidden')) {
+      const lr = $('swline').getBoundingClientRect();
+      if (Math.abs(e.clientX - lr.left) < 14) { sw = true; w.classList.add('swiping'); e.preventDefault(); return; }
+    }
+    const sc = $('viewer').classList.contains('cmp') ? ($('psB').contains(e.target) ? $('psB') : $('psA')) : w;
+    d = { x: e.clientX, y: e.clientY, sl: sc.scrollLeft, st: sc.scrollTop, sc }; w.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (sw) { const r = $('boxA').getBoundingClientRect(); S.swipeX = (e.clientX - r.left) / r.width; applySwipe(); return; }
+    if (!d) return; d.sc.scrollLeft = d.sl - (e.clientX - d.x); d.sc.scrollTop = d.st - (e.clientY - d.y);
+    if (d.sc !== w) syncScroll(d.sc);
+  });
+  window.addEventListener('mouseup', () => { d = null; sw = false; w.classList.remove('grabbing'); w.classList.remove('swiping'); });
+})();
+/* 2ウインドウのスクロールを連動させる */
+let syncing = false;
+function syncScroll(from) {
+  if (syncing) return;
+  const to = from === $('psA') ? $('psB') : $('psA');
+  syncing = true; to.scrollLeft = from.scrollLeft; to.scrollTop = from.scrollTop; syncing = false;
+}
+$('psA').addEventListener('scroll', () => { if ($('viewer').classList.contains('cmp')) syncScroll($('psA')); });
+$('psB').addEventListener('scroll', () => { if ($('viewer').classList.contains('cmp')) syncScroll($('psB')); });
+let resizeT = null;
+window.addEventListener('resize', () => { if (!S.pages.length) return; clearTimeout(resizeT); resizeT = setTimeout(renderView, 120); });
+const setView = (v) => { S.view = v; renderView(); };
+$('modes').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && !b.disabled) setView(b.dataset.m); });
+document.addEventListener('keydown', (e) => {
+  if (!S.pages.length || e.metaKey || e.ctrlKey || e.altKey || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) || $('fbModal').classList.contains('show')) return;
+  const m = { 1: 'before', 2: 'after', 3: 'swipe', 4: 'compare' }[e.key];
+  if (m) { const b = document.querySelector(`#modes button[data-m="${m}"]`); if (b && !b.disabled) setView(m); }
+});
+/* スワイプ：仕切り線の左が補正前、右が補正後 */
+function applySwipe() {
+  const x = Math.max(0, Math.min(1, S.swipeX)) * 100;
+  $('pdfS').style.clipPath = `inset(0 0 0 ${x}%)`;
+  $('ovS3').style.clipPath = `inset(0 0 0 ${x}%)`;
+  $('ovS').style.clipPath = viewMode(S.pages[S.cur]) === 'swipe' ? `inset(0 ${100 - x}% 0 0)` : '';
+  $('swline').style.left = x + '%';
+}
+const ovBtn = (id, key) => {
+  $(id).onclick = () => {
+    S[key] = !S[key];
+    const b = $(id);
+    b.classList.toggle('on', S[key]); b.classList.toggle('off', !S[key]);
+    b.setAttribute('aria-pressed', String(S[key]));
+    b.querySelector('.est').textContent = S[key] ? '表示中' : '非表示';
+    drawOverlay();
+  };
+};
+ovBtn('ovTrim', 'ovTrim'); ovBtn('ovBand', 'ovBand');
+
+/* ---------- 補正・保存 ---------- */
+/* S.applied のページだけを含めて補正済みPDFを作り直す（毎回、元のPDFから作るので重ねがけにならない）。
+   newly のページだけ補正後を再チェックする（他のページの結果は変わらない） */
+async function rebuildOutput(newly, label) {
+  const o = opts();
+  const targets = S.pages.filter((pg) => S.applied.has(pg.index) && checkedSides(pg).length);
+  if (!targets.length) { clearOut(); return; }
+  const jobs = targets.map((pg) => {
+    const sides = {}; checkedSides(pg).forEach((k) => (sides[k] = pg.fix[k]));
+    // 今ある断ち代（keep）はそのまま残し、足りない分だけを補う
+    // 区間ごとに、今ある断ち代は残して足りない分だけを補う（部分的な不足・段差のある不足に対応）
+    const segs = {}; checkedSides(pg).forEach((k) => (segs[k] = pg.before.edges[k].segments || []));
+    return { pageIndex: pg.index, sides, trim: pg.boxes.trim, bleed: pg.bleed, segs };
+  });
+  showBusy(label || '補正中…');
+  const r = await E.fillEdges(S.bytes, jobs, { srcPt: o.srcPt, useOcg: o.useOcg });
+  if (S.outJsDoc) S.outJsDoc.destroy();
+  S.outBytes = r.data; S.warnings = r.warnings; S.baseLen = r.base.length;
+  S.outJsDoc = await openPdf(await viewBytes(S.outBytes));
+  let i = 0;
+  for (const pg of newly) {
+    showBusy(`補正後を再チェック中… ${++i} / ${newly.length} ページ`, (i - 1) / newly.length);
+    pg.after = await analyzeOne(S.outJsDoc, pg, o, false);   // 補正後の確かめは判定だけ（測り直しは要らない）
+
+    renderRow(pg);
+  }
+  $('btnSave').disabled = false;
+}
+async function guarded(fn, noHistory, label) {
+  if (S.busy) return;
+  if (!noHistory) pushHistory(label || '補正');
+  S.busy = true; $('btnFix').disabled = true; updateUndo(); renderStep();
+  try { await fn(); }
+  catch (err) { console.error(err); alert('補正できませんでした（' + (err.message || err) + '）'); }
+  hideBusy();
+  S.busy = false;
+  updateUndo();
+  refresh();
+}
+// まとめて補う（1ページずつモードでは「未確認の残り」だけ）
+$('btnFix').onclick = () => guarded(async () => {
+  const add = S.pages.filter(undecided);
+  add.forEach((pg) => { S.applied.add(pg.index); pg.decision = 'applied'; });
+  await rebuildOutput(add);
+  if (add.length && !add.some((pg) => pg.index === S.cur)) S.cur = add[0].index;
+  if (S.view !== 'compare') S.view = 'after'; renderView();
+}, false, stepMode() ? '残りをまとめて補う' : 'まとめて補う');
+// このページを補う
+function stepApply(pg) {
+  return guarded(async () => {
+    S.applied.add(pg.index); pg.decision = 'applied';
+    await rebuildOutput([pg]);
+    if (S.view !== 'compare') S.view = 'after'; renderView();
+  }, false, `p.${pg.index + 1} を補う`);
+}
+// このページの補正を取り消す
+function stepUndo(pg) {
+  return guarded(async () => {
+    S.applied.delete(pg.index); pg.decision = ''; pg.after = null;
+    await rebuildOutput([]);
+    renderRow(pg); S.view = 'before'; renderView();
+  }, false, `p.${pg.index + 1} の補正を取り消す`);
+}
+// 補正をすべて取り消す
+function undoAll() {
+  return guarded(async () => {
+    S.applied = new Set(); S.pages.forEach((pg) => { pg.decision = ''; pg.after = null; });
+    clearOut(); S.view = 'before'; renderView();
+  }, false, '補正をすべて取り消す');
+}
+/* 不足ページへジャンプ。onlyOpen=true なら未確認のページだけ（1ページずつモードの「次へ」） */
+function jumpNg(dir, onlyOpen) {
+  let list = ngPages();
+  if (onlyOpen && stepMode()) { const open = list.filter(undecided); if (open.length) list = open; }
+  if (!list.length) return;
+  const idx = list.map((pg) => pg.index);
+  let target;
+  if (dir > 0) target = idx.find((i) => i > S.cur) ?? idx[0];
+  else target = [...idx].reverse().find((i) => i < S.cur) ?? idx[idx.length - 1];
+  goPage(target);
+  renderSummary();
+}
+$('btnSave').onclick = () => {
+  if (!S.outBytes) return;
+  saveBlob(S.outBytes, S.file.name.replace(/\.pdf$/i, '') + '_断ち代補正.pdf');
+};
+function saveBlob(bytes, name) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ====== フィードバック（ISBN検版・トンボ計測等と同方式） ====== */
+(function () {
+  const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
+  const FB_APP_VERSION = "v1.0";
+  const modal = $('fbModal');
+  let fbVerdict = '';
+  const THUMB_MAX_EDGE = 1800;
+  // 表示中のページ（PDF＋判定の重ね表示）を合成して PNG 化。長辺1800pxまで縮小
+  function capturePageThumb() {
+    return new Promise((resolve) => {
+      try {
+        const pc = $('pdfC'); if (!pc.width) return resolve('');
+        const c = document.createElement('canvas'); c.width = pc.width; c.height = pc.height;
+        const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(pc, 0, 0);
+        const finish = () => {
+          const k = Math.min(1, THUMB_MAX_EDGE / Math.max(c.width, c.height));
+          if (k >= 1) return resolve(c.toDataURL('image/png'));
+          const s = document.createElement('canvas'); s.width = Math.max(1, Math.round(c.width * k)); s.height = Math.max(1, Math.round(c.height * k));
+          const sx = s.getContext('2d'); sx.imageSmoothingQuality = 'high'; sx.drawImage(c, 0, 0, s.width, s.height);
+          resolve(s.toDataURL('image/png'));
+        };
+        const svg = $('ovS');
+        if (!svg.innerHTML) return finish();
+        const xml = new XMLSerializer().serializeToString(svg).replace('<svg', `<svg width="${c.width}" height="${c.height}"`);
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0, c.width, c.height); finish(); };
+        img.onerror = finish;
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+      } catch (e) { resolve(''); }
+    });
+  }
+  /* 名前とアドレスは全KENPANツールで共通の保存名に入れる */
+  function kenpanWho(upd) {
+    let r = { name: '', email: '' };
+    try { const j = localStorage.getItem('kenpan-reporter'); if (j) r = Object.assign(r, JSON.parse(j) || {}); } catch (e) {}
+    if (upd) { Object.assign(r, upd); try { localStorage.setItem('kenpan-reporter', JSON.stringify(r)); } catch (e) {} }
+    return r;
+  }
+  const KENPAN_MAIL_RE = /^[^@\s]+@fujiwara-i\.com$/i;
+  const fbCurPage = () => (S.pages.length ? 'p' + (S.cur + 1) : '');
+  // 現在ページの判定結果をプレーンテキストで（実PDFなしで原因調査できるように）
+  function captureDetailText() {
+    try {
+      const pg = S.pages[S.cur]; if (!pg) return '';
+      const o = opts(), b = pg.boxes, L = [];
+      L.push(`ページ: ${fbCurPage()} / 種類: ${o.mode === 'book' ? '本文・' + (o.binding === 'right' ? '右綴じ' : '左綴じ') : 'ペラもの'} / ノンブル: ${o.startNombre + pg.index}`);
+      if (b.trim) L.push(`仕上がり: ${E.pt2mm(b.trim.r - b.trim.l).toFixed(2)} × ${E.pt2mm(b.trim.t - b.trim.b).toFixed(2)}mm / BleedBox: ${b.hasBleed ? 'あり' : 'なし'}`);
+      if (pg.before && pg.before.edges) {
+        L.push('[辺ごとの実測]');
+        for (const k of SIDES) {
+          const e = pg.before.edges[k], a = pg.after && pg.after.edges ? pg.after.edges[k] : null;
+          L.push(`  ${sideName(pg, k)}(${k}): ${e.status} 必要${mm1(e.needPt)} 中央値${mm1(e.medianPt)} 最小${mm1(e.minPt)} 不足区間${(e.segments || []).map((g) => `[${E.pt2mm(g.a0).toFixed(1)}-${E.pt2mm(g.a1).toFixed(1)}mm 今${mm1(g.extPt)}]`).join('') || 'なし'}` +
+            (pg.fix[k] ? ` 補正=${pg.fix[k]}` : '') + (a ? ` → 補正後 ${a.status} ${mm1(a.medianPt)}` : ''));
+        }
+      }
+      return L.join('\n');
+    } catch (e) { return ''; }
+  }
+  function captureDiag() {
+    try {
+      if (!S.pages.length) return JSON.stringify({ ran: false, note: 'PDF未読込' });
+      const pg = S.pages[S.cur];
+      return JSON.stringify({
+        ran: !!(pg && pg.before),
+        inputs: { pages: S.pages.length, page: S.cur + 1, hasTrimBox: !!(pg && pg.boxes.trim), hasBleedBox: !!(pg && pg.boxes.hasBleed), rotate: pg ? pg.boxes.rotate : null, revertable: S.revertable },
+        output: S.outBytes ? { appendedBytes: S.outBytes.length - S.baseLen, warnings: S.warnings } : null,
+        view: S.view,
+      });
+    } catch (e) { return JSON.stringify({ ran: null, note: '診断の収集に失敗: ' + e }); }
+  }
+  function setVerdict(v) { fbVerdict = v; document.querySelectorAll('#fbVerdict button').forEach((b) => b.classList.toggle('on', b.dataset.v === v)); }
+  function showNote(msg, ok) { const n = $('fbNote'); n.style.display = 'block'; n.className = 'fbnote' + (ok ? ' ok' : ''); n.innerHTML = msg; }
+  function openModal() {
+    $('fbFile').value = S.file ? S.file.name : '（未読込）';
+    $('fbFileHint').textContent = '表示ページ: ' + (fbCurPage() || '—') + (S.view === 'after' ? '（補正後）' : '');
+    $('fbPage').value = fbCurPage(); $('fbCategory').value = ''; $('fbComment').value = '';
+    const w = kenpanWho(); $('fbReporter').value = w.name || ''; $('fbEmail').value = w.email || '';
+    $('fbNote').style.display = 'none'; $('fbSend').disabled = false; $('fbSend').textContent = '送信する';
+    setVerdict(''); modal.classList.add('show');
+  }
+  const closeModal = () => modal.classList.remove('show');
+  async function send() {
+    if (!fbVerdict) { showNote('「判定結果は正しかった？」を選択してください。', false); return; }
+    const reporter = $('fbReporter').value.trim(), email = $('fbEmail').value.trim().toLowerCase();
+    if (!reporter) { showNote('お名前を入れてください（対応のご連絡に使います）。', false); $('fbReporter').focus(); return; }
+    if (!KENPAN_MAIL_RE.test(email)) { showNote('メールアドレスは社内アドレス（@fujiwara-i.com）で入れてください。', false); $('fbEmail').focus(); return; }
+    kenpanWho({ name: reporter, email });
+    const btn = $('fbSend'); btn.disabled = true; btn.textContent = '画像を準備中…';
+    const o = opts();
+    const payload = {
+      tool: 'tachi_check', verdict: fbVerdict, category: $('fbCategory').value,
+      file: $('fbFile').value.trim(), page: $('fbPage').value.trim(), comment: $('fbComment').value.trim(),
+      reporter, email, appVersion: FB_APP_VERSION, userAgent: navigator.userAgent,
+      ruleId: '', expected: '', actual: '', bbox: '', engine: 'canvas',
+      thumb: await capturePageThumb(), detailText: captureDetailText(), diag: '',
+      settings: JSON.stringify({ useOcg: o.useOcg, mode: o.mode, binding: o.binding, method: o.method, startNombre: o.startNombre,
+        bleedMm: $('optBleed').value, tolMm: $('optTol').value, white: o.whiteTol, lightAsPhoto: o.lightAsPhoto, minLenMm: $('optMinLen').value, stepMm: $('optStep').value, dpi: o.dpi, srcMm: $('optSrc').value }),
+    };
+    btn.textContent = '送信中…';
+    payload.diag = captureDiag();
+    try {
+      await fetch(FEEDBACK_ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+      showNote('送信しました。ありがとうございます！', true);
+      $('fbComment').value = ''; setVerdict('');
+      setTimeout(closeModal, 1100);
+    } catch (err) {
+      showNote('送信に失敗しました。ネットワークをご確認のうえ再度お試しください。', false);
+      btn.disabled = false; btn.textContent = '送信する';
+    }
+  }
+  $('fbOpen').addEventListener('click', openModal);
+  $('fbCancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) closeModal(); });
+  document.querySelectorAll('#fbVerdict button').forEach((b) => b.addEventListener('click', () => setVerdict(b.dataset.v)));
+  $('fbSend').addEventListener('click', send);
+})();
+</script>
+<script>window.KENPAN_HAS_WORK=function(){ return !!(S && S.bytes); };</script>
+<script src="../assets/kenpan-nav.js"></script>
+</body>
+</html>

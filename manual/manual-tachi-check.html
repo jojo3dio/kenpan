@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>断ち代チェック — 操作マニュアル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* KENPAN のマニュアル共通の作り（manual-nodo-dobu.html と同じ）。アクセントだけ桔梗色。
+   アンバー／琥珀系は使わない（--amber は他ツールとの変数名合わせで、中身は桔梗色） */
+:root{
+  --accent:#5457c9;
+  --bg:#ffffff; --strip:#fafaf9; --panel:#ffffff; --panel2:#f6f5f2; --line:#e7e4dd;
+  --ink:#26211a; --ink-dim:#5f584d; --ink-faint:#a39a8c;
+  --amber:#5457c9; --glow:var(--accent);
+  --err:#c8362a; --ok:#2e7d46;
+  --mono:'JetBrains Mono',ui-monospace,monospace; --ui:'Zen Kaku Gothic New',system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(40,32,20,.06),0 10px 30px rgba(40,32,20,.05);
+}
+[data-theme="dark"]{
+  --bg:#14110e; --strip:#1a160f; --panel:#1d1915; --panel2:#27211a; --line:#3a3227;
+  --ink:#ece5d8; --ink-dim:#b3a690; --ink-faint:#7a6f5e; --amber:#8d90f2;
+  --accent:#8d90f2; --glow:var(--accent);
+  --err:#e5604f; --ok:#4fae6e;
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  -webkit-font-smoothing:antialiased;line-height:1.8}
+a{color:color-mix(in srgb,var(--glow) 80%, var(--ink))}
+
+.top{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--strip);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;backdrop-filter:saturate(1.1)}
+.back{font-size:13px;text-decoration:none;color:var(--ink-dim);border:1px solid var(--line);
+  background:var(--panel);border-radius:9px;padding:7px 12px;transition:.15s;white-space:nowrap}
+.back:hover{border-color:var(--glow);color:var(--glow)}
+.top .nm{font-size:14px;font-weight:700}
+.sp{flex:1}
+.tbtn{font-family:var(--ui);font-size:13px;cursor:pointer;border:1px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px}
+
+.wrap{max-width:700px;margin:0 auto;padding:24px 18px 60px}
+
+.hero{display:flex;gap:20px;align-items:flex-start;
+  background:color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius:20px;padding:26px;box-shadow:var(--shadow);margin-bottom:34px}
+[data-theme="dark"] .hero{background:color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.hero .ic{width:68px;height:68px;border-radius:18px;flex:0 0 auto;color:var(--glow);
+  background:color-mix(in srgb, var(--glow) 14%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--glow) 26%, transparent);
+  display:flex;align-items:center;justify-content:center}
+.hero .ic svg{width:36px;height:36px}
+.hero h1{margin:0 0 6px;font-size:24px;line-height:1.3}
+.hero p{margin:0 0 16px;color:var(--ink-dim);font-size:14px}
+.hero .open{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;
+  text-decoration:none;background:var(--glow);color:#fff;border-radius:11px;padding:11px 18px;
+  box-shadow:0 8px 20px color-mix(in srgb, var(--glow) 28%, transparent);transition:.15s}
+.hero .open:hover{filter:brightness(1.07);transform:translateY(-1px)}
+
+h2{font-size:17px;margin:36px 0 14px;padding-left:12px;
+  border-left:4px solid var(--glow);line-height:1.4}
+p{font-size:14px;color:var(--ink)}
+.lead{color:var(--ink-dim)}
+
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+ol.steps>li{position:relative;padding:14px 16px 14px 52px;margin-bottom:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:14px}
+ol.steps>li::before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;
+  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;background:var(--glow)}
+ol.steps>li b{color:var(--ink)}
+ol.steps ul{margin:6px 0 4px;padding-left:18px;color:var(--ink-dim);font-size:13.5px}
+ol.steps ul li{margin:3px 0}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:6px 0}
+.cards .c{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.cards .c .t{font-weight:700;font-size:13.5px;margin-bottom:4px}
+.cards .c .d{font-size:13px;color:var(--ink-dim)}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:6px;
+  background:color-mix(in srgb,var(--glow) 14%, var(--panel));color:var(--glow);
+  border:1px solid color-mix(in srgb,var(--glow) 26%, transparent)}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.sw.dash{background:none;border:1.5px dashed var(--glow);border-radius:2px}
+
+.faq{margin:0}
+.faq dt{font-weight:700;font-size:14px;margin-top:16px}
+.faq dd{margin:5px 0 0;font-size:13.5px;color:var(--ink-dim)}
+
+.note{background:var(--panel2);border:1px dashed var(--line);border-radius:12px;
+  padding:14px 16px;font-size:13px;color:var(--ink-dim);margin:18px 0}
+.note b{color:var(--ink)}
+ul.plain{font-size:14px;color:var(--ink);padding-left:20px}
+ul.plain li{margin:5px 0}
+table.spec{width:100%;border-collapse:collapse;font-size:13.5px;margin:6px 0}
+table.spec th,table.spec td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.spec th{background:var(--panel2);font-weight:700;white-space:nowrap}
+.foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--ink-faint)}
+@media (max-width:560px){
+  .top{padding:12px 16px;gap:10px} .top .nm+span{display:none}
+  .hero{flex-direction:column;padding:20px} table.spec th{white-space:normal}
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="back" href="../index.html">← ハブに戻る</a>
+  <span class="nm">断ち代チェック</span><span style="color:var(--ink-faint);font-size:13px">操作マニュアル</span>
+  <span class="sp"></span>
+  <a class="back" href="../notes/notes-tachi-check.html">開発メモ</a>
+  <button class="tbtn" id="themeBtn" title="表示切替">◑</button>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1.2"/><path d="M3 3h18v18H3" stroke-dasharray="2.2 2.2" stroke-width="1.5" stroke-linecap="round"/><path d="M9.2 12.1l1.9 1.9 3.7-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div>
+      <h1>断ち代チェック</h1>
+      <p>下版PDFの天・地・小口の断ち代（塗り足し）をページごとに実測し、足りない所を知らせます。足りない所は、内側の絵柄の「反転」か「引き伸ばし」で<b>足りない分だけ</b>補えます。</p>
+      <a class="open" href="../edit/tachi-check.html" target="_blank" rel="noopener">ツールを開く（別タブ）→</a>
+    </div>
+  </div>
+
+  <h2>このツールでできること</h2>
+  <p class="lead">入稿PDFには、断ち代が2mmしかない・写真だけ仕上がり線で止まっている・傾けて置いた写真の端が辺に沿って少しずつ足りなくなる、といった不足がよくあります。全ページを拡大して目で見るのは大変なので、ツールが<b>仕上がり線の外側を列ごとに測って</b>、何mm足りないかまで出します。</p>
+  <div class="cards">
+    <div class="c"><div class="t">見つける</div><div class="d">天・地・小口ごとに「今ある断ち代」と「必要な断ち代」を表示。辺の一部だけ足りない、場所によって不足量が違う、という形も分けて出します。</div></div>
+    <div class="c"><div class="t">足りない分だけ補う</div><div class="d">今ある断ち代は残し、足りない区間だけを描き足します。足りている区間には一切触りません。</div></div>
+    <div class="c"><div class="t">元に戻せる</div><div class="d">元のデータは1バイトも変えず、末尾に追記するだけ。補正済みPDFを入れ直すと、元ファイルと完全に同じものに戻せます。</div></div>
+  </div>
+  <div class="note"><b>ノド断ち代との違い：</b>ノド断ち代は「リング綴じなどで、ノド側にある隣ページの絵柄をどうするか」のツールです。断ち代チェックは「天・地・小口で足りない断ち代を補う」ツールです。本文ではノド側は判定しません。</div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li><b>PDFを開く。</b>画面にPDFをドラッグ＆ドロップするか、右上の「PDFを選択」を押します。開くと自動でチェックが始まり、プレビューの上に進み具合が出ます。</li>
+    <li><b>種類と綴じを選ぶ。</b>右カラムの「判定設定」で選びます。
+      <ul>
+        <li><b>種類</b>：本文（綴じあり）はノド側を判定しません。表紙・チラシなどは「ペラもの・表紙」で4辺すべてを判定します。</li>
+        <li><b>綴じ</b>：右綴じ／左綴じ。ページの奇数・偶数と合わせて、小口が左右どちらかを決めます。</li>
+      </ul>
+    </li>
+    <li><b>結果を見る。</b>左の一覧に、ページごとに「OK」か「天 1.5 不足」のように出ます。右上の「不足 ○ページ」を押すか ◀ ▶ で、不足のあるページへ順に飛べます。プレビューの<span class="sw" style="background:var(--err)"></span>赤い帯が足りない所です。</li>
+    <li><b>補い方を選ぶ。</b><b>反転</b>は今ある絵柄の端で折り返してコピーします（写真・柄向き）。<b>引き伸ばし</b>は端の色を外へ延ばします（無地・グラデーション向き）。辺ごとに「このページ」のプルダウンで変えたり、「補わない」にしたりもできます。</li>
+    <li><b>進め方を選んで補う。</b>
+      <ul>
+        <li><b>まとめて補う</b>：「断ち代を補う」ボタンで、不足の辺を一斉に補います。</li>
+        <li><b>1ページずつ</b>：不足のあるページを開き、「このページを補う」か「補わずに次へ」を選びます。途中から「残り ○ページをまとめて補う」で一度に補うこともできます。</li>
+      </ul>
+      補うと、補正後のPDFをもう一度チェックして、不足がなくなったかを確かめます。
+    </li>
+    <li><b>見比べる。</b>上の「表示」で <b>補正前／補正後／スワイプ／並べて</b> を切り替えます。スワイプは仕切り線の左が補正前、右が補正後です。</li>
+    <li><b>「補正済みPDFを保存」で書き出す。</b>ファイル名の末尾に「_断ち代補正」が付きます。1ページずつのときは、すべて確認し終わると保存ボタンが光ってお知らせします。</li>
+  </ol>
+
+  <h2>画面の見かた</h2>
+  <div class="cards">
+    <div class="c"><div class="t"><span class="sw dash"></span>仕上がり線</div><div class="d">断裁される位置（TrimBox）。青紫の点線で重ねます。</div></div>
+    <div class="c"><div class="t"><span class="sw" style="background:var(--err)"></span>足りない所</div><div class="d">断ち代が必要な幅に届いていない区間。辺の一部だけのときは、その区間だけが赤くなります。</div></div>
+    <div class="c"><div class="t"><span class="sw" style="background:var(--ok)"></span>補正した所</div><div class="d">描き足した区間。緑で表示します。</div></div>
+    <div class="c"><div class="t"><span class="sw" style="background:#8a9097;opacity:.6"></span>ノド（対象外）</div><div class="d">本文のノド側。判定も補正もしません。</div></div>
+  </div>
+  <p class="lead">右下の「重ね表示」で、仕上がり線・判定の帯をそれぞれ表示／非表示にできます。絵柄だけを見たいときは非表示にしてください。</p>
+  <p class="lead">右カラムの「このページ」には辺ごとの実測が出ます。一部だけ足りないときは「一部 149mm の区間」、不足量が場所によって違うときは「2か所・0.5〜2.0mm 不足」のように出ます。</p>
+  <p class="lead">操作：ホイール＝ズーム（カーソル位置を中心に）／ドラッグ＝移動／<span class="tag">←</span><span class="tag">→</span>＝ページ送り／<span class="tag">1</span>〜<span class="tag">4</span>＝表示切替／<span class="tag">⌘/Ctrl+Z</span>＝戻す。</p>
+
+  <h2>判定のしくみ</h2>
+  <p class="lead">200dpiで描いたページを、仕上がり線から外へ向かって列ごとに調べ、絵柄がどこまで続いているかを測ります。</p>
+  <table class="spec">
+    <tr><th>絵柄があるとみなす</th><td><b>0%でなければ</b>絵柄。色が少しでも入っていれば断ち代があるとみなします。写真のハイライトは5%前後でも色が入っているためです。</td></tr>
+    <tr><th>網点の隙間</th><td>0.3mm以下の白は、網点の点と点の間とみなして、絵柄が続いていると判断します。</td></tr>
+    <tr><th>仕上がり際が白</th><td>仕上がり線のすぐ内側（0.4mm）が白なら余白とみなし、補う必要なしとします。</td></tr>
+    <tr><th>写真のハイライト</th><td>前後は足りていて、15mm以下と短く、内側が明るい所は、写真の一部とみなして不足にしません。</td></tr>
+    <tr><th>細かく割らない</th><td>5mmより短い不足は前後に含めます。不足量が0.5mm以上違う所は、別の区間として分けて補います。</td></tr>
+  </table>
+
+  <h2>補い方のしくみ</h2>
+  <ul class="plain">
+    <li>区間ごとに<b>今ある絵柄の端</b>を軸にして、反転または引き伸ばしで、足りない分だけを描き足します。</li>
+    <li>写真が少し傾いて置かれ、断ち代が斜めに減っている辺は、端の並びに合わせた<b>傾いた軸</b>で折り返します。段差状にはなりません。</li>
+    <li>乗算・不透明度などの透明効果があるページは、元の絵柄と重ならないよう<b>元の端からぴったり</b>描きます（重なった所が濃い線になるのを防ぐため）。</li>
+    <li>角は、どの部分も1回だけ描きます。</li>
+    <li>ページ自身の内容を参照して重ねる方式なので、<b>画像の再圧縮・ラスタライズ・色変換は起きません</b>（CMYKのまま）。</li>
+  </ul>
+
+  <h2>詳細設定</h2>
+  <p class="lead">上のツールバーの「詳細設定」で開きます。通常は触る必要はありません。判定の項目を変えたら「設定を反映して再チェック」を押してください。</p>
+  <table class="spec">
+    <tr><th>先頭ページのノンブル</th><td>1。抜き出したPDFで偶数ページから始まるときに変えます（小口の左右が入れ替わります）。</td></tr>
+    <tr><th>必要な断ち代</th><td>3mm。BleedBox が無いPDFで使います。</td></tr>
+    <tr><th>許容誤差</th><td>0.2mm。これ以下の不足は問題なしとします。</td></tr>
+    <tr><th>不足とみなす最小の長さ</th><td>5mm。これより短い区間は前後に含めます。</td></tr>
+    <tr><th>段差とみなす差</th><td>0.5mm。不足量がこれ以上違う区間は分けて補います。</td></tr>
+    <tr><th>白とみなす濃さ</th><td>0%だけ（標準）。2%以下・4%以下にもできますが、写真のハイライトを白と見て誤検知しやすくなります。</td></tr>
+    <tr><th>解析の解像度</th><td>200dpi。</td></tr>
+    <tr><th>写真の一部とみなす</th><td>オン（明るい部分の短い不足）。オフにすると、写真の明るい所で止まっている短い区間も不足として出します。</td></tr>
+    <tr><th>引き伸ばす元の幅</th><td>0.1mm。引き伸ばしで外へ伸ばす、端の幅です。</td></tr>
+    <tr><th>レイヤーに入れる</th><td>オン。補った部分をレイヤー「断ち代補正」（表示・印刷ともオン）に入れます。</td></tr>
+  </table>
+
+  <h2>データの扱い</h2>
+  <ul class="plain">
+    <li>PDFは<b>ブラウザの中だけ</b>で処理され、どこにもアップロードされません。</li>
+    <li>保存はノド側の白と同じ方式で、元PDFのバイト列は一切書き換えず、<b>末尾に追記するだけ</b>です。</li>
+    <li>既存のレイヤーは消さず、レイヤー一覧に「断ち代補正」を足すだけです。非表示の指示レイヤーなどはそのまま残ります。</li>
+    <li>補正済みPDFを読み込むと、右カラムの「全体」に<b>「補正前に戻して保存」</b>が出ます。追記分だけを取り除き、<b>元ファイルとバイト単位で同じPDF</b>を書き出します。</li>
+    <li>断ち代チェックの後にノド側の白をかけたPDFは、戻すとノド白まで消えてしまうので、ここでは戻しません。</li>
+  </ul>
+
+  <h2>うまくいかないとき</h2>
+  <dl class="faq">
+    <dt>小口とノドが逆になる</dt>
+    <dd>まず綴じ方向を確認してください。抜き出したPDFで偶数ページから始まる場合は、詳細設定の「先頭ページのノンブル」を実際のページ番号にします。</dd>
+
+    <dt>足りているのに「不足」と出る（誤検知）</dt>
+    <dd>そのページを表示した状態で、ヘッダーの「フィードバック」から「誤検知」を選んで送ってください。ページの画像と実測の値が届きます。急ぐときは「このページ」でその辺を「補わない」にできます。</dd>
+
+    <dt>足りないのに「OK」になる（見逃し）</dt>
+    <dd>写真の明るい所で止まっている短い区間は、写真の一部とみなしてOKにしています。気になる場合は詳細設定で「写真の一部とみなす」をオフにして再チェックしてください。見逃しもフィードバックから送ってください。</dd>
+
+    <dt>補った所の継ぎ目に白い筋が見える</dt>
+    <dd>透明効果のあるページを大きく拡大したときに、画面のアンチエイリアスで髪の毛のような筋が見えることがあります。画面表示だけの現象で、印刷には出ません。</dd>
+
+    <dt>「TrimBoxなし」と出て判定されない</dt>
+    <dd>仕上がりサイズ（TrimBox）が設定されていないPDFは判定できません。書き出し設定を見直してください。BleedBox が無いだけなら、詳細設定の「必要な断ち代」（既定3mm）で判定します。</dd>
+
+    <dt>「PDFを開けませんでした」と出る</dt>
+    <dd>権限（パスワード）付きのPDFは、権限ロック解除で解除してから入れてください。</dd>
+
+    <dt>補正できなかったページがある</dt>
+    <dd>ページの内容が特殊な形式（LZW・ASCII85 の圧縮など）のときは補正を飛ばし、右カラムの「全体」に理由を出します。判定は行います。</dd>
+
+    <dt>回転指定のあるページ</dt>
+    <dd>回転前の向きで判定します。天地・小口がずれて見えることがあるので、注意を出します。</dd>
+  </dl>
+
+  <div class="foot">検版ハブ｜断ち代チェック 操作マニュアル。ツール本体・ハブと同じフォルダ構成（edit/・manual/・notes/）に置いてください。 ｜ © FUJIWARA PRINTING.inc</div>
+</div>
+<script>
+(function(){
+  var K='kenpan-hub-theme';
+  function set(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem(K,t);}catch(e){}}
+  set((function(){try{return localStorage.getItem(K)||'light';}catch(e){return 'light';}})());
+  document.getElementById('themeBtn').onclick=function(){
+    var d=document.documentElement.getAttribute('data-theme')==='dark';set(d?'light':'dark');
+  };
+})();
+</script>
+<script src="../assets/kenpan-nav.js"></script>
+</body>
+</html>
