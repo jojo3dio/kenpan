@@ -1198,51 +1198,109 @@ function scanBarcodes(canvas){
   const W=canvas.width, H=canvas.height;
   const hits={};        // value -> [{y,x0,x1}, ...]
   let rotSeen=false;    // ZXingが内部回転で読んだ＝ページ内容が縦向きの可能性
-  function record(r,offY,useX){
-    if(!r) return;
-    if(r.rotated){ rotSeen=true; return; }  // 座標が使えないので採用しない
+  function record(r,offX,offY,useX){
+    if(!r) return false;
+    if(r.rotated){ rotSeen=true; return false; }  // 座標が使えないので採用しない
     const v=r.text;
     if(!hits[v]) hits[v]=[];
-    hits[v].push({y:r.y+offY, x0:useX?r.x0:null, x1:useX?r.x1:null});
+    hits[v].push({y:r.y+offY, x0:useX?r.x0+offX:null, x1:useX?r.x1+offX:null});
+    return true;
   }
-  // 全面スキャンは検出専用。座標は信頼度が低いので box 集計には使わない(useX=false)
-  record(decodeCanvas(canvas),0,false);
+  // 切り出し用キャンバスは1枚を使い回す(毎回の生成・GCを避ける)
+  const scratch=document.createElement('canvas');
+  const sx=scratch.getContext('2d',{willReadFrequently:true});
+  function decodeRegion(x,y,w,h){
+    x=Math.max(0,Math.round(x)); y=Math.max(0,Math.round(y));
+    w=Math.min(W-x,Math.round(w)); h=Math.min(H-y,Math.round(h));
+    if(w<16||h<16) return null;
+    if(scratch.width!==w||scratch.height!==h){ scratch.width=w; scratch.height=h; }
+    else sx.clearRect(0,0,w,h);
+    sx.drawImage(canvas,x,y,w,h,0,0,w,h);
+    const r=decodeCanvas(scratch);
+    if(r) record(r,x,y,true);
+    return r;
+  }
+  // ① 全面スキャン(検出専用。座標は信頼度が低いので box 集計には使わない)
+  record(decodeCanvas(canvas),0,0,false);
+  // ② 全幅の帯スキャン
   const bandH=Math.max(24,Math.round(H*0.16)), step=Math.max(12,Math.round(H*0.07));
-  const band=document.createElement('canvas'); band.width=W; band.height=bandH;
-  const bx=band.getContext('2d');
-  for(let top=0; top+bandH<=H; top+=step){
-    bx.clearRect(0,0,W,bandH);
-    bx.drawImage(canvas,0,top,W,bandH,0,0,W,bandH);  // 帯はフル幅なのでx座標はそのまま
-    record(decodeCanvas(band),top,true);
-  }
+  for(let top=0; top+bandH<=H; top+=step) decodeRegion(0,top,W,bandH);
+
   const median=arr=>{ const a=[...arr].sort((p,q)=>p-q); const n=a.length; return n?(n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2):0; };
   // 同じ値のバーコードが1ページに複数ある(スリップは坊主と売上カードに同じISBNを刷る)
   // 場合、値だけで束ねると2本の中間に枠が落ちてしまう。位置で塊に分ける。
   const clusterGap=Math.max(bandH*1.6, H*0.08);
-  const out=[];
-  const pad=H*0.045, padX=W*0.012;
-  for(const v of Object.keys(hits)){
-    const ds=hits[v].slice().sort((a,b)=>a.y-b.y);
-    const groups=[]; let cur=[ds[0]];
-    for(let i=1;i<ds.length;i++){
-      if(ds[i].y-cur[cur.length-1].y>clusterGap){ groups.push(cur); cur=[ds[i]]; }
-      else cur.push(ds[i]);
+  function collect(){
+    const gs=[];
+    for(const v of Object.keys(hits)){
+      const ds=hits[v].slice().sort((a,b)=>a.y-b.y);
+      const groups=[]; let cur=[ds[0]];
+      for(let i=1;i<ds.length;i++){
+        if(ds[i].y-cur[cur.length-1].y>clusterGap){ groups.push(cur); cur=[ds[i]]; }
+        else cur.push(ds[i]);
+      }
+      groups.push(cur);
+      for(const g of groups){
+        const ys=g.map(d=>d.y);
+        const xs0=g.filter(d=>d.x0!=null).map(d=>d.x0);
+        const xs1=g.filter(d=>d.x1!=null).map(d=>d.x1);
+        gs.push({value:v, ymin:Math.min(...ys), ymax:Math.max(...ys), hasX:xs0.length>0,
+                 x0:xs0.length?median(xs0):0, x1:xs1.length?median(xs1):W});
+      }
     }
-    groups.push(cur);
-    for(const g of groups){
-      const ys=g.map(d=>d.y);
-      const xs0=g.filter(d=>d.x0!=null).map(d=>d.x0);
-      const xs1=g.filter(d=>d.x1!=null).map(d=>d.x1);
-      const ymin=Math.min(...ys), ymax=Math.max(...ys);
-      const x0=xs0.length?median(xs0):0, x1=xs1.length?median(xs1):W;
-      out.push({value:v,
-        box:{x:(x0-padX)/W, y:(ymin-pad)/H, w:(x1-x0+padX*2)/W, h:(ymax-ymin+pad*2)/H}});
+    return gs;
+  }
+
+  // ③ 相方の欠けた書籍コードだけ、その列を狙って再探索する。
+  //    全幅の帯では、同じ行にある表1の飾り罫や縦組み文字をZXingが
+  //    スタートガードと誤認し、その行の本物のバーコードまで届かないことがある
+  //    (1行につき最初に見つけたガードしか試さないため)。横幅を絞れば読める。
+  //    小さな切り出しを数枚読むだけなので、通常のデータでは追加コストはほぼ無い。
+  const isIsbn=v=>/^(978|979)/.test(v), isDnc=v=>/^(192|191)/.test(v);
+  let gs=collect();
+  const lonely=gs.filter(g=>{
+    if(!(isIsbn(g.value)||isDnc(g.value)) || !g.hasX) return false;
+    const want=isIsbn(g.value)?isDnc:isIsbn;
+    const gw=g.x1-g.x0;
+    return !gs.some(o=>want(o.value) && o.hasX &&
+      Math.min(o.x1,g.x1)-Math.max(o.x0,g.x0) > gw*0.3 &&
+      Math.abs((o.ymin+o.ymax)/2-(g.ymin+g.ymax)/2) < Math.max(H*0.3, gw*1.5));
+  });
+  for(const g of lonely){
+    const bw=g.x1-g.x0;                       // バー幅(ガード〜ガード)の実測
+    if(bw<=0 || bw>W*0.5) continue;
+    const cx0=g.x0-bw*0.6, cw=bw*2.2;        // 左右に余白(クワイエットゾーン＋位置ずれ)
+    const cy=(g.ymin+g.ymax)/2, reach=Math.max(H*0.2, bw*1.8);
+    const y0=Math.max(0,cy-reach), y1=Math.min(H,cy+reach);
+    // 帯高はバー幅基準(EAN-13のバー高 ≒ 幅の0.7)。もう一方のバーコードだけを含む帯が必ずできる刻み
+    const bh=Math.max(24,Math.round(bw*0.6)), st=Math.max(8,Math.round(bw*0.22));
+    for(let t=y0; t<y1; t+=st){
+      decodeRegion(cx0, t, cw, Math.min(bh, y1-t));
+      if(t+bh>=y1) break;
     }
   }
+  if(lonely.length) gs=collect();
+
+  // ④ 1本も見つからない場合だけ、横方向にも窓を切って全面を再探索
+  //    (縦向きデータの可能性が高い rotSeen 時は、呼び出し側の回転再探索に任せる)
+  if(gs.length===0 && !rotSeen){
+    const colW=Math.round(W*0.30), colStep=Math.round(W*0.15);
+    for(let top=0; top+bandH<=H; top+=step){
+      for(let left=0; left<W; left+=colStep){
+        const w=Math.min(colW, W-left);
+        if(w<colW*0.5) break;
+        decodeRegion(left, top, w, bandH);
+      }
+    }
+    gs=collect();
+  }
+
+  const pad=H*0.045, padX=W*0.012;
+  const out=gs.map(g=>({value:g.value,
+    box:{x:(g.x0-padX)/W, y:(g.ymin-pad)/H, w:(g.x1-g.x0+padX*2)/W, h:(g.ymax-g.ymin+pad*2)/H}}));
   out.rotSeen=rotSeen;
   return out;
 }
-
 /* ---------- pdf.js 実テキスト抽出 ---------- */
 
 /* OCR-B等のシンボリックフォントは、バー下の数字を通常の'0'〜'9'ではなく
