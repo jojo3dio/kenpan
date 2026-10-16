@@ -256,6 +256,7 @@ class Doc {
     if (!m) throw new Error("startxref を解釈できません");
     this.entries = new Map();
     this.trailer = null;
+    this.trailers = [];   // 新しい順。追記の trailer に /Info などを引き継ぐのに使う
     this.xrefStyle = null;
     const seen = new Set();
     let off = parseInt(m[1], 10);
@@ -263,6 +264,7 @@ class Doc {
       seen.add(off);
       const t = await this.readXrefSection(off);
       if (!this.trailer) this.trailer = t.dict;
+      this.trailers.push(t.dict);
       if (this.xrefStyle === null) this.xrefStyle = t.style;
       const xs = t.dict.map.get("/XRefStm");
       if (xs && xs.v.t === "num" && !seen.has(xs.v.v)) {
@@ -512,6 +514,17 @@ class Writer {
     const rootStr = rootRef.v.t === "ref" ? rootRef.v.num + " 0 R" : "1 0 R";
     const idEntry = tr.get("/ID");
     const idStr = idEntry ? latin(this.overrideId || doc.buf, idEntry.s, idEntry.e) : null;
+    // 前の trailer の項目（/Info など）を引き継ぐ。ISO 32000-1 7.5.6：追記した trailer には、前の trailer の /Prev 以外の項目をすべて入れる。
+    // 以前は /Size /Root /Prev /ID しか書かず、/Info が消えて文書のプロパティ（PDF/X の /GTS_PDFXVersion など）が読まれなくなっていた
+    // （Acrobat のプリフライトで PDF/X-4 と認識されない。2026-10-16）。最新の trailer に /Info が無ければ（過去の追記で消えた）古い方から拾う
+    const SKIP = new Set(["/Size", "/Prev", "/Root", "/ID", "/XRefStm", "/Type", "/W", "/Index", "/Length", "/Filter", "/DecodeParms", "/F", "/FFilter", "/FDecodeParms", "/DL"]);
+    const carried = new Map();
+    for (const [k, ent] of tr) if (!SKIP.has(k)) carried.set(k, latin(doc.buf, ent.s, ent.e));
+    if (!carried.has("/Info")) for (const t of (doc.trailers || [])) {
+      const ent = t.map.get("/Info");
+      if (ent) { carried.set("/Info", latin(doc.buf, ent.s, ent.e)); break; }
+    }
+    const extra = [...carried].map(([k, v]) => " " + k + " " + v).join("");
     const nums = [...this.offsets.keys()].sort((a, b) => a - b);
     const size = Math.max(...nums) + 1;
     const startxref = this.pos;
@@ -530,7 +543,7 @@ class Writer {
           s += String(this.offsets.get(n)).padStart(10, "0") + " 00000 n \n";
       }
       s += "trailer\n<< /Size " + size + " /Root " + rootStr + " /Prev " + this.prevOffset() +
-        (idStr ? " /ID " + idStr : "") + " >>\nstartxref\n" + startxref + "\n%%EOF\n";
+        (idStr ? " /ID " + idStr : "") + extra + " >>\nstartxref\n" + startxref + "\n%%EOF\n";
       this.push(bytes(s));
     } else {
       const num = this.alloc();
@@ -555,7 +568,7 @@ class Writer {
       }
       const index = groups.map(g => g.start + " " + g.list.length).join(" ");
       const dict = "/Type /XRef /Size " + size2 + " /Index [" + index + "] /W [1 4 2] /Root " +
-        rootStr + " /Prev " + this.prevOffset() + (idStr ? " /ID " + idStr : "");
+        rootStr + " /Prev " + this.prevOffset() + (idStr ? " /ID " + idStr : "") + extra;
       this.push(bytes(num + " 0 obj\n<< " + dict + " /Length " + data.length + " >>\nstream\n"));
       this.push(data);
       this.push(bytes("\nendstream\nendobj\nstartxref\n" + startxref + "\n%%EOF\n"));
@@ -1634,6 +1647,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         const bx = (b) => '[' + [b.l, b.b, b.r, b.t].map(f4).join(' ') + ']';
         pageRepl['/TrimBox'] = bx(job.trim);
         pageRepl['/BleedBox'] = bx(job.bleed);
+        // ArtBox（Illustrator は用紙全体）が BleedBox からはみ出すと PDF/X の「TrimBox・ArtBox は BleedBox の内側」に反するので、TrimBox に合わせる
+        const art = toBox(await K.boxOf(doc, page, '/ArtBox'));
+        const inB = (r) => r.l >= job.bleed.l - 0.01 && r.b >= job.bleed.b - 0.01 && r.r <= job.bleed.r + 0.01 && r.t <= job.bleed.t + 0.01;
+        if (art && !inB(art)) pageRepl['/ArtBox'] = bx(job.trim);
       }
       w.obj(page.num, K.rebuildDict(page.dict, page.src, pageRepl));
       applied++;
