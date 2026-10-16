@@ -770,9 +770,14 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
           if (ho === hi || !inward(ho, hi, cy)) continue;
           const dY = Math.abs(hi.c - ho.c);
           if (Math.abs(dX - dY) > 0.5 * pmm) continue;
-          // 二重トンボの形：内側の線は相手の外側の線の位置で、外側の線は相手の内側の線の位置で止まる
-          if (Math.abs(endV(vi) - ho.c) > tol || Math.abs(endV(vo) - hi.c) > tol) continue;
-          if (Math.abs(endH(hi) - vo.c) > tol || Math.abs(endH(ho) - vi.c) > tol) continue;
+          // 二重トンボの形（2026-10-16 wine.pdf の件で緩めた。NOTES 3章）
+          //  - 内トンボ（vi・hi）は外トンボの線（断ち代の外端）より内へは入らない。絵柄が断ち代より外まであると、そこで手前に止まる
+          //  - 外トンボ（vo・ho）は相手の外トンボの線（断ち代の角）まで届き、内トンボの線（仕上がり線）より内へは入らない。
+          //    断ち代の角から仕上がり線までの部分は、絵柄が断ち代まであると絵柄に接して途中で止まって見える
+          const notPast = (end, p, dir) => dir * (end - p) <= tol, reaches = (end, p, dir) => dir * (end - p) >= -tol;
+          const dv = cy === 't' ? 1 : -1, dh = cx === 'l' ? 1 : -1;   // 内向き（px）
+          if (!notPast(endV(vi), ho.c, dv) || !reaches(endV(vo), ho.c, dv) || !notPast(endV(vo), hi.c, dv)) continue;
+          if (!notPast(endH(hi), vo.c, dh) || !reaches(endH(ho), vo.c, dh) || !notPast(endH(ho), vi.c, dh)) continue;
           const d = (cx === 'l' ? vi.c : W - vi.c) + (cy === 't' ? hi.c : H - hi.c);   // 用紙の角に近いものを選ぶ
           if (!best || d < best.d) best = { d, trimX: vi.c, bleedX: vo.c, trimY: hi.c, bleedY: ho.c };
         }
@@ -825,6 +830,13 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const c0 = Math.max(0, Math.floor(Math.min(toI(pos - half), toI(pos + half)))), c1 = Math.min((vert ? Wd : Ht) - 1, Math.ceil(Math.max(toI(pos - half), toI(pos + half))));
       const a0 = Math.max(0, Math.ceil(Math.min(toA(s0), toA(s1)))), a1 = Math.min((vert ? Ht : Wd) - 1, Math.floor(Math.max(toA(s0), toA(s1))));
       if (a1 - a0 < 3) return null;
+      // 窓の両端（線から 0.4mm 離れた所）に絵柄があるときは測らない（断ち代より外まで絵柄があると重心がずれるため）
+      let side = 0;
+      for (const c of [c0, c1]) for (let a = a0; a <= a1; a++) {
+        const x = vert ? c : a, y = vert ? a : c, i = (y * Wd + x) * 4;
+        side = Math.max(side, Math.max(255 - data[i], 255 - data[i + 1], 255 - data[i + 2]) * (data[i + 3] / 255));
+      }
+      if (side > 24) return null;
       let sw = 0, sc = 0;
       for (let c = c0; c <= c1; c++) for (let a = a0; a <= a1; a++) {
         const x = vert ? c : a, y = vert ? a : c, i = (y * Wd + x) * 4;
@@ -2546,9 +2558,15 @@ async function findMarks(jsDoc, pg) {
       } catch (err) { console.warn('marks refine', err); }
       pg.boxes = Object.assign({}, pg.boxes, { trim: m.trim, bleed: m.fillBleed, hasTrim: true, hasBleed: true, fromMarks: true });
     }
+    // TrimBox が用紙全体と同じでトンボも見つからないページは、仕上がりが分からないので「判定不可」にする
+    // （以前は断ち代がページの外になり「表示範囲外で測れません」のまま OK 扱いになっていた。2026-10-16 wine.pdf）
+    else if (pg.boxes.trim) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
     pg.marks = m;
     page.cleanup();
-  } catch (err) { console.warn('marks', err); pg.marks = { error: String(err.message || err) }; }
+  } catch (err) {
+    console.warn('marks', err); pg.marks = { error: String(err.message || err) };
+    if (pg.boxes.trim && !pg.boxes.fromMarks) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
+  }
 }
 // ページの一部（pt の範囲 R）だけを 1200dpi で描く
 async function renderWindow(page, view, R) {
@@ -2616,7 +2634,7 @@ const mm1 = (pt) => (pt == null || isNaN(pt) ? '—' : E.pt2mm(pt).toFixed(1));
 function rowInfo(pg) {
   if (pg.state === 'busy') return { dot: 'busy', cls: '', txt: 'チェック中…' };
   if (pg.state === 'wait') return { dot: '', cls: '', txt: '—' };
-  if (!pg.boxes.trim) return { dot: '', cls: '', txt: 'TrimBoxなし' };
+  if (!pg.boxes.trim) return { dot: '', cls: '', txt: pg.boxes.trimIsMedia ? '判定不可（トンボなし）' : 'TrimBoxなし' };
   if (pg.error || !pg.before) return { dot: '', cls: '', txt: '解析できず' };
   const sh = shortSides(pg);
   if (!sh.length) return { dot: 'ok', cls: 'ok', txt: 'OK' };
@@ -2655,11 +2673,12 @@ function renderSide() {
   $('pageHd').textContent = `このページ（p.${pg.index + 1}` + (o.mode === 'book' ? `・ノンブル ${o.startNombre + pg.index}・小口${roles.left === 'koguchi' ? '左' : '右'}）` : '）');
   const list = $('sideList'); list.innerHTML = '';
   const msg = (t) => { list.innerHTML = `<div class="rnote" style="margin:0">${t}</div>`; };
-  if (!pg.boxes.trim) return msg('TrimBox（仕上がりサイズ）が設定されていないため判定できません。' + (pg.marks && pg.marks.error ? `トンボも探しましたが、${esc(pg.marks.error)}。` : ''));
+  if (!pg.boxes.trim) return msg(pg.boxes.trimIsMedia
+    ? `TrimBox が用紙全体と同じ（仕上がりの情報がない）ため、四隅のトンボを探しましたが、${esc((pg.marks && pg.marks.error) || 'トンボが見つかりません')}。仕上がり線が分からないので判定できません。`
+    : 'TrimBox（仕上がりサイズ）が設定されていないため判定できません。' + (pg.marks && pg.marks.error ? `トンボも探しましたが、${esc(pg.marks.error)}。` : ''));
   if (pg.error) return msg('解析できませんでした：' + esc(pg.error));
   if (!pg.before) return msg('チェック中です…');
   if (pg.boxes.fromMarks) list.insertAdjacentHTML('beforeend', `<div class="rnote" style="margin:0 0 6px">TrimBox が用紙全体と同じだったので、<b>四隅のトンボ</b>から仕上がり線と断ち代（外トンボの線の内側まで）を求めました。補うと TrimBox・BleedBox も書き込みます。</div>`);
-  else if (pg.needMarks && pg.marks && pg.marks.error) list.insertAdjacentHTML('beforeend', `<div class="rnote" style="margin:0 0 6px">TrimBox が用紙全体と同じです。トンボを探しましたが、${esc(pg.marks.error)}。</div>`);
   const order = o.mode === 'book' ? ['top', 'bottom', roles.left === 'koguchi' ? 'left' : 'right', roles.left === 'nodo' ? 'left' : 'right'] : SIDES;
   for (const k of order) {
     const e = pg.before.edges[k], nm = sideName(pg, k);
@@ -2776,7 +2795,7 @@ function renderSummary() {
   const sub = [`全 ${S.pages.length} ページ`, o.mode === 'book' ? `${o.binding === 'right' ? '右綴じ' : '左綴じ'}・ノドは対象外` : '4辺すべてが対象'];
   const noTrim = S.pages.filter((pg) => !pg.boxes.trim).length;
   const rotated = S.pages.filter((pg) => pg.boxes.rotate).length;
-  if (noTrim) sub.push(`TrimBoxなし ${noTrim} ページ（判定不可）`);
+  if (noTrim) sub.push(`判定できないページ ${noTrim}（TrimBoxなし、または用紙全体と同じでトンボも見つからない）`);
   const byMarks = S.pages.filter((pg) => pg.boxes.fromMarks).length;
   if (byMarks) sub.push(`トンボから仕上がりを求めた ${byMarks} ページ`);
   if (rotated) sub.push(`回転指定あり ${rotated} ページ（回転前の向きで判定）`);
@@ -2801,8 +2820,9 @@ function renderSummary() {
     add('ale', `<b>${shortPages.length} ページ・${shortCount} 辺で断ち代が不足</b><br>${sub.join('／')}`);
     $('fixNote').textContent = '今ある断ち代は残し、足りない分だけを補います（反転：絵柄の端で折り返してコピー／引き伸ばし：端の色を外へ延ばす）。元の絵柄・画質・色は変わりません。';
   } else {
-    add('alo', `<b>断ち代の不足はありません</b><br>${sub.join('／')}`);
-    $('fixNote').textContent = '補正が必要な辺はありません。';
+    if (noTrim === S.pages.length) add('ale', `<b>判定できませんでした</b><br>仕上がり線（TrimBox またはトンボ）が分かるページがありません。<br>${sub.join('／')}`);
+    else add(noTrim ? 'ale' : 'alo', `<b>断ち代の不足はありません</b>${noTrim ? `（判定できたページのみ）` : ''}<br>${sub.join('／')}`);
+    $('fixNote').textContent = noTrim === S.pages.length ? '判定できるページがないため、補正できません。' : '補正が必要な辺はありません。';
   }
   $('onlyNgWrap').classList.toggle('hidden', !shortCount || S.pages.length < 2);
   if (stepMode()) {
