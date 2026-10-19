@@ -128,6 +128,20 @@
     50%{box-shadow:0 0 0 5px var(--warn-dim);}
   }
   @media (prefers-reduced-motion:reduce){ .bm-alert{animation:none;} }
+  /* 確認が必要な行：行の下に理由を出す（ログを開かなくても分かるように） */
+  .bm-row.fixed{flex-wrap:wrap; row-gap:4px;}
+  .bm-row.fixed.issue-err{outline-color:color-mix(in srgb, var(--err) 75%, transparent);}
+  .bm-row.fixed.issue-err .bm-fixmark{background:var(--err);}
+  .bm-row .bm-issue{
+    flex:0 0 100%; box-sizing:border-box; padding:5px 9px 5px 10px; margin:0 0 1px;
+    border-radius:7px; font-size:11.5px; line-height:1.5; font-family:var(--sans); font-weight:500;
+    color:var(--warn); background:var(--warn-dim);
+  }
+  .bm-row .bm-issue.err{color:var(--err); background:var(--err-dim);}
+  .bm-row .bm-issue + .bm-issue{margin-top:2px;}
+  .bm-row.issue-flash{animation:bmIssueFlash 1.2s ease-out 1;}
+  @keyframes bmIssueFlash{0%{box-shadow:inset 0 0 0 999px color-mix(in srgb, var(--warn) 30%, transparent);}100%{box-shadow:inset 0 0 0 999px transparent;}}
+  .bm-alert .ba-list .ba-line{display:block;}
   /* 自動修正された行の目印 */
   .bm-row.fixed{outline:1.5px dashed color-mix(in srgb, var(--warn) 70%, transparent); outline-offset:-3px;}
   .bm-row .bm-fixmark{flex:none; width:0; overflow:hidden;}
@@ -932,13 +946,13 @@
   <section class="card" id="cardTree" style="display:none;">
     <h2>しおりの階層編集</h2>
     <p class="hint">左のチェックで項目を選び、ツールバーの「▲▼」で順番を入れ替えます（複数選択可）。行の「◀▶」で階層を上げ下げ、「＋」で直下に挿入、「✕」で削除。見出しとラベルは直接クリックして編集できます。ページラベルが分からないときは、右端の「📍」でプレビュー中のページをその行に直接設定できます。</p>
-    <button class="bm-alert" id="bmAlert" type="button" title="ログを開いて内容を確認します">
+    <button class="bm-alert" id="bmAlert" type="button" title="確認が必要な行へ順に移動します">
       <span class="ba-ico">!</span>
       <span class="ba-body">
         <span class="ba-ttl" id="bmAlertTtl"></span>
         <span class="ba-list" id="bmAlertList"></span>
       </span>
-      <span class="ba-cta">ログで確認</span>
+      <span class="ba-cta" id="bmAlertCta">該当行へ ▶</span>
       <span class="ba-close" id="bmAlertClose" title="このお知らせを閉じる">✕</span>
     </button>
     <div class="bm-toolbar">
@@ -1159,7 +1173,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.11";
+const APP_VERSION = "v1.13";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1232,21 +1246,113 @@ function titleIssueKinds(raw){
   return kinds;
 }
 
-// 階層編集パネルのアラート表示（ログを見ないと気づけない問題を、作業面に出す）
-function showBmAlert(count, samples){
+// ── 確認が必要な行（ログを見ないと気づけない問題を、階層編集の行と上部のお知らせに出す） ──
+// 行ごとの理由は bmEntries の各項目に付けた印から都度組み立てる。ラベルを直す・📍でページを指定する等で
+// 原因が解消すれば、次の再描画で自動的に消える。
+let issueAlertDismissed = false;   // ✕で閉じたら、次の読み込み・実行まで出さない
+let issueCursor = -1;              // 「該当行へ」で最後に移動した行
+function entryIssues(e){
+  const out = [];
+  const lab = String(e.label || "").trim();
+  if(lab && !(e.physFixed && typeof e.physIdx === "number") && unresolvedLabels.has(normalizeLabel(e.label))){
+    out.push({kind: "label", sev: "err",
+      text: `ページラベル「${lab}」がこのPDFに見つからないため、このしおりは追加されていません。ラベルを直すか、右端の📍でページを指定してください。`});
+  }
+  if(!lab && !(e.physFixed && typeof e.physIdx === "number") && (e._doorMissing || e._inherited)){
+    out.push({kind: "door", sev: "warn",
+      text: e._doorMissing
+        ? "目次にページ番号がなく、本文からも扉のページを見つけられませんでした。仮に次の項目と同じページにしています（📍で正しいページを指定できます）。"
+        : "ページラベルが空のため、仮に次の項目と同じページにしています（ラベルを入れるか📍でページを指定できます）。"});
+  }
+  if(e._subSkipped){
+    out.push({kind: "subskip", sev: "warn",
+      text: `この項目のページが決まらなかったため、目次にある小見出し ${e._subSkipped} 件を追加できていません。`});
+  }
+  if(e._subMissed && e._subMissed.length){
+    const head = e._subMissed.slice(0, 3).map(t => `「${t}」`).join("");
+    out.push({kind: "submiss", sev: "warn",
+      text: `目次にある小見出し ${e._subMissed.length} 件が本文で見つからず、追加していません：${head}${e._subMissed.length > 3 ? ` ほか${e._subMissed.length - 3}件` : ""}（必要なら「＋」で追加してください）`});
+  }
+  if(e._fixed){
+    out.push({kind: "fixed", sev: "warn",
+      text: "Windowsで「□」に化ける文字を自動で直しました。見出しが正しいかご確認ください。"});
+  }
+  return out;
+}
+const ISSUE_KIND_LABEL = {
+  label:   "ページが見つからず追加されていないしおり",
+  door:    "ページを仮に決めたしおり（扉ページが不明）",
+  subskip: "小見出しを追加できなかった項目",
+  submiss: "本文で見つからなかった小見出しがある項目",
+  fixed:   "文字化け対策で見出しを自動修正した行"
+};
+function issueRows(){
+  const rows = [];
+  bmEntries.forEach((e, i) => { const iss = entryIssues(e); if(iss.length) rows.push({i, e, iss}); });
+  return rows;
+}
+function refreshIssueAlert(){
   const box = $("bmAlert");
   if(!box) return;
-  if(!count){ box.classList.remove("show"); return; }
-  $("bmAlertTtl").textContent =
-    `Windowsで「□」に化ける文字を ${count} 件見つけて自動修正しました。該当行をご確認ください`;
-  const head = samples.slice(0, 3).join("／");
-  $("bmAlertList").textContent =
-    `該当：${head}${samples.length > 3 ? ` ほか${samples.length - 3}件` : ""}（「!」印が付き、破線で囲まれた行です）`;
+  const rows = issueRows();
+  if(rows.length === 0 || issueAlertDismissed){ box.classList.remove("show"); return; }
+  const hasErr = rows.some(r => r.iss.some(x => x.sev === "err"));
+  $("bmAlertTtl").textContent = hasErr
+    ? `確認が必要なしおりが ${rows.length} 件あります（追加されていないものがあります）`
+    : `確認が必要なしおりが ${rows.length} 件あります`;
+  const byKind = new Map();
+  for(const r of rows) for(const x of r.iss){
+    if(!byKind.has(x.kind)) byKind.set(x.kind, []);
+    byKind.get(x.kind).push(r.e.title || "（見出しなし）");
+  }
+  const list = $("bmAlertList");
+  list.textContent = "";
+  for(const [kind, titles] of byKind){
+    const line = document.createElement("span");
+    line.className = "ba-line";
+    const head = titles.slice(0, 2).map(t => `「${t.length > 24 ? t.slice(0, 24) + "…" : t}」`).join("");
+    line.textContent = `・${ISSUE_KIND_LABEL[kind]}：${titles.length} 件 ${head}${titles.length > 2 ? " ほか" : ""}`;
+    list.appendChild(line);
+  }
+  const tail = document.createElement("span");
+  tail.className = "ba-line";
+  tail.textContent = "一覧では「!」印の行の下に理由を表示しています。";
+  list.appendChild(tail);
+  $("bmAlertCta").textContent = rows.length > 1 ? "次の該当行へ ▶" : "該当行へ ▶";
   box.classList.add("show");
 }
+// 確認が必要な行へ順に移動（リスト内でスクロールし、プレビューもそのページへ）
+function jumpToNextIssue(){
+  const rows = issueRows();
+  if(rows.length === 0) return;
+  const next = rows.find(r => r.i > issueCursor) || rows[0];
+  issueCursor = next.i;
+  const rowEl = $("bmList").children[next.i];
+  if(rowEl){
+    rowEl.scrollIntoView({block: "center", behavior: "smooth"});
+    rowEl.classList.remove("issue-flash");
+    void rowEl.offsetWidth;
+    rowEl.classList.add("issue-flash");
+  }
+  if(typeof next.e.physIdx === "number" && previewApp_isShown()) renderPreviewPage(next.e.physIdx + 1);
+}
+// 旧API（自動修正時に呼ばれていた）。表示内容は refreshIssueAlert が項目の印から組み立てる
+function showBmAlert(){ refreshIssueAlert(); }
+// 新しい読み込み・実行の開始時に呼ぶ：お知らせを消し、閉じた状態も解除する
 function hideBmAlert(){
+  issueAlertDismissed = false;
+  issueCursor = -1;
   const box = $("bmAlert");
   if(box) box.classList.remove("show");
+}
+// ログを見ない人向けに、画面上部の帯にも知らせる（出力ボタンの状態は変えない）
+function notifyUser(msg){
+  log(msg, "warn");
+  const bar = $("resultBar");
+  if(!bar) return;
+  bar.style.display = "";
+  bar.className = "failure";
+  $("resultMsg").textContent = String(msg).replace(/^⚠\s*/, "");
 }
 
 // エントリ配列のタイトルを一括サニタイズし、直した内容をログとアラートに出す
@@ -1269,7 +1375,8 @@ function sanitizeEntries(entries){
     log(`  ⚠ Windowsで「□」に化けるおそれのある文字を ${fixed} 件見つけたので自動修正しました`, "warn");
     notes.forEach(n => log(n, "warn"));
     log("    （制御文字＝InDesignの右インデントタブ等／互換漢字＝見た目が同じで別コードの漢字）", "warn");
-    showBmAlert(fixed, samples);
+    void samples;
+    refreshIssueAlert();
   }
   return fixed;
 }
@@ -1282,8 +1389,12 @@ function openLogModal(){
 }
 function closeLogModal(){ $("logModalBg").classList.remove("show"); }
 $("btnShowLog").addEventListener("click", openLogModal);
-$("bmAlert").addEventListener("click", openLogModal);
-$("bmAlertClose").addEventListener("click", e => { e.stopPropagation(); hideBmAlert(); });
+$("bmAlert").addEventListener("click", jumpToNextIssue);
+$("bmAlertClose").addEventListener("click", e => {
+  e.stopPropagation();
+  issueAlertDismissed = true;
+  $("bmAlert").classList.remove("show");
+});
 $("btnCloseLog").addEventListener("click", closeLogModal);
 $("logModalBg").addEventListener("click", e => { if(e.target === $("logModalBg")) closeLogModal(); });
 document.addEventListener("keydown", e => { if(e.key === "Escape"){ closeLogModal(); closeTocPreview(); closeTocTextModal(); } });
@@ -1441,7 +1552,7 @@ $("pvTocPageInput").addEventListener("keydown", e => {
   const idx = n !== null ? previewTocPages.indexOf(n) : -1;
   if(idx !== -1) renderTocPanePage(idx);
   else{
-    log("⚠ 指定されたページは目次ページの範囲外です。目次ページ内のラベルを入力してください。", "warn");
+    notifyUser("⚠ 指定されたページは目次ページの範囲外です。目次ページ内のラベルを入力してください。");
     $("pvTocPageInput").value = pageLabelFor(currentTocPreviewPage);
   }
 });
@@ -1522,7 +1633,7 @@ async function copyTocPageText(){
       pages.push({page: physPage, text: lines.map(l => l.text).join("\n").trim()});
     }
     if(pages.every(p => !p.text)){
-      log("⚠ 目次ページからテキストを抽出できませんでした（画像化されている可能性があります）。", "warn");
+      notifyUser("⚠ 目次ページからテキストを抽出できませんでした（画像化されている可能性があります）。");
       return;
     }
     // 目次プレビューで今見ているページから開く
@@ -1538,7 +1649,7 @@ $("pvTocCopyBtn").addEventListener("click", copyTocPageText);
 async function toggleTocPane(){
   if(!tocPaneShown){
     if(previewTocPages.length === 0){
-      log("⚠ 並べて表示できる目次ページの情報がありません（しおりリストから作成した場合は目次ページが未指定です）。", "warn");
+      notifyUser("⚠ 並べて表示できる目次ページの情報がありません（しおりリストから作成した場合は目次ページが未指定です）。");
       return;
     }
     tocPaneShown = true;
@@ -1619,7 +1730,7 @@ async function renderTocPreviewPage(){
 }
 
 async function openTocPreview(){
-  if(!pdfFile){ log("⚠ 先にPDFファイルを選択してください。", "warn"); return; }
+  if(!pdfFile){ notifyUser("⚠ 先にPDFファイルを選択してください。"); return; }
   try{
     const buf = await pdfFile.arrayBuffer();
     tocPreviewDoc = await openPdfjs(buf.slice(0));
@@ -1632,7 +1743,7 @@ async function openTocPreview(){
       tocPreviewPages = await findTocPages(tocPreviewDoc, scanLimit);
     }
     if(tocPreviewPages.length === 0){
-      log("⚠ 確認できる目次ページが見つかりませんでした。ページ番号を指定してみてください。", "warn");
+      notifyUser("⚠ 確認できる目次ページが見つかりませんでした。ページ番号を指定してみてください。");
       return;
     }
     tocPreviewIdx = 0;
@@ -1729,7 +1840,8 @@ let undoStack = [];
 let redoStack = [];
 const UNDO_LIMIT = 50;
 
-function snapshot(){ return bmEntries.map(e => ({title: e.title, label: e.label, level: e.level, physIdx: e.physIdx, physFixed: e.physFixed})); }
+function snapshot(){ return bmEntries.map(e => ({title: e.title, label: e.label, level: e.level, physIdx: e.physIdx, physFixed: e.physFixed,
+  _fixed: e._fixed, _inherited: e._inherited, _doorMissing: e._doorMissing, _subMissed: e._subMissed, _subSkipped: e._subSkipped})); }
 
 // 変更を加える「前」に呼び、現在の状態を履歴へ積む
 function pushUndo(){
@@ -1919,8 +2031,8 @@ async function loadTxtFile(f){
 
 // 「しおりを追加する」（しおりリスト側）：パース→そのまま処理・プレビューへ
 async function runFromList(){
-  if(!pdfFile){ log("⚠ 先にPDFファイルを選択してください。", "warn"); return; }
-  if(!txtFile){ log("⚠ しおりリスト（.txt）を選択してください。", "warn"); return; }
+  if(!pdfFile){ notifyUser("⚠ 先にPDFファイルを選択してください。"); return; }
+  if(!txtFile){ notifyUser("⚠ しおりリスト（.txt）を選択してください。"); return; }
   const btn = $("btnRunList"); btn.disabled = true;
   previewTocPages = []; // しおりリスト経由は目次ページ指定がないため並列表示は無効
   log("=".repeat(44));
@@ -1928,7 +2040,7 @@ async function runFromList(){
   try{
     const count = await loadTxtFile(txtFile);
     if(count === 0){
-      log("⚠ タブ区切りの行が見つかりません。1行に「見出し（タブ）ページ番号」の形式で入力してください。", "warn");
+      notifyUser("⚠ タブ区切りの行が見つかりません。1行に「見出し（タブ）ページ番号」の形式で入力してください。");
       return;
     }
     log(`  読み込み：${count} 件`);
@@ -2445,13 +2557,14 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
     const start = physList[i];
     if(start === null){
       log(`  ⚠ 「${list[i].title}」はページを解決できないため、小見出しの検出を見送りました`, "warn");
+      list[i]._subSkipped = subs.length;
       continue;
     }
     let limit = totalPages - 1;
     for(let j = i + 1; j < list.length; j++){
       if(physList[j] !== null && physList[j] > start){ limit = physList[j]; break; }
     }
-    for(const s of subs) queue.push({ownerIdx: i, sub: s, key: normText(s), start, limit, phys: null});
+    for(const s of subs) queue.push({ownerIdx: i, owner: list[i], sub: s, key: normText(s), start, limit, phys: null});
   }
   if(queue.length === 0) return 0;
 
@@ -2504,7 +2617,7 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
     const rows = [];
     for(const q of byOwner.get(ownerIdx)){
       const label = labelForPhys(q.phys, parent.label, physList[ownerIdx], resolveLabel, pageLabels);
-      if(!label){ noLabel++; continue; }
+      if(!label){ noLabel++; (parent._subMissed = parent._subMissed || []).push(q.sub); continue; }
       rows.push({title: sanitizeTitle(q.sub), label, level: (parent.level || 0) + 1, physIdx: q.phys});
     }
     if(rows.length > 0){ list.splice(ownerIdx + 1, 0, ...rows); added += rows.length; }
@@ -2512,6 +2625,7 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
   for(const e of list) if(e._subs) delete e._subs;
 
   const missed = queue.filter(q => q.phys === null);
+  for(const q of missed) (q.owner._subMissed = q.owner._subMissed || []).push(q.sub);
   const fallback = queue.filter(q => q.viaFallback).length;
   log(`  小見出しを追加：${added} 件`, added > 0 ? "ok" : "warn");
   if(fallback > 0) log(`  （出現順では拾えず、節の範囲内を再検索して特定：${fallback} 件）`);
@@ -2565,6 +2679,7 @@ async function locateDoorPages(list, pdfjsDoc, totalPages, resolveLabel, pageLab
     }
     if(hit === null){
       log(`  ⚠ 「${e.title}」の扉ページが本文から見つかりませんでした（直後の項目のページを暫定で使います）`, "warn");
+      e._doorMissing = true;
       continue;
     }
     const label = labelForPhys(hit, loLabel, loPhys, resolveLabel, pageLabels);
@@ -2780,7 +2895,7 @@ function nestUnderHeadings(entries){
 }
 
 async function autoDetectToc(){
-  if(!pdfFile){ log("⚠ 先にPDFファイルを選択してください。", "warn"); return; }
+  if(!pdfFile){ notifyUser("⚠ 先にPDFファイルを選択してください。"); return; }
   const rangeStr = $("tocPages").value.trim();
 
   const btn = $("btnAutoToc"); btn.disabled = true;
@@ -2795,7 +2910,7 @@ async function autoDetectToc(){
       log("── 目次ページから自動認識中 ──");
       pages = parsePageRange(rangeStr, totalPages);
       if(pages.length === 0){
-        log(`⚠ ページ番号を解釈できませんでした（このPDFは全 ${totalPages} ページです）。`, "warn");
+        notifyUser(`⚠ ページ番号を解釈できませんでした（このPDFは全 ${totalPages} ページです）。`);
         return;
       }
       log(`  対象ページ（指定）：${pages.join(", ")}（全 ${totalPages} ページ中）`);
@@ -2804,7 +2919,7 @@ async function autoDetectToc(){
       const scanLimit = Math.min(40, totalPages);
       pages = await findTocPages(pdfjsDoc, scanLimit);
       if(pages.length === 0){
-        log(`⚠ 先頭 ${scanLimit} ページの中に目次らしきページが見つかりませんでした。目次のページ番号を入力欄に指定してやり直してください。`, "warn");
+        notifyUser(`⚠ 先頭 ${scanLimit} ページの中に目次らしきページが見つかりませんでした。目次のページ番号を入力欄に指定してやり直してください。`);
         return;
       }
       log(`  目次ページを自動検出：${pages.join(", ")}（先頭 ${scanLimit} ページを走査）`);
@@ -2862,7 +2977,7 @@ async function autoDetectToc(){
     }
 
     if(parsed.length === 0){
-      log("⚠ 「見出し＋ページ番号」のパターンが見つかりませんでした。指定ページが目次ではない可能性があります。", "warn");
+      notifyUser("⚠ 「見出し＋ページ番号」のパターンが見つかりませんでした。指定ページが目次ではない可能性があります。");
       return;
     }
     if(bmEntries.length > 0 && !confirm(`現在の階層エディタには ${bmEntries.length} 件のしおりがあります。目次からの自動認識結果（${parsed.length} 件）で置き換えますか？`)){
@@ -2917,7 +3032,9 @@ async function autoDetectToc(){
       const hn = nestUnderHeadings(bmEntries);
       if(hn > 0){
         normalizeLevels(bmEntries);
-        levelNote += `\n  階層：大きな文字の章見出し ${bmEntries.filter(e => e._heading).length} 件の配下 ${hn} 件を1段下げました`;
+        const hnote = `  階層：大きな文字の章見出し ${bmEntries.filter(e => e._heading).length} 件の配下 ${hn} 件を1段下げました`;
+        // 「フラットで読み込みました」と並ぶと矛盾して見えるので置き換える
+        levelNote = /フラットで読み込みました/.test(levelNote) ? levelNote.replace(/[^\n]*フラットで読み込みました[^\n]*/, hnote) : levelNote + "\n" + hnote;
       }
     }
     for(const e of bmEntries) delete e._heading;
@@ -2955,8 +3072,8 @@ async function autoDetectToc(){
     if(wrapped > 0) log(`  （2行以上に折り返された項目を連結：${wrapped} 件）`);
     if(vmerged > 0) log(`  （縦組みで見出しと副題などの複数列を1項目に連結：${vmerged} 件）`);
     if(noFolio > 0){
-      log(`  ⚠ 目次にページ番号が印字されていない見出しが ${noFolio} 件あります（部扉・章扉など）。`, "warn");
-      log("    本文から扉のページを探し、見つからなかった行だけページラベル欄が空のまま残ります（入力すると通し番号が追随します）。", "warn");
+      // この時点では未確定なので注意扱いにしない。扉が見つからなかったものだけ、しおり追加時に個別に ⚠ を出す
+      log(`  （ページ番号のない見出し：${noFolio} 件 … 部扉・章扉として、しおり追加時に本文から扉のページを探します）`);
     }
     if(skipped > 0) log(`  （パターンに合わず読み飛ばした行：${skipped}）`);
     log(levelNote);
@@ -3207,7 +3324,9 @@ function renderBmList(focusIndex){
 
   bmEntries.forEach((e, i) => {
     const row = document.createElement("div");
-    row.className = "bm-row" + (e.level > 0 ? " lv1" : "") + (selectedEntries.has(e) ? " sel" : "") + (e._fixed ? " fixed" : "");
+    const issues = entryIssues(e);
+    row.className = "bm-row" + (e.level > 0 ? " lv1" : "") + (selectedEntries.has(e) ? " sel" : "")
+      + (issues.length ? " fixed" : "") + (issues.some(x => x.sev === "err") ? " issue-err" : "");
     row.style.setProperty("--lv", e.level);
     row.dataset.lv = String(Math.min(e.level || 0, 3));
 
@@ -3339,6 +3458,8 @@ function renderBmList(focusIndex){
       syncSerial(e, serial, label);   // 入力したページラベルに対応する通し番号へ即座に追随させる
       updateExportDirty();
     });
+    // 確認が必要な行は、ラベルを直したら（確定時に）理由の表示を更新する
+    label.addEventListener("change", () => { if(row.classList.contains("fixed")) renderBmList(); });
 
     // 現在プレビューしているページを、この行のページとして直接登録する。
     // ページラベルが分からないPDFや、目次に載っていない見出しを足したときのための逃げ道。
@@ -3348,7 +3469,7 @@ function renderBmList(focusIndex){
     btnPin.title = "表示中のプレビューページをこの行に設定";
     btnPin.addEventListener("click", () => {
       if(!previewPdfjsDoc){
-        log("⚠ 先にPDFを読み込んでください（プレビューのページを取得できません）。", "warn");
+        notifyUser("⚠ 先にPDFを読み込んでください（プレビューのページを取得できません）。");
         return;
       }
       pushUndo();
@@ -3379,9 +3500,9 @@ function renderBmList(focusIndex){
 
     const fixmark = document.createElement("span");
     fixmark.className = "bm-fixmark";
-    if(e._fixed){
+    if(issues.length){
       fixmark.textContent = "!";
-      fixmark.title = "Windowsで「□」化する文字を自動修正した行です。見出しをご確認ください";
+      fixmark.title = issues.map(x => x.text).join("\n");
     }
     row.append(check, handle, guide, btnOut, btnIn, fixmark, title, btnAdd, btnDel);
 
@@ -3396,6 +3517,13 @@ function renderBmList(focusIndex){
     row.appendChild(serial);
     row.appendChild(btnPin);
     row.appendChild(label);
+    // 確認が必要な理由を行の下に表示（同じ行の要素として持たせ、行の並び＝bmEntriesの並びを崩さない）
+    for(const x of issues){
+      const note = document.createElement("div");
+      note.className = "bm-issue" + (x.sev === "err" ? " err" : "");
+      note.textContent = (x.sev === "err" ? "✕ " : "⚠ ") + x.text;
+      row.appendChild(note);
+    }
 
     list.appendChild(row);
 
@@ -3446,6 +3574,7 @@ function renderBmList(focusIndex){
       restoringBmFocus = false;
     }
   }
+  refreshIssueAlert();
 }
 
 // ツールバーの上下移動ボタン：選択が1件以上ある時のみ有効
@@ -4004,7 +4133,7 @@ async function runBookmark(opts){
       log(`  ⚠ 見出しが空の ${skipped} 行をスキップしました`, "warn");
     }
     if(entries.length === 0){
-      log("⚠ しおりリストが空です。txtファイルを選択するか「＋ しおりを追加」で作成してください。", "warn");
+      notifyUser("⚠ しおりリストが空です。txtファイルを選択するか「＋ しおりを追加」で作成してください。");
       showResult(false, "しおりリストに有効な行がありません。");
       return;
     }
@@ -4146,6 +4275,7 @@ async function runBookmark(opts){
       }
     }
     let inheritedCount = 0;
+    for(const ent of entries) delete ent._inherited;
 
     entries.forEach((ent, i) => {
       const {title, label, level} = ent;
@@ -4157,6 +4287,7 @@ async function runBookmark(opts){
       if(physIdx === null && !label.trim() && inheritedPhys[i] !== null){
         physIdx = inheritedPhys[i];
         inherited = true;
+        ent._inherited = true;
       }
       ent.physIdx = physIdx; // プレビュー画面で該当ページへジャンプするために記録
       if(physIdx !== null && physIdx >= 0 && physIdx < totalPages){
@@ -4195,9 +4326,11 @@ async function runBookmark(opts){
       log(`  追加成功：${okCount} 件`, "ok");
     }
     log(`  出力ファイル：${resultName}`, "ok");
-    showResult(true, ngLabels.length > 0
+    const needCheck = issueRows().length;
+    showResult(true, (ngLabels.length > 0
       ? `しおり付きPDFを作成しました（${okCount} 件追加・${ngLabels.length} 件スキップ）。`
-      : `しおり付きPDFを作成しました（${okCount} 件）。`);
+      : `しおり付きPDFを作成しました（${okCount} 件）。`)
+      + (needCheck > 0 ? ` うち ${needCheck} 件は確認が必要です（一覧で「!」印の付いた行）。` : ""));
 
     updateExportDirty();
     if(!keepPreview && !previewApp_isShown()){
