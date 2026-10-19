@@ -69,7 +69,7 @@
   .drop.a.loaded{border-color:var(--amber)}
   .drop.b.loaded{border-color:var(--cyan)}
   .drop .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;transition:.15s}
-  .drop.a .ico{background:#3a2d16;color:var(--amber)}
+  .drop.a .ico{background:#2d2342;color:var(--amber)}
   .drop.b .ico{background:#152a2e;color:var(--cyan)}
   .drop .txt{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
   .drop .tag{font-size:13px;font-weight:700;color:var(--ink);letter-spacing:.01em}
@@ -168,7 +168,7 @@
   .allhdr{display:flex;justify-content:flex-end;margin-bottom:8px}
   .pgrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);
     border-radius:7px;margin-bottom:6px;cursor:pointer;background:var(--panel2);transition:.12s}
-  .pgrow:hover{border-color:var(--amber);background:#2c2418}
+  .pgrow:hover{border-color:var(--amber);background:#26203a}
   body.light .pgrow:hover{background:var(--amber-soft)}
   .pgrow.cur{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}
   .pgrow .pdot{width:24px;height:22px;border-radius:6px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
@@ -196,7 +196,7 @@
   .reg{
     display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);
     border-radius:7px;margin-bottom:6px;cursor:pointer;background:var(--panel2);transition:.12s}
-  .reg:hover{border-color:var(--amber);background:#2c2418}
+  .reg:hover{border-color:var(--amber);background:#26203a}
   .reg.active{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}
   .reg .no{font-family:var(--mono);font-weight:600;color:var(--amber);width:24px;text-align:center;flex:0 0 auto}
   .reg .meta{flex:1;min-width:0;font-size:11px;line-height:1.45}
@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.17　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.19　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -757,7 +757,8 @@ async function loadPdf(file, side){
 async function renderOne(doc, pageNum, scale){
   if(!doc || pageNum>doc.numPages) return null;
   const page = await doc.getPage(pageNum);
-  const vp = page.getViewport({scale});
+  const sh = subShift(doc, pageNum, page.view, scale);
+  const vp = page.getViewport({scale, offsetX:sh.dx, offsetY:sh.dy});
   const cv = document.createElement("canvas");
   cv.width = Math.max(1,Math.round(vp.width));
   cv.height= Math.max(1,Math.round(vp.height));
@@ -770,7 +771,24 @@ async function renderOne(doc, pageNum, scale){
   // ページ内の画像を「もう一度」展開する。高解像度CMYK写真のPDF（b.pdf：4000×3000px×7点）では
   // これだけで全体の約3割（11ページ走査で7秒）を占めていた。
   try{ cacheImageRectsFromRender(doc, pageNum, page); }catch(e){}
-  return {cv,ctx,w:cv.width,h:cv.height,ptW:baseVp.width,ptH:baseVp.height, view:page.view.slice()};
+  return {cv,ctx,w:cv.width,h:cv.height,ptW:baseVp.width,ptH:baseVp.height, view:page.view.slice(), shift:sh};
+}
+/* ---- v1.18 端数ずれ対策：仕上がり(trim)の左上がちょうど画素の境目に来るよう描画をずらす ----
+   背景（実データ n_051：B は A より上下左右10mm大きい）：300dpiで10mm＝118.11px。従来は
+   ページ左上を原点に描き、位置合わせで118pxずらしていたため、0.11pxの端数がAとBの描画の
+   違いとして残り、写真の細かい模様が「色変更」と誤検出された（画素を揃えて比べると差は0）。
+   各PDFを、仕上がり左上が整数pxになるよう1px未満だけずらして描けば、ずらし量が整数で済み、
+   AとBが同じ画素格子に乗る。テキスト・画像矩形・ボックスの座標も同じだけずらす。 */
+function subShift(doc, pageNum, view, scale){
+  try{
+    const boxes = (doc===S.docA)?S.boxesA:(doc===S.docB)?S.boxesB:null;
+    const b = boxes && boxes[pageNum-1];
+    const box = b && (b.trim || b.crop || b.media);
+    if(!box || !view) return {dx:0, dy:0};
+    const x=(box.x-view[0])*scale, y=(view[3]-(box.y+box.h))*scale;
+    const fr=v=>{ const d=Math.ceil(v-1e-6)-v; return (d>1e-6 && d<1)?d:0; };
+    return {dx:fr(x), dy:fr(y)};
+  }catch(e){ return {dx:0, dy:0}; }
 }
 /* ---- v1.16 高速化：画像矩形と見開き描画のキャッシュ ---- */
 // doc -> Map(物理ページ番号 -> 画像矩形[scale=1のpx])。PDFを読み直せばdocが変わるので自動的に無効。
@@ -796,8 +814,11 @@ function imageRectsFromOps(ops, vpTransform){
 }
 // 描画直後のページから、pdf.jsが描画に使った命令列（内部の_intentStates）を読む。
 // pdf.js 3.11.174固定の内部構造に依存するため、取れなければ何もしない（従来のgetOperatorListに戻る）。
+// v1.18：同じ命令列から「テキストの見え方」モデル（textVisCache）も作る。
 function cacheImageRectsFromRender(doc, pageNum, page){
-  let m=imgRectCache.get(doc); if(m && m.has(pageNum)) return;
+  let m=imgRectCache.get(doc), v=textVisCache.get(doc);
+  const needImg=!(m && m.has(pageNum)), needVis=!(v && v.has(pageNum));
+  if(!needImg && !needVis) return;
   const states=page._intentStates; if(!states || typeof states.values!=="function") return;
   let ops=null;
   for(const st of states.values()){
@@ -805,9 +826,159 @@ function cacheImageRectsFromRender(doc, pageNum, page){
     if(ol && ol.lastChunk && ol.fnArray && ol.fnArray.length){ ops=ol; break; }
   }
   if(!ops) return;
-  const rects=imageRectsFromOps(ops, page.getViewport({scale:1}).transform);
-  if(!m){ m=new Map(); imgRectCache.set(doc, m); }
-  m.set(pageNum, rects);
+  if(needImg){
+    const rects=imageRectsFromOps(ops, page.getViewport({scale:1}).transform);
+    if(!m){ m=new Map(); imgRectCache.set(doc, m); }
+    m.set(pageNum, rects);
+  }
+  if(needVis){
+    let model=null; try{ model=buildTextVisModel(ops, page); }catch(e){ console.warn("textVis: モデル作成に失敗",e); }
+    if(!v){ v=new Map(); textVisCache.set(doc, v); }
+    v.set(pageNum, model);
+  }
+}
+
+/* ---- v1.18 見えていない文字をテキスト比較から外す ----
+   背景（実データ n_051 / n_091）：InDesignに見開きPDFを配置して片ページだけ見せた下版、
+   さらに「白い四角で旧文字を隠し、別ページから切り抜いたPDFを小さい枠で貼る」修正。
+   pdf.jsのgetTextContentはクリップも上塗りも考慮しないため、
+    ・枠の外にある隣ページの本文が丸ごと「下版の文字」として入り（誤検出の文字変更が多数）、
+    ・白い四角の下の旧文字（子ども24／タワー）もそのまま残る（本当の修正が文字比較では
+      「変化なし」になり、画素差分まで抑制されて見逃し）。
+   描画命令列をたどって、各文字の描画点について
+    1) その時点のクリップ（矩形近似）の内側か
+    2) 後から描かれた不透明な矩形の塗りに覆われていないか
+   を判定し、見えていない文字を除外する。判定できない文字は従来どおり残す（安全側）。 */
+const textVisCache=new WeakMap();   // doc -> Map(物理ページ番号 -> モデル|null)
+function buildTextVisModel(ops, page){
+  const OPS=pdfjsLib.OPS;
+  const MT=(m,n)=>[m[0]*n[0]+m[2]*n[1], m[1]*n[0]+m[3]*n[1], m[0]*n[2]+m[2]*n[3], m[1]*n[2]+m[3]*n[3], m[0]*n[4]+m[2]*n[5]+m[4], m[1]*n[4]+m[3]*n[5]+m[5]];
+  const AP=(q,m)=>[q[0]*m[0]+q[1]*m[2]+m[4], q[0]*m[1]+q[1]*m[3]+m[5]];
+  const bboxOf=pts=>{ let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18; for(const q of pts){ if(q[0]<x0)x0=q[0]; if(q[0]>x1)x1=q[0]; if(q[1]<y0)y0=q[1]; if(q[1]>y1)y1=q[1]; } return [x0,y0,x1,y1]; };
+  const rectXf=(r,m)=>bboxOf([[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]].map(q=>AP(q,m)));
+  const isect=(a,b)=>{ if(!a) return b; if(!b) return a; return [Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])]; };
+  const vertCache=new Map();
+  const isVert=name=>{ if(vertCache.has(name)) return vertCache.get(name); let v=false;
+    try{ if(page && page.commonObjs && page.commonObjs.has(name)){ const f=page.commonObjs.get(name); v=!!(f && f.vertical); } }catch(e){}
+    vertCache.set(name,v); return v; };
+  // 座標はすべてPDFのユーザー空間（getTextContentのtransformと同じ空間）
+  let g={ctm:[1,0,0,1,0,0], clip:null, ca:1, bm:"source-over", smask:false};
+  const st=[];
+  let tm=[1,0,0,1,0,0], tlm=[1,0,0,1,0,0], fs=0, fname="", cs=0, ws=0, hs=1, rise=0, lead=0;
+  let path=null;   // 直前のconstructPath {bbox, rectOnly}
+  const runs=[], occ=[], imgs=[], glyphs=[];
+  let seq=0;
+  for(let i=0;i<ops.fnArray.length;i++){
+    const fn=ops.fnArray[i], ar=ops.argsArray[i];
+    switch(fn){
+      case OPS.save: st.push(Object.assign({},g)); break;
+      case OPS.restore: if(st.length) g=st.pop(); break;
+      case OPS.transform: g.ctm=MT(g.ctm, ar); break;
+      case OPS.paintFormXObjectBegin:
+        st.push(Object.assign({},g));
+        if(ar && ar[0]) g.ctm=MT(g.ctm, ar[0]);
+        if(ar && ar[1] && ar[1].length===4) g.clip=isect(g.clip, rectXf(ar[1], g.ctm));   // フォームのBBoxもクリップ
+        break;
+      case OPS.paintFormXObjectEnd: if(st.length) g=st.pop(); break;
+      case OPS.beginGroup: st.push(Object.assign({},g)); break;
+      case OPS.endGroup: if(st.length) g=st.pop(); break;
+      case OPS.setGState:
+        for(const kv of (ar&&ar[0])||[]){ const k=kv[0], v=kv[1];
+          if(k==="ca") g.ca=v; else if(k==="BM") g.bm=v; else if(k==="SMask") g.smask=!!v; }
+        break;
+      case OPS.constructPath: {
+        const sub=ar[0]||[], mm=ar[2];
+        const rectOnly = sub.length>0 && sub.every(o=>o===OPS.rectangle);
+        // pdf.js 3.11のminMaxは [minX, maxX, minY, maxY]（パス座標＝CTM適用前）
+        path=(mm && mm.length===4 && isFinite(mm[0])) ? {bbox:rectXf([mm[0],mm[2],mm[1],mm[3]], g.ctm), rectOnly} : null;
+        break; }
+      case OPS.clip: case OPS.eoClip:
+        if(path) g.clip=isect(g.clip, path.bbox);       // 矩形以外のクリップは外接矩形で近似（＝見える側に倒す）
+        break;
+      case OPS.fill: case OPS.eoFill: case OPS.fillStroke: case OPS.eoFillStroke: case OPS.closeFillStroke: case OPS.closeEOFillStroke:
+        // 不透明・通常合成の矩形塗りだけを「上から隠す物」とする（透明・乗算などは下が透けるので除外）
+        if(path && path.rectOnly && g.ca>=0.99 && !g.smask && (!g.bm || g.bm==="source-over" || g.bm==="Normal")){
+          const r=isect(path.bbox, g.clip); if(r[2]>r[0] && r[3]>r[1]) occ.push({r, seq:seq++});
+        }
+        path=null; break;
+      case OPS.endPath: path=null; break;
+      case OPS.paintImageXObject: case OPS.paintInlineImageXObject: case OPS.paintJpegXObject: {
+        const r=isect(rectXf([0,0,1,1], g.ctm), g.clip); if(r[2]>r[0]&&r[3]>r[1]) imgs.push({r, seq:seq++}); break; }
+      case OPS.beginText: tm=[1,0,0,1,0,0]; tlm=[1,0,0,1,0,0]; break;
+      case OPS.setFont: fname=ar[0]; fs=ar[1]; break;
+      case OPS.setTextMatrix: tm=ar.slice(0,6); tlm=tm.slice(); break;
+      case OPS.moveText: tlm=MT(tlm,[1,0,0,1,ar[0],ar[1]]); tm=tlm.slice(); break;
+      case OPS.setLeadingMoveText: lead=-ar[1]; tlm=MT(tlm,[1,0,0,1,ar[0],ar[1]]); tm=tlm.slice(); break;
+      case OPS.setLeading: lead=ar[0]; break;
+      case OPS.nextLine: tlm=MT(tlm,[1,0,0,1,0,-lead]); tm=tlm.slice(); break;
+      case OPS.setCharSpacing: cs=ar[0]; break;
+      case OPS.setWordSpacing: ws=ar[0]; break;
+      case OPS.setHScale: hs=ar[0]/100; break;
+      case OPS.setTextRise: rise=ar[0]; break;
+      case OPS.showText: case OPS.showSpacedText: {
+        const gl=ar[0]||[]; const vert=isVert(fname);
+        const m=MT(g.ctm, tm);
+        let adv=0; const gp=[];
+        for(const q of gl){
+          if(typeof q==="number"){ adv += -q*fs/1000 * (vert?-1:1); continue; }   // TJの字間調整
+          if(!q) continue;
+          const w = vert ? (q.vmetric ? -q.vmetric[0] : (q.width||1000)) : (q.width||0);
+          const wa = w*fs/1000, spacing = cs + (q.isSpace ? ws : 0);
+          if(q.unicode && q.unicode.trim()){
+            const c = vert ? AP([0, -(adv+wa/2)], m) : AP([(adv+wa/2)*hs, rise+fs*0.35], m);
+            gp.push({x:c[0], y:c[1], ch:q.unicode});
+          }
+          adv += wa + spacing;
+        }
+        tm = vert ? MT(tm,[1,0,0,1,0,-adv]) : MT(tm,[1,0,0,1,adv*hs,0]);
+        if(gp.length){ const run={clip:g.clip, seq:seq++}; runs.push(run); for(const q of gp){ q.run=run; glyphs.push(q); } }
+        break; }
+    }
+  }
+  const G=20, grid=new Map();   // 文字点の格子索引（20pt格子）
+  for(const q of glyphs){ const k=Math.floor(q.x/G)+","+Math.floor(q.y/G); let a=grid.get(k); if(!a){a=[];grid.set(k,a);} a.push(q); }
+  // 0=見える 1=クリップ外 2=後から塗られた不透明な矩形の下
+  const glyphState=q=>{ const c=q.run.clip, pad=0.5;
+    if(c && !(q.x>=c[0]-pad && q.x<=c[2]+pad && q.y>=c[1]-pad && q.y<=c[3]+pad)) return 1;
+    for(const o of occ){ if(o.seq<=q.run.seq) continue; const r=o.r; if(q.x>r[0]&&q.x<r[2]&&q.y>r[1]&&q.y<r[3]) return 2; }
+    return 0; };
+  let clipped=0, covered=0;
+  for(const q of glyphs){ const s2=glyphState(q); if(s2===1) clipped++; else if(s2===2) covered++; }
+  // 画像が文字の後に、その上へ置かれている（画像での貼り込み修正の可能性）。文字は消さず、件数だけ数える。
+  let imgOver=0;
+  for(const im of imgs){ const r=im.r; for(const q of glyphs){ if(q.run.seq<im.seq && q.x>r[0]&&q.x<r[2]&&q.y>r[1]&&q.y<r[3] && !glyphState(q)){ imgOver++; break; } } }
+  return {grid, G, glyphState, glyphCount:glyphs.length, clipped, covered, imgOver};
+}
+// 抽出テキスト1片の各文字（推定位置 pts=[{x,y,ch}]、ユーザー空間）が見えているかを返す（0/1/2）。
+// 文字位置は文字列幅の按分なので、全角/半角混在で数pt ずれる。各文字に「同じ字の最寄りの描画点」を
+// 探し、描画点が属する描画命令の多数決で「この文字片はどの命令から来たか」を決め、その命令の中で
+// 対応を取り直す。隠れた別ページの文字が、たまたま近くにある“見えている同じ字”に吸い寄せられて
+// 見える扱いになるのを防ぐ。同じ字が同じ場所に重ね描きされていれば（貼り込み修正の下地と上張り）、
+// どれか1つでも見えていれば見える。対応する描画点が無ければ判定不能＝見える扱い。
+function itemVisStates(model, pts, fsz){
+  const R=Math.max(3, fsz*1.6), G=model.G, span=Math.ceil(R/G);
+  const near=(p, runSet)=>{ const gx=Math.floor(p.x/G), gy=Math.floor(p.y/G); let best=null, bd=1e9;
+    for(let dx=-span;dx<=span;dx++) for(let dy=-span;dy<=span;dy++){
+      const a=model.grid.get((gx+dx)+","+(gy+dy)); if(!a) continue;
+      for(const q of a){ if(q.ch!==p.ch) continue; if(runSet && !runSet.has(q.run)) continue;
+        const d=Math.hypot(q.x-p.x,q.y-p.y); if(d<=R && d<bd){ bd=d; best=q; } } }
+    return best; };
+  const tiesOf=q=>{ const out=[q]; const gx=Math.floor(q.x/G), gy=Math.floor(q.y/G);
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){ const a=model.grid.get((gx+dx)+","+(gy+dy)); if(!a) continue;
+      for(const o of a){ if(o!==q && o.ch===q.ch && Math.abs(o.x-q.x)<=1 && Math.abs(o.y-q.y)<=1) out.push(o); } }
+    return out; };
+  const first=pts.map(p=>near(p,null));
+  const votes=new Map();
+  for(const q of first) if(q){ const rs=new Set(tiesOf(q).map(o=>o.run)); for(const r of rs) votes.set(r,(votes.get(r)||0)+1); }
+  if(!votes.size) return pts.map(()=>0);
+  let top=0; for(const v of votes.values()) top=Math.max(top,v);
+  const acc=new Set(); for(const [r,v] of votes) if(v===top || v>=2) acc.add(r);
+  return pts.map((p,i)=>{ let q=first[i]; if(!q) return 0;
+    if(!acc.has(q.run)){ const q2=near(p,acc); if(q2) q=q2; }
+    let s2=1, any=false;
+    for(const o of tiesOf(q)){ if(o!==q && !acc.has(o.run)) continue; any=true;
+      const t=model.glyphState(o); if(t===0) return 0; if(t===2) s2=2; }
+    return any? s2 : model.glyphState(q); });
 }
 // 見開きの全面描画を直近1枚だけ持つ（左右の半ページで描画を共有＝見開き1面の描画・画像展開を1回に）
 const spreadRenderCache=new WeakMap();   // doc -> {key, full}
@@ -1028,8 +1199,9 @@ function tryTomboAlign(a,b){
   return { offX:Math.round(acx-bcx), offY:Math.round(acy-bcy), aRect:ta };
 }
 // ボックス左上をレンダリングpx座標（左上原点）に変換。view=[x0,y0,x1,y1]（cropbox, pt）
-function boxTopLeftPx(view, box, scale){
-  return { x:(box.x - view[0])*scale, y:(view[3] - (box.y + box.h))*scale };
+function boxTopLeftPx(view, box, scale, sh){
+  const dx=sh?sh.dx:0, dy=sh?sh.dy:0;   // v1.18 描画の端数ずらし
+  return { x:(box.x - view[0])*scale + dx, y:(view[3] - (box.y + box.h))*scale + dy };
 }
 // 論理ページ(r)の「起点角」をそのページのpx座標で返す。見開き分割時は仕上がり(trim)線を背で割って算出。
 //  ・単ページ: 指定boxの左上
@@ -1038,7 +1210,7 @@ function boxTopLeftPx(view, box, scale){
 function logicalBoxCornerPx(r, boxes, mode){
   if(!r || !r.view) return null;
   const box=pickBox(boxes, mode); if(!box) return null;
-  const tl=boxTopLeftPx(r.view, box, S.scale);
+  const tl=boxTopLeftPx(r.view, box, S.scale, r.shift);
   if(!r.crop) return tl;                                  // 単ページ
   const spineX = tl.x + (box.w*S.scale)/2;                // trim中央＝背（ノド）
   if(r.crop==='L') return { x: tl.x,        y: tl.y };    // 左ページ：trim左上
@@ -1048,7 +1220,7 @@ function logicalBoxCornerPx(r, boxes, mode){
 function boxPxForLogical(r, boxes, mode){
   if(!r||!r.view) return null;
   const box=pickBox(boxes, mode); if(!box) return null;
-  const tl=boxTopLeftPx(r.view, box, S.scale);
+  const tl=boxTopLeftPx(r.view, box, S.scale, r.shift);
   let x=tl.x, y=tl.y, w=box.w*S.scale, h=box.h*S.scale;
   if(r.crop){ w=w/2; x = (r.crop==='R') ? (tl.x + box.w*S.scale/2 - r.sx) : tl.x; }
   return {x,y,w,h};
@@ -1092,7 +1264,15 @@ function applyAlignment(a,b){
   return true;
 }
 // 比較範囲マスク用に、A論理ページのtrim/bleed矩形(px)を保存
-function setCompareRects(a, aligned){
+function setCompareRects(a, aligned, b){
+  // v1.18 起点「中央」のままでも、結果的に仕上がり同士がぴったり重なっている（±1px）なら
+  //  仕上がり基準とみなし、トンボ部の無視を効かせる。実データ n_051（Bが四方10mm大きい）では
+  //  中央そろえ＝仕上がりそろえになるが、マスクが効かずに用紙の角のトンボ線が差分に出ていた。
+  if(!aligned && a && b && currentPairTrimUsable()){
+    const ma=S.planA[S.aLogical-1], mb=S.planB[S.bLogical-1];
+    const aC=logicalBoxCornerPx(a, S.boxesA[ma.src-1], "trim"), bC=logicalBoxCornerPx(b, S.boxesB[mb.src-1], "trim");
+    if(aC && bC && Math.abs(aC.x-bC.x-S.offX)<=1 && Math.abs(aC.y-bC.y-S.offY)<=1) aligned=true;
+  }
   S.alignedByBox=!!aligned; S.aTrimPx=null; S.aBleedPx=null;
   if(!aligned) return;
   const ma=S.aLogical?S.planA[S.aLogical-1]:null; if(!ma) return;
@@ -1106,11 +1286,16 @@ async function getTextItems(doc, pageNum, scale){
   if(!doc || pageNum>doc.numPages) return [];
   try{
     const page=await doc.getPage(pageNum);
-    const vp=page.getViewport({scale});
+    const sh=subShift(doc, pageNum, page.view, scale);       // v1.18 描画と同じ端数ずらし
+    const vp=page.getViewport({scale, offsetX:sh.dx, offsetY:sh.dy});
     const tc=await page.getTextContent();
+    // v1.18 描画時に作った「見え方」モデル。無ければ（未描画のページ等）従来どおり全文字を使う。
+    const vm=(textVisCache.get(doc)||new Map()).get(pageNum)||null;
+    const vis={clipped:0, covered:0, imgOver:vm?vm.imgOver:0};
     const out=[];
-    for(const it of tc.items){
-      if(!it.str || !it.str.trim()) continue;
+    for(const it0 of tc.items){
+      if(!it0.str || !it0.str.trim()) continue;
+      for(const it of visibleParts(it0, vm, vis)){
       const tx=pdfjsLib.Util.transform(vp.transform, it.transform);
       const fsz=Math.hypot(tx[2],tx[3])||Math.abs(tx[3])||10;   // 文字サイズ
       let x, y, w, h;
@@ -1130,6 +1315,7 @@ async function getTextItems(doc, pageNum, scale){
         x=tx[4]; y=tx[5]-fsz*0.85;      // ベースライン→上端の近似
       }
       out.push({str:it.str, x, y, w:Math.max(w,1), h:Math.max(h,1)});
+      }
     }
     // 同一文字が同じ位置に二重描画されているテキストを除去（ノンブル「2」→「22」化・
     // フェイクボールド等での本文丸ごと二重描画を防ぐ）。
@@ -1144,8 +1330,67 @@ async function getTextItems(doc, pageNum, scale){
       const dup = uniq.find(u => u.str===it.str && Math.abs(u.x-it.x)<=3 && Math.abs(u.y-it.y)<=3);
       if(!dup) uniq.push(it);
     }
-    return uniq;
+    // v1.18 隠れた文字があったページ（貼り込み修正）では、下地と上張りで同じ字が同じ場所に
+    // 2回入る（例：下地「子ども2」＋上張り「子ども23」）。文字単位で重なりを除く。
+    const res = (vis.clipped||vis.covered) ? dedupeChars(uniq) : uniq;
+    res.vis=vis;
+    return res;
   }catch(e){ return []; }   // テキストを持たないPDF（画像のみ等）は空
+}
+// v1.18 テキスト片を「見えている文字」の連続ごとに分ける（全部見えていればそのまま1片）。
+// 返す片は pdf.js の item と同じ形（str/transform/width/height/dir）で、位置と幅を文字数で按分する。
+function visibleParts(it, vm, vis){
+  if(!vm) return [it];
+  const chs=[...it.str], n=chs.length; if(!n) return [it];
+  const t=it.transform, vert=(it.dir==="ttb");
+  const fsz=Math.hypot(t[2],t[3])||Math.abs(t[3])||10;
+  const L=Math.hypot(t[0],t[1])||1, ux=t[0]/L, uy=t[1]/L;
+  const len=vert?(it.height||n*fsz):(it.width||0);
+  const pts=chs.map((ch,i)=>{ const s=(i+0.5)/n*len;
+    return vert ? {x:t[4], y:t[5]-s, ch} : {x:t[4]+ux*s-uy*fsz*0.35, y:t[5]+uy*s+ux*fsz*0.35, ch}; });
+  let st; try{ st=itemVisStates(vm, pts, fsz); }catch(e){ return [it]; }
+  let hid=0; st.forEach((v,i)=>{ if(v && chs[i].trim()){ hid++; if(v===1) vis.clipped++; else vis.covered++; } });
+  if(!hid) return [it];
+  const parts=[]; let i=0;
+  while(i<n){
+    if(st[i] && chs[i].trim()){ i++; continue; }
+    let j=i; while(j<n && !(st[j] && chs[j].trim())) j++;
+    const str=chs.slice(i,j).join("");
+    if(str.trim()){
+      const s0=i/n*len, sl=(j-i)/n*len;
+      const tr=t.slice(); 
+      if(vert){ tr[5]=t[5]-s0; } else { tr[4]=t[4]+ux*s0; tr[5]=t[5]+uy*s0; }
+      parts.push({str, transform:tr, width:vert?it.width:sl, height:vert?sl:it.height, dir:it.dir});
+    }
+    i=j;
+  }
+  return parts;
+}
+// v1.18 文字単位の重なり除去（同じ字が同じ場所＝字幅の3割以内にある2つ目以降を落とす）。
+function dedupeChars(items){
+  const charsOf=it=>{ const chs=[...it.str], n=chs.length||1, vert=it.h>it.w*1.5 && n>1;
+    return chs.map((ch,i)=> vert ? {ch, x:it.x+it.w/2, y:it.y+(i+0.5)/n*it.h, i} : {ch, x:it.x+(i+0.5)/n*it.w, y:it.y+it.h/2, i}); };
+  const order=items.map((it,k)=>k).sort((a,b)=>[...items[b].str].length-[...items[a].str].length);
+  const kept=[]; const out=[];
+  for(const k of order){
+    const it=items[k]; const cs=charsOf(it); const n=cs.length||1;
+    // 位置は文字数按分なので、全角/半角混在の片どうしでは字送り方向に数pt ずれる。字送り方向は
+    // 字幅の6割、行と直交する方向は字の高さの3割までを「同じ場所」とみなす。
+    const vert=it.h>it.w*1.5 && n>1, cw=vert?it.h/n:it.w/n, thick=vert?it.w:it.h;
+    const tolA=Math.max(2, Math.min(cw,thick)*0.6), tolC=Math.max(2, thick*0.3);
+    const tx=vert?tolC:tolA, ty=vert?tolA:tolC;
+    const keep=cs.map(c=>!c.ch.trim() || !kept.some(q=>q.ch===c.ch && Math.abs(q.x-c.x)<=tx && Math.abs(q.y-c.y)<=ty));
+    cs.forEach((c,i)=>{ if(keep[i] && c.ch.trim()) kept.push(c); });
+    if(keep.every(Boolean)){ out.push({k, it}); continue; }
+    const chs=[...it.str]; let i=0;
+    while(i<n){ if(!keep[i]){ i++; continue; } let j=i; while(j<n && keep[j]) j++;
+      const str=chs.slice(i,j).join("");
+      if(str.trim()) out.push({k, it: vert ? {str, x:it.x, y:it.y+i/n*it.h, w:it.w, h:Math.max(1,(j-i)/n*it.h)}
+                                            : {str, x:it.x+i/n*it.w, y:it.y, w:Math.max(1,(j-i)/n*it.w), h:it.h}});
+      i=j; }
+  }
+  out.sort((a,b)=>a.k-b.k);   // 元の並び順を保つ
+  return out.map(o=>o.it);
 }
 
 /* ============ 見開き対応：ページプラン ============ */
@@ -1617,7 +1862,7 @@ async function renderLogical(doc, plan, logical, scale){
   const cv=document.createElement("canvas"); cv.width=halfW; cv.height=full.h;
   const ctx=cv.getContext("2d",{willReadFrequently:true});
   ctx.drawImage(full.cv, sx,0,halfW,full.h, 0,0,halfW,full.h);
-  return {cv,ctx,w:halfW,h:full.h, ptW:full.ptW/2, ptH:full.ptH, view:full.view, crop:m.crop, sx, fullW:full.w};
+  return {cv,ctx,w:halfW,h:full.h, ptW:full.ptW/2, ptH:full.ptH, view:full.view, shift:full.shift, crop:m.crop, sx, fullW:full.w};
 }
 // 論理ページのテキスト（半分にクロップしx座標を補正）
 async function getTextItemsLogical(doc, plan, logical, scale){
@@ -1630,20 +1875,23 @@ async function getTextItemsLogical(doc, plan, logical, scale){
     const page=await doc.getPage(m.src); const vp=page.getViewport({scale});
     const fullW=Math.round(vp.width); const halfW=Math.floor(fullW/2);
     const x0=(m.crop==='L')?0:(fullW-halfW);
-    return all.filter(t=> (t.x+t.w/2)>=x0 && (t.x+t.w/2)<x0+halfW)
+    const r=all.filter(t=> (t.x+t.w/2)>=x0 && (t.x+t.w/2)<x0+halfW)
               .map(t=>Object.assign({},t,{x:t.x-x0}));
+    r.vis=all.vis; return r;
   }catch(e){ return all; }
 }
 // 配置画像の矩形（px, 論理ページ座標。見開き分割は半分にクロップ）。色変化を画像単位でまとめる用。
 async function getImageRectsLogical(doc, plan, logical, scale){
   const m=plan?plan[logical-1]:null; if(!doc||!m||m.src<1||m.src>doc.numPages) return [];
   try{
-    const page=await doc.getPage(m.src); const vp=page.getViewport({scale});
+    const page=await doc.getPage(m.src); const sh=subShift(doc, m.src, page.view, scale);
+    const vp=page.getViewport({scale, offsetX:sh.dx, offsetY:sh.dy});
     let rects;
     const cached=imgRectCache.get(doc);
     if(cached && cached.has(m.src)){
       // 描画時に拾った矩形（scale=1）を拡大するだけ。ビューポート変換はscaleに比例するのでそのまま掛ければ一致。
-      rects=cached.get(m.src).map(r=>({x:r.x*scale,y:r.y*scale,w:r.w*scale,h:r.h*scale}));
+      // v1.18 描画の端数ずらし(sh)を足す
+      rects=cached.get(m.src).map(r=>({x:r.x*scale+sh.dx,y:r.y*scale+sh.dy,w:r.w*scale,h:r.h*scale}));
     } else {
       const ops=await page.getOperatorList();
       rects=imageRectsFromOps(ops, vp.transform);
@@ -1695,7 +1943,7 @@ async function refreshPage(suggestCenter){
       }
     }
     if(tomboRect){ S.alignedByBox=true; S.aTrimPx=tomboRect; S.aBleedPx=null; }
-    else setCompareRects(a, aligned);
+    else setCompareRects(a, aligned, b);
     fitInkLut();
     computeDiff(); buildContent(); fitView(); draw(); updatePanel(); updatePageLabel();
     if(S.docA && S.docB && window.fbAfterResults) window.fbAfterResults();
@@ -1931,7 +2179,28 @@ function computeDiff(){
             if(e<best){ best=e; if(best<=th) break; }
           }
         }
-        d=best;
+        // v1.18 逆方向も見る：Bの画素に近いものがAの近傍にあるか。片方向だけだと、Bに足された
+        //  1〜2px の細い線（余白の数字「1」など）は「Bの近傍に白がある」ので一致扱いになり、
+        //  追加が丸ごと消えていた（削除方向は拾えるのに追加は拾えない非対称）。
+        if(best>th){ d=best; }
+        else {
+          // 縁のにじみ（中間調）はAの近傍に同じ値が無くても、近傍の最小〜最大の間に入っていれば
+          // 位置ずれによる補間とみなして一致扱いにする（白地に足された線は範囲外なので残る）。
+          const axBase=cx-p.ax, ayBase=cy-p.ay;
+          let mn0=255,mn1=255,mn2=255,mx0=0,mx1=0,mx2=0;
+          for(let ny=-tol; ny<=tol; ny++){
+            const syy=ayBase+ny; if(syy<0||syy>=S.aH) continue;
+            const aRow=syy*aw;
+            for(let nx=-tol; nx<=tol; nx++){
+              const sxx=axBase+nx; if(sxx<0||sxx>=aw) continue;
+              const ai2=(aRow+sxx)<<2; const v0=aD[ai2], v1=aD[ai2+1], v2=aD[ai2+2];
+              if(v0<mn0)mn0=v0; if(v0>mx0)mx0=v0; if(v1<mn1)mn1=v1; if(v1>mx1)mx1=v1; if(v2<mn2)mn2=v2; if(v2>mx2)mx2=v2;
+            }
+          }
+          const out=(v,mn,mx)=> v<mn ? mn-v : (v>mx ? v-mx : 0);
+          const o0=out(bD[bi],mn0,mx0), o1=out(bD[bi+1],mn1,mx1), o2=out(bD[bi+2],mn2,mx2);
+          d=o0>o1?(o0>o2?o0:o2):(o1>o2?o1:o2);
+        }
       }
       if(d>th){
         cellCnt[cellRow+Math.floor(x/cell)]++;
@@ -1944,6 +2213,26 @@ function computeDiff(){
   const active=new Uint8Array(cols*rows);
   for(let i=0;i<active.length;i++) active[i]=cellCnt[i]>=cellActiveMin?1:0;
   const minCells=Math.max(1, S.noise);          // ノイズ除去：このセル数未満は無視
+  // v1.18 小さな書き込み・記号の追加/削除の救済（実データ n_265：余白の数字「1」6×8pt が
+  //  ノイズ除去で消えて未検知）。セル数が足りない小領域でも、片側が「インク」で、もう片側が
+  //  その周り（エッジ許容+1px）まで完全に白い画素がまとまってあれば、位置合わせの縁ノイズでは
+  //  あり得ないので残す。縁ノイズは必ず相手側の近くにインクがあるため、この条件を満たさない。
+  const blankNeed=Math.max(12, Math.round(40*(S.dpi/300)*(S.dpi/300)));
+  const inkOnBlank=(c0,c1,r0,r1)=>{
+    // 細い線の差分は周りのセルにも散るので、周囲1セル分広げて数える
+    const X0=ox0+Math.max(0,c0-1)*cell, X1=Math.min(ox0+ow, ox0+(c1+2)*cell), Y0=oy0+Math.max(0,r0-1)*cell, Y1=Math.min(oy0+oh, oy0+(r1+2)*cell);
+    const R=tol+1; let cnt=0;
+    const lum=(D,i)=>D[i]*0.299+D[i+1]*0.587+D[i+2]*0.114;
+    const whiteAround=(D,w,h,lx,ly)=>{ for(let yy=ly-R;yy<=ly+R;yy++){ if(yy<0||yy>=h) continue; for(let xx=lx-R;xx<=lx+R;xx++){ if(xx<0||xx>=w) continue; if(lum(D,(yy*w+xx)<<2)<235) return false; } } return true; };
+    for(let cy=Y0; cy<Y1; cy++) for(let cx=X0; cx<X1; cx++){
+      const axl=cx-p.ax, ayl=cy-p.ay, bxl=cx-p.bx, byl=cy-p.by;
+      if(axl<0||ayl<0||bxl<0||byl<0||axl>=aw||ayl>=S.aH||bxl>=bw||byl>=bh_) continue;
+      const la=lum(aD,(ayl*aw+axl)<<2), lb=lum(bD,(byl*bw+bxl)<<2);
+      if(la<128 && lb>=235 && whiteAround(bD,bw,bh_,bxl,byl)) cnt++;
+      else if(lb<128 && la>=235 && whiteAround(aD,aw,S.aH,axl,ayl)) cnt++;
+      if(cnt>=blankNeed) return true;
+    }
+    return false; };
   const seen=new Uint8Array(cols*rows);
   const stack=new Int32Array(cols*rows);
   let regions=[];
@@ -1964,7 +2253,7 @@ function computeDiff(){
         if(active[ni]&&!seen[ni]){seen[ni]=1;stack[sp++]=ni;}
       }
     }
-    if(n<minCells) continue;
+    if(n<minCells && !inkOnBlank(minc,maxc,minr,maxr)) continue;
     // 共通座標でのbbox（少し余白）
     const pad=2;
     const x0=ox0+Math.max(0,minc*cell-pad);
@@ -1972,6 +2261,30 @@ function computeDiff(){
     const x1=ox0+Math.min(ow,(maxc+1)*cell+pad);
     const y1=oy0+Math.min(oh,(maxr+1)*cell+pad);
     regions.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cells:n,pix});
+  }
+  // v1.18 小さな書き込みの救済（2巡目）：細い線の数字・記号は差分画素がセル境界に散って、
+  //  どのセルも有効数に届かないことがある（n_265 の「1」：差分約80px が4セルに分散）。
+  //  有効でないセルのうち少しでも差分のあるセルをつなぎ、上の inkOnBlank 条件を満たすものだけ残す。
+  {
+    const weak=new Uint8Array(cols*rows);
+    for(let i=0;i<weak.length;i++) weak[i]=(!active[i] && cellCnt[i]>=3)?1:0;
+    const seenW=new Uint8Array(cols*rows);
+    for(let i=0;i<weak.length;i++){
+      if(!weak[i]||seenW[i]) continue;
+      let sp=0; stack[sp++]=i; seenW[i]=1; let minc=cols,maxc=-1,minr=rows,maxr=-1,n=0,pix=0, touch=false;
+      while(sp>0){ const idx=stack[--sp]; const c=idx%cols, r=(idx-c)/cols; n++; pix+=cellCnt[idx];
+        if(c<minc)minc=c; if(c>maxc)maxc=c; if(r<minr)minr=r; if(r>maxr)maxr=r;
+        for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue; const nc=c+dc,nr=r+dr;
+          if(nc<0||nr<0||nc>=cols||nr>=rows)continue; const ni=nr*cols+nc;
+          if(active[ni]) touch=true;                               // 既存の領域に接している＝そちらで扱う
+          else if(weak[ni]&&!seenW[ni]){seenW[ni]=1;stack[sp++]=ni;} } }
+      if(touch || pix<blankNeed || n>64) continue;                 // 64セル超は「小さな書き込み」ではない
+      if(!inkOnBlank(minc,maxc,minr,maxr)) continue;
+      const pad=2;
+      const x0=ox0+Math.max(0,minc*cell-pad), y0=oy0+Math.max(0,minr*cell-pad);
+      const x1=ox0+Math.min(ow,(maxc+1)*cell+pad), y1=oy0+Math.min(oh,(maxr+1)*cell+pad);
+      regions.push({x:x0,y:y0,w:x1-x0,h:y1-y0,cells:n,pix});
+    }
   }
   // 大きい順
   regions.sort((p,q)=>q.pix-p.pix);
@@ -1997,12 +2310,25 @@ function computeDiff(){
         // 整列の端数による縁ノイズ（低dpiほど増える）なので強めに抑制し、dpiによる増減を抑える。
         const pad=Math.round(S.dpi/72*3);          // 約1mm（ディセンダ/AA縁/縦組みの食み出しを覆う）
         const small=Math.round(S.dpi/72*2.2);      // 小領域＝縁ノイズの目安サイズ
+        // v1.18 安全網：文字の上に不透明な塗りや画像が後から置かれているページ（貼り込み修正）では、
+        // テキスト層が見た目と食い違うことがある。文字比較が何も出していない場所で画素が大きく
+        // 違うなら、抑制せず「見た目が変わっています」として残す（文字データだけを信じて消さない）。
+        const vA=S.aText&&S.aText.vis, vB=S.bText&&S.bText.vis;
+        const patched=!!((vA&&(vA.covered||vA.imgOver))||(vB&&(vB.covered||vB.imgOver)));
+        const rescue=rg=>{
+          if(!patched) return false;
+          const hp=Math.round(S.dpi/72*1.5);
+          if(textFindings.some(f=>rectOverlap(rg,{x:f.x-hp,y:f.y-hp,w:f.w+hp*2,h:f.h+hp*2})>0)) return false;
+          if(diffFracCommon(p, rg.x,rg.y,rg.x+rg.w,rg.y+rg.h) < 0.12) return false;   // 縁ノイズ程度は救わない
+          rg.cls=mkCls("changed","見た目が変わっています","文字データは同じですが表示が違います（上張り・貼り込み修正の可能性）","PIX-2","表示変化なし","表示が変化（文字データは同一）");
+          if(S.diag){ S.diag.cut.rescued=(S.diag.cut.rescued||0)+1; }
+          return true; };
         regions=regions.filter(rg=>{ const area=Math.max(1,rg.w*rg.h); let cov=0;
           const cxr=rg.x+rg.w/2, cyr=rg.y+rg.h/2;
           for(const e of explainedBoxes){
             const ex={x:e.x-pad,y:e.y-pad,w:e.w+pad*2,h:e.h+pad*2};
             cov+=rectOverlap(rg,ex);
-            if(cov>area*0.35) return false;          // テキスト領域に3.5割以上重なる→ノイズ
+            if(cov>area*0.35) return rescue(rg);     // テキスト領域に3.5割以上重なる→ノイズ
             // 小さな縁ノイズ：中心がテキスト近傍(pad内)にあれば除外
             if(rg.w<=small && rg.h<=small && cxr>=ex.x && cxr<=ex.x+ex.w && cyr>=ex.y && cyr<=ex.y+ex.h) return false;
           }
@@ -2144,9 +2470,9 @@ const KIND={
   added:  {color:"var(--ok)",  hex:"#7ec86b", short:"追加"},
   color:  {color:"var(--cyan)",hex:"#46c8da", short:"色変更"},
   moved:  {color:"#b889f4",    hex:"#b889f4", short:"位置変更"},
-  text:   {color:"var(--amber)",hex:"#e0a23a",short:"文字変更"},
+  text:   {color:"#e04fb0",hex:"#e04fb0",short:"文字変更"},   // v1.18 琥珀色をやめてマゼンタに
   weight: {color:"#5b9cff",    hex:"#5b9cff", short:"太さ変更"},
-  changed:{color:"var(--amber)",hex:"#e0a23a",short:"変更"},
+  changed:{color:"#e04fb0",hex:"#e04fb0",short:"変更"},
 };
 function mkCls(key, label, detail, ruleId, expected, actual){
   // 追記的メタデータ（既存の判定ロジック・分岐条件は変更しない）：
@@ -2613,9 +2939,11 @@ function textDiff(p){
   const findings=[], explained=[], bBoxes=[];
   // ▼ 診断記録（v1.11）。スプレッドシートの diag 列に入り、実PDFを取り寄せずに
   //   「なぜ検出しなかったか」を追えるようにする。処理の結果を写すだけで判定には影響しない。
+  const _vs=v=>v?{clipped:v.clipped||0, covered:v.covered||0, imgOver:v.imgOver||0}:null;
   const DIAG = S.diag = {
     ran:true,
-    inputs:{ aItems:aItems.length, bItems:bItems.length, aChars:0, bChars:0, nm:0, fallback:false },
+    inputs:{ aItems:aItems.length, bItems:bItems.length, aChars:0, bChars:0, nm:0, fallback:false,
+             aHidden:_vs(aItems.vis), bHidden:_vs(bItems.vis) },   // v1.18 見えないので除いた文字数（クリップ外／上塗り）
     counts:{ blocks:0, emitted:0, split:0 },
     cut:{ multiset:0, pair:0, reflow:0, pixel:0 },
     cutSample:[],
@@ -2792,13 +3120,19 @@ function textDiff(p){
   const aC2=l=>({x:(l.x0+l.x1)/2+p.ax, y:(l.y0+l.y1)/2+p.ay});
   const bC2=l=>({x:(l.x0+l.x1)/2+p.bx, y:(l.y0+l.y1)/2+p.by});
   const bByKey=new Map(); bL.forEach((l,i)=>{ if(!bByKey.has(l.key))bByKey.set(l.key,[]); bByKey.get(l.key).push(i); });
-  const bUsed=new Array(bL.length).fill(false); const moved=[];
-  aL.forEach(a=>{ const cand=bByKey.get(a.key); if(!cand) return; let bi=-1,best=Infinity;
-    for(const j of cand){ if(bUsed[j])continue; const d=Math.hypot(bC2(bL[j]).x-aC2(a).x,bC2(bL[j]).y-aC2(a).y); if(d<best){best=d;bi=j;} }
-    if(bi<0)return; bUsed[bi]=true; const b=bL[bi];
+  // v1.18 対応づけは「全ての候補ペアを距離の近い順に」確定する。以前はA行の並び順に早い者勝ちで
+  //  最寄りのB行を取っていたため、同じ文字列の行がAに2本・Bに1本（行の切れ方の違い）のとき、
+  //  先に来た別の行がBの行を奪い、実際は動いていない行が「右12.5mm・下34.0mm移動」と出ていた
+  //  （実データ n_265 の文献「Phys. Rev. B」）。
+  const bUsed=new Array(bL.length).fill(false), aUsed=new Array(aL.length).fill(false); const moved=[];
+  const pairs=[];
+  aL.forEach((a,i)=>{ const cand=bByKey.get(a.key); if(!cand) return;
+    for(const j of cand){ pairs.push([Math.hypot(bC2(bL[j]).x-aC2(a).x,bC2(bL[j]).y-aC2(a).y), i, j]); } });
+  pairs.sort((u,v)=>u[0]-v[0]);
+  for(const [d,i,j] of pairs){ if(aUsed[i]||bUsed[j]) continue; aUsed[i]=true; bUsed[j]=true;
+    const a=aL[i], b=bL[j];
     const dxmm=(bC2(b).x-aC2(a).x)*px2mm, dymm=(bC2(b).y-aC2(a).y)*px2mm;
-    if(Math.abs(dxmm)>tolMm||Math.abs(dymm)>tolMm) moved.push({a,b,dxmm,dymm});
-  });
+    if(Math.abs(dxmm)>tolMm||Math.abs(dymm)>tolMm) moved.push({a,b,dxmm,dymm}); }
   moved.sort((m,n)=>(m.b.y0-n.b.y0)||(m.b.x0-n.b.x0));
   const groups=[];
   for(const mv of moved){ let g=groups.find(g=>Math.abs(g.dxmm-mv.dxmm)<0.6&&Math.abs(g.dymm-mv.dymm)<0.6); if(!g){g={dxmm:mv.dxmm,dymm:mv.dymm,items:[]};groups.push(g);} g.items.push(mv); }
@@ -2887,7 +3221,7 @@ function buildContent(){
     if(S.bCv) c.drawImage(S.bCv,p.bx,p.by); c.restore();
     drawNonOverlap(c,p);
     // 仕切り線
-    c.strokeStyle="#e0a23a"; c.lineWidth=Math.max(2,p.W*0.003); c.beginPath();
+    c.strokeStyle="#a986f5"; c.lineWidth=Math.max(2,p.W*0.003); c.beginPath();
     c.moveTo(sx,0); c.lineTo(sx,p.H); c.stroke();
   }
   S.content=cv; S.contentW=p.W; S.contentH=p.H; S.sideGap=0;
@@ -2979,7 +3313,7 @@ function drawSide(v){
     cctx.fillText(label, originX+8+23, 17); cctx.textAlign="left";
     cctx.restore();
   };
-  drawPane(0, S.contentA, "A 顧客", "#e0a23a");
+  drawPane(0, S.contentA, "A 顧客", "#a986f5");
   drawPane(hw+SIDE_DIV, S.contentB, "B 下版", "#46c8da");
   // 中央仕切り
   cctx.fillStyle=(getComputedStyle(document.body).getPropertyValue('--line')||'#3a3128').trim();
@@ -3738,7 +4072,7 @@ async function loadPageForExport(pg){
     }
   } else { S.offX=0; S.offY=0; }
   if(tomboRectExp){ S.alignedByBox=true; S.aTrimPx=tomboRectExp; S.aBleedPx=null; }
-  else setCompareRects(a, alignedExp);
+  else setCompareRects(a, alignedExp, b);
   fitInkLut();
   computeDiff();
 }
@@ -3810,7 +4144,7 @@ function buildSummaryImage(p){
   let y=pad;
   c.fillStyle="#1a1a1a"; c.textBaseline="top";
   c.font="700 28px 'Zen Kaku Gothic New',sans-serif";
-  c.fillText(`差分レポート（B基準）  ページ ${S.page} / ${maxPages}`, pad, y); y+=44;
+  c.fillText(`差分レポート（B基準）  ページ ${S.page} / ${navCount()}`, pad, y); y+=44;
   c.font="400 16px 'Zen Kaku Gothic New',sans-serif"; c.fillStyle="#555";
   const now=new Date();
   const ts=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
@@ -3819,7 +4153,7 @@ function buildSummaryImage(p){
   c.fillText(`B 最終下版: ${truncate(S.nameB,40)||"—"}（このPDFを基準に表記）`, pad, y); y+=24;
   const aSize=S.aPtW?`${(S.aPtW*PT2MM).toFixed(1)}×${(S.aPtH*PT2MM).toFixed(1)}mm`:"—";
   const bSize=S.bPtW?`${(S.bPtW*PT2MM).toFixed(1)}×${(S.bPtH*PT2MM).toFixed(1)}mm`:"—";
-  c.fillText(`A寸法: ${aSize}　B寸法: ${bSize}`, pad, y); y+=30;
+  c.fillText(`対応ページ: A ${S.aLogical||"—"} ⇔ B ${S.bLogical||"—"}　A寸法: ${aSize}　B寸法: ${bSize}`, pad, y); y+=30;
   if(!p){
     c.fillStyle="#d83a2e"; c.font="700 18px 'Zen Kaku Gothic New',sans-serif";
     c.fillText("片側にこのページが無いため比較できません。", pad, y);
@@ -3962,7 +4296,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.17";
+  const APP_VERSION = "v1.19";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
