@@ -1159,7 +1159,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.10";
+const APP_VERSION = "v1.11";
 
 // ───────────────────────────────────────────
 //  状態
@@ -2082,7 +2082,7 @@ function prepVerticalItems(items){
     dedup.push(it);
   }
   const base = dominantFontSize(dedup);
-  if(!base) return {items: dedup, base: 0};
+  if(!base) return {items: dedup, base: 0, marks: []};
   const isBigNum = it => ITEM_FONT_SIZE(it) > base * 1.3 && /^[0-9０-９]+$/.test(it.str.trim());
   const bigNums = dedup.filter(isBigNum);
   // 番号の真上に小さく添えられた種別の字（「余」＋「01」＝余話01 など）も番号と一緒に落とす
@@ -2091,7 +2091,7 @@ function prepVerticalItems(items){
     // 数字（上段の項目のページ番号が下段の番号の真上に来ることがある）は対象外
     return ITEM_FONT_SIZE(it) < nsz && it.str.trim().length <= 2 && !/[0-9０-９]/.test(it.str)
       && cx >= n.transform[4] - 2 && cx <= n.transform[4] + n.width + 2
-      && it.transform[5] >= top - 2 && it.transform[5] <= top + nsz * 1.5;
+      && it.transform[5] >= top - 2 && it.transform[5] <= top + nsz * 0.6;   // 番号に接して上に乗るものだけ（柱の「目次」などは離れている）
   });
   const kept = dedup.filter(it => {
     const sz = ITEM_FONT_SIZE(it);
@@ -2100,7 +2100,15 @@ function prepVerticalItems(items){
     if(isBigNum(it) || isNumTag(it)) return false;
     return true;
   });
-  return {items: kept, base};
+  // 落とした番号は捨てずに返す（項目の頭に付ける「01」「余01」などとして使う）
+  const marks = bigNums.map(n => {
+    const nsz = ITEM_FONT_SIZE(n), top = n.transform[5] + nsz * 0.88;
+    const tag = dedup.find(it => it.str.trim() && !isBigNum(it) && isNumTag(it)
+      && itemXCenter(it) >= n.transform[4] - 2 && itemXCenter(it) <= n.transform[4] + n.width + 2
+      && it.transform[5] >= top - 2 && it.transform[5] <= top + nsz * 0.6);
+    return {text: (tag ? tag.str.trim() : "") + n.str.trim(), cx: n.transform[4] + n.width / 2, y: n.transform[5], size: nsz};
+  });
+  return {items: kept, base, marks};
 }
 // 字面の長さ（字数×サイズ）で重み付けした最頻の文字サイズ（リーダー罫・空白は数えない）。
 // 字数だけで数えると、漢字1字に2〜3字のかなが付くルビのほうが多数派になってしまう
@@ -2224,8 +2232,22 @@ async function extractLines(pdfjsDoc, physIdx){
     for(const tier of splitVerticalTiers(prep.items, prep.base)){
       for(const col of clusterCoords(tier, itemXCenter, 6)){
         const ln = buildLine(col, true);
-        if(ln) tiered.push(ln);
+        if(!ln) continue;
+        const xs = col.filter(it => it.str.trim()).map(itemXCenter).sort((a, b) => a - b);
+        ln.cx = xs.length ? xs[Math.floor(xs.length / 2)] : ln.x;
+        tiered.push(ln);
       }
+    }
+    // 大きな番号は、真下に頭をそろえて始まる列のうち、横位置が最も近い列に持たせる
+    for(const m of prep.marks || []){
+      let best = null, bd = Infinity;
+      for(const ln of tiered){
+        const dy = m.y - ln.y;
+        if(dy < -2 || dy > prep.base * 2.5) continue;
+        const dx = Math.abs(ln.cx - m.cx);
+        if(dx <= Math.max(m.size, prep.base * 1.5) && dx < bd){ bd = dx; best = ln; }
+      }
+      if(best && !best.num) best.num = m.text;
     }
     const hits = ls => ls.filter(ln => parseTocLine(ln.text)).length;
     return hits(tiered) > hits(legacy) ? tiered : legacy;
@@ -2527,6 +2549,8 @@ async function locateDoorPages(list, pdfjsDoc, totalPages, resolveLabel, pageLab
     if(hi < lo || hi - lo > 80) continue;
     const keys = [normText(e.title)];
     const k2 = normText(stripMarker(e.title));
+    const k3 = normText(e.title.replace(/^[^\s\u3000]{0,2}?[0-9０-９]{1,3}[\s\u3000]+/, ""));
+    if(k3 && k3.length >= 2 && k3 !== keys[0] && k3 !== k2) keys.push(k3);
     if(k2 && k2.length >= 2 && k2 !== keys[0]) keys.push(k2);
 
     let hit = null;
@@ -2703,7 +2727,8 @@ function mergeVerticalTocEntries(lines){
         text += trimText(lines[j].text);
         j++;
       }
-      out.push({...ln, text, heading: true});
+      const num = lines.slice(i, j).map(l => l.num).find(Boolean) || "";
+      out.push({...ln, text, heading: true, num});
       i = j - 1;
       continue;
     }
@@ -2736,7 +2761,8 @@ function mergeVerticalTocEntries(lines){
     const r = parseTocLine(text, 160);
     if(!r){ out.push(ln); continue; }
     out.splice(out.length - chain.length, chain.length);
-    out.push({...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, vmerged: true});
+    const num = parts.map(l => l.num).find(Boolean) || "";
+    out.push({...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, vmerged: true, num});
   }
   return out;
 }
@@ -2818,7 +2844,7 @@ async function autoDetectToc(){
       if(ln.vmerged) vmerged++;
       else if(ln.parsed) wrapped++;
       if(r){
-        parsed.push({...r, x: ln.x, vertical: ln.vertical});
+        parsed.push({...r, x: ln.x, vertical: ln.vertical, num: ln.num || ""});
         continue;
       }
       if(!ln.text.trim()) continue;
@@ -2828,7 +2854,7 @@ async function autoDetectToc(){
       const bare = ln.text.replace(/[\s\u3000.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
       const rank = markerRank(bare);
       if((rank === LV_RANK.bu || rank === LV_RANK.sho || ln.heading) && looksLikeRealTitle(bare, 60)){
-        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading});
+        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading, num: ln.num || ""});
         noFolio++;
         continue;
       }
@@ -2895,6 +2921,15 @@ async function autoDetectToc(){
       }
     }
     for(const e of bmEntries) delete e._heading;
+    // 縦組み目次の頭に大きく組まれた番号（「01」「余01」「1」）を見出しの頭に付ける。
+    // 記号から階層を推定するときに「01　…」が番号付きの項目と誤読されないよう、階層を決めたあとで付ける
+    {
+      let numbered = 0;
+      parsed.forEach((e, i) => {
+        if(e.num && bmEntries[i]){ bmEntries[i].title = e.num + "\u3000" + bmEntries[i].title; numbered++; }
+      });
+      if(numbered > 0) levelNote += `\n  見出しの頭の大きな番号（01・余01 など）を ${numbered} 件に付けました`;
+    }
 
     // 小見出し（目次で「／」区切りで列挙される項目）を各項目に持たせておき、
     // 本文からの位置特定は runBookmark 内（ページラベルの解決が済んだあと）で行う
