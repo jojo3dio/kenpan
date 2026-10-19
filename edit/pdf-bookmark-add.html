@@ -1159,7 +1159,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.9";
+const APP_VERSION = "v1.10";
 
 // ───────────────────────────────────────────
 //  状態
@@ -2031,11 +2031,15 @@ function parseTocLine(text, maxLen){ return splitTitleLabel(text, maxLen); }
 // 変換行列のスケール値を使えば、まとまり方に関係なく常に1文字分の大きさが得られる。
 const ITEM_FONT_SIZE = it => Math.abs(it.transform[0]) || Math.abs(it.transform[3]) || it.height || 0;
 
+// リーダー罫（……・・・）だけのアイテム。縦組みの目次では90°回転して置かれ、幅＝点線の長さになるため、
+// 組み方向の判定に入れると「横組み」側に大量の票が入ってしまう（実体のある文字ではないので除外する）
+const LEADER_ONLY_RE = /^[\s\u3000.\u2024\u2025\u2026\u30FB\u22EF･·…‥]+$/;
 function classifyOrientation(items){
   let vertVotes = 0, horizVotes = 0;
   for(const it of items){
     const len = it.str.length;
     if(len <= 1) continue;
+    if(LEADER_ONLY_RE.test(it.str)) continue;
     if(it.height > it.width * 1.4) vertVotes += len;
     else if(it.width > it.height * 1.4) horizVotes += len;
   }
@@ -2060,6 +2064,93 @@ function clusterCoords(items, coordFn, tol){
     groups.get(gid).push(it);
   }
   return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, arr]) => arr);
+}
+
+// ── 縦組み目次の前処理 ──
+// ・擬似ボールド（同じ文字列を同じ位置に2度描く）の重複を1つにする
+// ・ルビ（本文の半分未満の大きさ）を落とす。ルビは親字の右に独立した列として並ぶため、
+//   列のクラスタに混ざると「宇う宙ちゅう」のように見出しが壊れ、別列になれば項目の区切りが狂う
+// ・各項目の頭に大きく置かれた番号（「01」「1」など本文の1.3倍超の数字だけのアイテム）を落とす
+function prepVerticalItems(items){
+  const seen = new Set(), dedup = [];
+  for(const it of items){
+    if(it.str.trim()){
+      const k = it.str + "|" + it.transform.map(v => v.toFixed(1)).join(",");
+      if(seen.has(k)) continue;
+      seen.add(k);
+    }
+    dedup.push(it);
+  }
+  const base = dominantFontSize(dedup);
+  if(!base) return {items: dedup, base: 0};
+  const isBigNum = it => ITEM_FONT_SIZE(it) > base * 1.3 && /^[0-9０-９]+$/.test(it.str.trim());
+  const bigNums = dedup.filter(isBigNum);
+  // 番号の真上に小さく添えられた種別の字（「余」＋「01」＝余話01 など）も番号と一緒に落とす
+  const isNumTag = it => bigNums.some(n => {
+    const nsz = ITEM_FONT_SIZE(n), cx = itemXCenter(it), top = n.transform[5] + nsz * 0.88;
+    // 数字（上段の項目のページ番号が下段の番号の真上に来ることがある）は対象外
+    return ITEM_FONT_SIZE(it) < nsz && it.str.trim().length <= 2 && !/[0-9０-９]/.test(it.str)
+      && cx >= n.transform[4] - 2 && cx <= n.transform[4] + n.width + 2
+      && it.transform[5] >= top - 2 && it.transform[5] <= top + nsz * 1.5;
+  });
+  const kept = dedup.filter(it => {
+    const sz = ITEM_FONT_SIZE(it);
+    if(!it.str.trim()) return !(sz > 0 && sz < base * 0.5);
+    if(sz > 0 && sz < base * 0.5) return false;
+    if(isBigNum(it) || isNumTag(it)) return false;
+    return true;
+  });
+  return {items: kept, base};
+}
+// 字面の長さ（字数×サイズ）で重み付けした最頻の文字サイズ（リーダー罫・空白は数えない）。
+// 字数だけで数えると、漢字1字に2〜3字のかなが付くルビのほうが多数派になってしまう
+function dominantFontSize(items){
+  const cnt = new Map();
+  for(const it of items){
+    if(!it.str.trim() || LEADER_ONLY_RE.test(it.str)) continue;
+    const s = Math.round(ITEM_FONT_SIZE(it) * 10) / 10;
+    if(!s) continue;
+    cnt.set(s, (cnt.get(s) || 0) + it.str.replace(/[\s\u3000]/g, "").length * s);
+  }
+  let best = 0, bc = -1;
+  for(const [s, c] of cnt) if(c > bc){ bc = c; best = s; }
+  return best;
+}
+// アイテムが縦方向に占める範囲 [下端, 上端]（PDF座標）
+function itemYExtent(it){
+  const [a, b, , , , y] = it.transform;
+  if(Math.abs(b) > Math.abs(a)) return b < 0 ? [y - it.width, y] : [y, y + it.width];   // 90°回転（リーダー罫など）
+  const sz = ITEM_FONT_SIZE(it) || it.height || 0;
+  const t = it.str.trim();
+  // 縦書きフォントの文字は原点が字面の上端で、下へ伸びる。横書きの数字（縦中横・ページ番号）は原点がベースライン
+  const verticalGlyph = it.height > it.width * 1.2 || (t.length === 1 && /[^\x00-\x7F]/.test(t));
+  return verticalGlyph ? [y - Math.max(it.height, sz), y] : [y - sz * 0.2, y + sz * 0.88];
+}
+// 列のクラスタ用の座標（字面の中心）。回転したリーダー罫はベースライン付近に点が乗る
+function itemXCenter(it){
+  const [a, b, , , x] = it.transform;
+  const sz = ITEM_FONT_SIZE(it) || it.height || 0;
+  if(Math.abs(b) > Math.abs(a)) return x + sz * 0.2;
+  return x + (it.width || sz) / 2;
+}
+// 上下2段（以上）に組まれた縦組み目次を段ごとに分ける。
+// ページ全体の文字の縦方向の範囲を重ね合わせ、文字が1つも無い帯（本文1.5字分以上）で区切る。
+// 段の境目をまたいで同じx座標に列が並ぶため、段を分けずに列をまとめると上段と下段の項目が1列に混ざる。
+function splitVerticalTiers(items, base){
+  const solid = items.filter(it => it.str.trim());
+  if(solid.length === 0 || !base) return [items];
+  const iv = solid.map(itemYExtent).sort((p, q) => q[1] - p[1]);   // 上から
+  const cuts = [];
+  let low = iv[0][0];
+  for(let i = 1; i < iv.length; i++){
+    if(low - iv[i][1] >= base * 1.5) cuts.push((low + iv[i][1]) / 2);
+    low = Math.min(low, iv[i][0]);
+  }
+  if(cuts.length === 0) return [items];
+  const tierOf = it => { const [lo, hi] = itemYExtent(it); const c = (lo + hi) / 2; let k = 0; while(k < cuts.length && c < cuts[k]) k++; return k; };
+  const tiers = Array.from({length: cuts.length + 1}, () => []);
+  for(const it of items) tiers[tierOf(it)].push(it);
+  return tiers.filter(t => t.length > 0);
 }
 
 // 1ページ分のテキストを抽出し、縦組み／横組みを自動判別して読み順に並んだ「行（列）」の配列を返す
@@ -2117,14 +2208,27 @@ async function extractLines(pdfjsDoc, physIdx){
       // yは行間（＝折り返し判定）に使う。行内のブレを拾わないよう最も上の値を代表値とする
       y: Math.max(...solids.map(o => o.transform[5])),
       text,
-      vertical
+      vertical,
+      size: dominantFontSize(solids)   // 行の代表文字サイズ（章見出しの判定・見出しと副題の連結に使う）
     };
   };
 
   if(orientation === "vertical"){
     // 縦組み：X座標が近いものを1つの列としてクラスタ化し、右→左の列順・列内は上→下（Y降順）に並べる
     const columns = clusterCoords(all, it => it.transform[4], 6);
-    return columns.map(col => buildLine(col, true)).filter(Boolean);
+    const legacy = columns.map(col => buildLine(col, true)).filter(Boolean);
+    // ルビ付き・上下2段組みの目次向けに、前処理と段分けをしてから列をまとめた結果も作り、
+    // 「見出し＋ページ番号」として読める行が多いほうを採用する（従来の本の読み取りは変えない）
+    const prep = prepVerticalItems(all);
+    const tiered = [];
+    for(const tier of splitVerticalTiers(prep.items, prep.base)){
+      for(const col of clusterCoords(tier, itemXCenter, 6)){
+        const ln = buildLine(col, true);
+        if(ln) tiered.push(ln);
+      }
+    }
+    const hits = ls => ls.filter(ln => parseTocLine(ln.text)).length;
+    return hits(tiered) > hits(legacy) ? tiered : legacy;
   }else{
     // 横組み：Y座標が近いものを1つの行としてクラスタ化し、上→下の行順・行内は左→右に並べる
     const rows = clusterCoords(all, it => it.transform[5], 4);
@@ -2154,11 +2258,12 @@ async function extractRuns(pdfjsDoc, physIdx){
 
   const page = await pdfjsDoc.getPage(physIdx);
   const tc = await page.getTextContent();
-  const solid = tc.items.filter(it => it.str && it.str.trim());
+  let solid = tc.items.filter(it => it.str && it.str.trim());
   let result = {vertical: false, runs: []};
 
   if(solid.length > 0){
     const vertical = classifyOrientation(solid) === "vertical";
+    if(vertical) solid = prepVerticalItems(solid).items;
     const posOf = it => (vertical ? -it.transform[5] : it.transform[4]);   // 行内（字送り）方向
     const advOf = it => (vertical ? (it.height || 0) : (it.width || 0));
     const clusters = vertical
@@ -2235,6 +2340,11 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
         if(!t) continue;
         // ページ番号がランに含まれたままの場合もあるため、前方一致（余剰6文字以内）も許す
         if(n === t || (n.startsWith(t) && n.length - t.length <= 6)) return i;
+        // リーダー罫・ページ番号付きのまま切れたラン（「智徳の独立……」「人の下に人を造らず」……240」）は、
+        // それらを落としてから照合する。縦組みで見出しと副題を1項目に連結した場合は、その一部分とも照合する
+        const n3 = n.replace(/[0-9０-９]+$/, "").replace(/[.\u2024\u2025\u2026\u30FB･·]+$/, "");
+        if(n3 && n3 !== n && n3 === t) return i;
+        if(n3.length >= 6 && t.includes(n3)) return i;
         // 縦組みで2列に送られた見出しの前半・後半（「補論　日常の政治運営」「──将軍への…　二二七」）も
         // その項目の行として扱う（小見出しと取り違えて子しおりを作らないため）
         if(n.length >= 6){
@@ -2563,6 +2673,86 @@ async function findTocPages(pdfjsDoc, maxScan){
   return pages;
 }
 
+// ── 縦組み目次の項目まとめ ──
+// ①章見出し：ページ番号を持たず、項目の1.3倍以上の大きな文字の列。2列に折り返したものは1つに連結する。
+//   （「1　自然の摂理と／人倫の基盤」のような章扉の見出し。ページは本文の扉から探す）
+// ②見出し＋副題：「宇宙（ルビ付きの見出し）」「宇宙は人知では…………26（副題とページ番号）」のように、
+//   ページ番号を持たない列のすぐ左に、頭をそろえてページ番号付きの列が続く場合は1項目にまとめる。
+//   「コラム①」のような種別の小札や、2列に折り返した副題も同じ形なので一緒に連結される。
+//   字の大きさが違う列どうし（見出しと副題）は全角アキで、同じ大きさ（折り返し）はそのまま連結する。
+function mergeVerticalTocEntries(lines){
+  if(!lines.some(ln => ln.vertical)) return lines;
+  const hasLabel = ln => !!(ln.parsed || parseTocLine(ln.text));
+  const sizes = lines.filter(ln => ln.vertical && ln.size && hasLabel(ln)).map(ln => ln.size).sort((a, b) => a - b);
+  if(sizes.length < 3) return lines;
+  const med = sizes[Math.floor(sizes.length / 2)];
+  const trimText = t => t.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, "");
+  const isHeading = ln => ln.vertical && !hasLabel(ln) && (ln.size || 0) >= med * 1.3
+    && trimText(ln.text).replace(/[\s\u3000]/g, "").length >= 2 && !NUM_ONLY_RE.test(ln.text);
+  const isPartOrChapter = t => { const r = markerRank(t); return r === LV_RANK.bu || r === LV_RANK.sho; };
+
+  const out = [];
+  for(let i = 0; i < lines.length; i++){
+    const ln = lines[i];
+    if(isHeading(ln)){
+      let text = trimText(ln.text), j = i + 1;
+      while(j < lines.length && isHeading(lines[j])
+            && Math.abs(lines[j].size - ln.size) <= ln.size * 0.1
+            && Math.abs(lines[j].x - lines[j - 1].x) <= ln.size * 2.2
+            && Math.abs(lines[j].y - lines[j - 1].y) <= ln.size * 1.5){
+        text += trimText(lines[j].text);
+        j++;
+      }
+      out.push({...ln, text, heading: true});
+      i = j - 1;
+      continue;
+    }
+    if(!ln.vertical || !hasLabel(ln)){ out.push(ln); continue; }
+    // ページ番号付きの列から右（＝前）へ遡り、頭のそろった直前の列を集める（最大3列）
+    const bt = trimText(ln.text);
+    if(markerRank(bt) !== null || KANJI_SECTION_RE.test(bt)){ out.push(ln); continue; }
+    const chain = [];
+    let cur = ln;
+    for(let k = out.length - 1; k >= 0 && chain.length < 3; k--){
+      const p = out[k];
+      if(!p.vertical || p.heading || hasLabel(p)) break;
+      const pt = trimText(p.text);
+      const em = Math.max(p.size || 0, cur.size || 0);
+      if(!(em > 0)) break;
+      if(Math.abs(p.x - cur.x) > em * 2.2 || Math.abs(p.y - cur.y) > em * 1.5) break;
+      if((p.size || 0) > (ln.size || 0) * 1.3) break;
+      if(pt.replace(/[\s\u3000]/g, "").length < 2 || pt.length > 40 || NUM_ONLY_RE.test(pt) || isPartOrChapter(pt)) break;
+      chain.unshift(p);
+      cur = p;
+    }
+    if(chain.length === 0){ out.push(ln); continue; }
+    const parts = [...chain, ln];
+    let text = trimText(parts[0].text);
+    for(let k = 1; k < parts.length; k++){
+      const prev = parts[k - 1], next = parts[k];
+      const same = Math.abs((prev.size || 0) - (next.size || 0)) <= Math.max(prev.size || 0, next.size || 0) * 0.08;
+      text += (same ? "" : "\u3000") + trimText(next.text);
+    }
+    const r = parseTocLine(text, 160);
+    if(!r){ out.push(ln); continue; }
+    out.splice(out.length - chain.length, chain.length);
+    out.push({...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, vmerged: true});
+  }
+  return out;
+}
+
+// 縦組みの章見出し（mergeVerticalTocEntries で heading とした項目）の配下を1段下げる。
+// 最初の章見出しより前（推薦文・はじめに 等）と、後付（おわりに・参考文献 等）は最上位のまま。
+function nestUnderHeadings(entries){
+  let inScope = false, moved = 0;
+  for(const e of entries){
+    if(e._heading){ inScope = true; e.level = 0; continue; }
+    if(BACK_MATTER_RE.test(normText(e.title))){ inScope = false; continue; }
+    if(inScope){ e.level = (e.level || 0) + 1; moved++; }
+  }
+  return moved;
+}
+
 async function autoDetectToc(){
   if(!pdfFile){ log("⚠ 先にPDFファイルを選択してください。", "warn"); return; }
   const rangeStr = $("tocPages").value.trim();
@@ -2614,12 +2804,19 @@ async function autoDetectToc(){
       if(!r) continue;
       rawLines.splice(i, 2, {...b, x: a.x, y: a.y, text: at + bt, parsed: r});
     }
+    // 縦組み：章見出し（大きな文字）と「見出し＋副題」の2列組みをまとめる
+    {
+      const merged = mergeVerticalTocEntries(rawLines);
+      rawLines.length = 0;
+      rawLines.push(...merged);
+    }
 
     const parsed = [];
-    let skipped = 0, wrapped = 0, noFolio = 0;
+    let skipped = 0, wrapped = 0, noFolio = 0, vmerged = 0;
     for(const ln of rawLines){
       const r = ln.parsed || parseTocLine(ln.text);
-      if(ln.parsed) wrapped++;
+      if(ln.vmerged) vmerged++;
+      else if(ln.parsed) wrapped++;
       if(r){
         parsed.push({...r, x: ln.x, vertical: ln.vertical});
         continue;
@@ -2630,8 +2827,8 @@ async function autoDetectToc(){
       // リスト上で赤く示して手入力できるようにする（見出しごと捨ててしまわない）。
       const bare = ln.text.replace(/[\s\u3000.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
       const rank = markerRank(bare);
-      if((rank === LV_RANK.bu || rank === LV_RANK.sho) && looksLikeRealTitle(bare, 60)){
-        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical});
+      if((rank === LV_RANK.bu || rank === LV_RANK.sho || ln.heading) && looksLikeRealTitle(bare, 60)){
+        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading});
         noFolio++;
         continue;
       }
@@ -2673,6 +2870,7 @@ async function autoDetectToc(){
     }
     // ページ番号のない部扉・章扉は、runBookmark で本文から扉ページを探す
     parsed.forEach((e, i) => { if(!e.label && bmEntries[i]) bmEntries[i]._door = true; });
+    parsed.forEach((e, i) => { if(e.heading && bmEntries[i]) bmEntries[i]._heading = true; });
     hideBmAlert();
     sanitizeEntries(bmEntries);   // 目次ページから取り出したテキストは制御文字・互換漢字が混入しやすい
     normalizeLevels(bmEntries);
@@ -2689,6 +2887,14 @@ async function autoDetectToc(){
       normalizeLevels(bmEntries);
       levelNote += `\n  階層：部見出し（Ⅰ／第○部 など）の配下 ${nested} 件を1段下げました`;
     }
+    if(!markerLevels && bmEntries.some(e => e._heading)){
+      const hn = nestUnderHeadings(bmEntries);
+      if(hn > 0){
+        normalizeLevels(bmEntries);
+        levelNote += `\n  階層：大きな文字の章見出し ${bmEntries.filter(e => e._heading).length} 件の配下 ${hn} 件を1段下げました`;
+      }
+    }
+    for(const e of bmEntries) delete e._heading;
 
     // 小見出し（目次で「／」区切りで列挙される項目）を各項目に持たせておき、
     // 本文からの位置特定は runBookmark 内（ページラベルの解決が済んだあと）で行う
@@ -2712,6 +2918,7 @@ async function autoDetectToc(){
 
     log(`  認識：${bmEntries.length} 件`, "ok");
     if(wrapped > 0) log(`  （2行以上に折り返された項目を連結：${wrapped} 件）`);
+    if(vmerged > 0) log(`  （縦組みで見出しと副題などの複数列を1項目に連結：${vmerged} 件）`);
     if(noFolio > 0){
       log(`  ⚠ 目次にページ番号が印字されていない見出しが ${noFolio} 件あります（部扉・章扉など）。`, "warn");
       log("    本文から扉のページを探し、見つからなかった行だけページラベル欄が空のまま残ります（入力すると通し番号が追随します）。", "warn");
