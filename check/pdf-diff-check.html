@@ -126,6 +126,22 @@
   .kp-strip{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;padding:4px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--ink-dim)}
   /* ステージ背景：無地（ページの白地が見やすいよう中間色）。市松模様は見づらいので廃止 */
   .viewercol{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  /* v1.21 下版タブ */
+  .jobtabs{display:none;align-items:center;flex-wrap:wrap;gap:5px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--panel);max-height:96px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;flex:0 0 auto}
+  .jobtabs.show{display:flex}
+  .jtab{display:flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--ink-dim);font-size:12px;cursor:pointer;white-space:nowrap;max-width:min(260px,100%);flex:0 1 auto;min-width:0}
+  .jtab:hover{color:var(--ink)}
+  .jtab.active{background:var(--bg);color:var(--ink);border-color:var(--amber);box-shadow:inset 0 2px 0 var(--amber)}
+  .jtab .jn{overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .jtab .jb{font-family:var(--mono);font-size:10.5px;padding:1px 7px;border-radius:9px;background:var(--line);color:var(--ink-dim);flex:0 0 auto}
+  .jtab .jb.diff{background:var(--red);color:#fff}
+  .jtab .jb.ok{background:var(--ok);color:#fff}
+  .jtab .jb.warn{background:var(--amber);color:#fff}
+  .jtab .jb.run{background:var(--cyan);color:#fff}
+  .jtab .jx{border:none;background:none;color:var(--ink-faint);cursor:pointer;font-size:15px;line-height:1;padding:0 3px}
+  .jtab .jx:hover{color:var(--red)}
+  .jadd{flex:0 0 auto;margin:0 0 0 2px;padding:4px 10px;border:1px dashed var(--line);border-radius:6px;background:none;color:var(--ink-dim);font-family:var(--ui);font-size:12px;cursor:pointer;white-space:nowrap}
+  .jadd:hover{border-color:var(--amber);color:var(--ink)}
   .stage{flex:1;position:relative;min-width:0;min-height:0;background:var(--stage1);}
   /* ビューア下の表示トグルバー（ノンブル検版と同じ位置・同じ体裁） */
   .vbar{display:flex;align-items:center;gap:14px;color:var(--ink-dim);font-size:12px;flex-wrap:wrap;
@@ -373,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.20　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.21　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -388,9 +404,9 @@
         <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-5 5M12 4l5 5"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg></span>
         <span class="txt">
           <span class="tag">B・最終下版PDF</span>
-          <span class="lbl" id="lblB">ここにドラッグ＆ドロップ、またはクリックして選択</span>
+          <span class="lbl" id="lblB">ここにドラッグ＆ドロップ、またはクリックして選択（複数可）</span>
         </span>
-        <input type="file" id="fileB" accept="application/pdf,.pdf">
+        <input type="file" id="fileB" accept="application/pdf,.pdf" multiple>
       </label>
     </div>
     <div class="headctrls">
@@ -570,6 +586,8 @@
 
   <div class="body">
    <div class="viewercol">
+    <div class="jobtabs" id="jobTabs"></div>
+    <input type="file" id="fileBAdd" accept="application/pdf,.pdf" multiple style="display:none">
     <div class="stage" id="stage">
       <canvas id="canvas"></canvas>
       <div class="empty" id="empty">
@@ -678,18 +696,25 @@ function bindDrop(dropId, inputId, side){
   const drop=$("#"+dropId), input=$("#"+inputId);
   drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("over")});
   drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
+  // v1.21：Bは複数ファイル可。入れるたびにタブが増える（差し替えではなく追加）。Aは1本だけ。
+  const take=async files=>{
+    files=[...(files||[])]; if(!files.length) return;
+    if(side==="B"){ await addBFiles(files); return; }
+    if(jobBusy()){ toast("チェック中です。終わってから入れ直してください"); return; }
+    if(await loadPdf(files[0],"A")) await afterALoaded();
+  };
   drop.addEventListener("drop",e=>{
     e.preventDefault();drop.classList.remove("over");
-    const f=e.dataTransfer.files[0]; if(f) loadPdf(f,side);
+    take(e.dataTransfer.files);
   });
-  input.addEventListener("change",e=>{const f=e.target.files[0]; if(f) loadPdf(f,side);});
+  input.addEventListener("change",e=>{ const fs=[...e.target.files]; e.target.value=""; take(fs); });
 }
 bindDrop("dropA","fileA","A");
 bindDrop("dropB","fileB","B");
 
-async function loadPdf(file, side){
+async function loadPdf(file, side, opts){
   if(file.type && file.type!=="application/pdf" && !/\.pdf$/i.test(file.name)){
-    toast("PDFファイルを指定してください"); return;
+    toast("PDFファイルを指定してください"); return false;
   }
   try{
     showBusy(true);
@@ -702,9 +727,10 @@ async function loadPdf(file, side){
     // ワーカーが積み上がって動作が重くなっていた。先に必ず破棄する。
     const oldDoc = (side==="A")?S.docA:S.docB;
     if(oldDoc){ try{ await oldDoc.destroy(); }catch(e){} }
-    clearSigCache();                                    // 別PDFに差し替わったので指紋も破棄
+    // v1.21：Bだけ差し替えたときはAの指紋を残す（Aの全ページを描き直さない）
+    clearSigCache(side==="B"?"B":undefined);            // 別PDFに差し替わったので指紋も破棄
     const doc = await pdfjsLib.getDocument({
-      data:buf,
+      data:buf, worker:sharedPdfWorker(),
       cMapUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",   // 定義済みCMapフォント対応（無いと一部文字が消える）
       cMapPacked:true,
       standardFontDataUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/"
@@ -713,11 +739,11 @@ async function loadPdf(file, side){
       $("#lblA").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropA").classList.add("loaded"); }
     else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes; S.tomboBoxesA=null; S.tomboBoxesB=null; S.tomboChecked=false; S.profB=prof;
-      $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
+      $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p${JOBS.length>1?`（下版 ${JOBS.length}本）`:""}`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
     S.inkToastShown=false;                              // v1.17 新しいPDFでは「濃淡で比較」を改めて知らせる
-    clearSigCache();                                    // 別のPDFに差し替わったので指紋を破棄
+    clearSigCache(side==="B"?"B":undefined);            // 別のPDFに差し替わったので指紋を破棄
     await autoDetectSpreads();   // 見開きを先に自動判別（誤って「ノンブル自動」に倒さないため）
     await rebuildPlans();
     await autoDetectBindDir();   // 見開きの左右どちらが先のページかを絵柄で自動判別
@@ -750,8 +776,10 @@ async function loadPdf(file, side){
     if(S.docA && S.docB && maxPages()>1){
       await scanAllPages();
     }
+    return true;
   }catch(err){
     console.error(err); toast("PDFを読み込めませんでした");
+    return false;
   }finally{ showBusy(false); setLoadUI(); }
 }
 
@@ -1743,7 +1771,7 @@ async function correctTrimsByTombo(){
     const r=await fixBoxesByTombo(doc, raw, fin, label);
     if(r){
       if(side==="A") S.tomboBoxesA=r.boxes; else S.tomboBoxesB=r.boxes;
-      clearSigCache();
+      // 指紋のキーにはボックスの値が入っているので、ここで全破棄しなくてよい（v1.21：Aの指紋を残す）
       if(!S.tomboToastShown){
         S.tomboToastShown=true;
         toast(`TrimBoxが実際のトンボと違うため、${label} ${r.n}pの仕上がり位置を描かれたトンボから補正（元のPDFは変更しません）`,"ok");
@@ -1836,7 +1864,17 @@ async function ensurePairing(){
 // キーに仕上がり矩形を含めるので、仕上がりの推定結果が変わったら自然に別エントリになる。
 let sigCache=new Map();            // key -> Float32Array
 let sigPageCache=null;             // 1回のマッチング中だけ有効な描画キャッシュ（見開きの左右で共有）
-function clearSigCache(){ sigCache=new Map(); }
+function clearSigCache(side){
+  if(!side){ sigCache=new Map(); return; }
+  for(const k of [...sigCache.keys()]) if(k.startsWith(side+"|")) sigCache.delete(k);   // v1.21 片側だけ破棄
+}
+// v1.21：pdf.jsのワーカーを全PDFで1本に共有する（下版を何本も開いてもワーカーが増えない）
+let _pdfWorker=null;
+function sharedPdfWorker(){
+  try{ if(!_pdfWorker || _pdfWorker.destroyed) _pdfWorker=new pdfjsLib.PDFWorker({name:"pdf-diff-shared"}); }
+  catch(e){ _pdfWorker=null; }
+  return _pdfWorker||undefined;
+}
 async function pageSig(doc, plan, logical, boxes, side){
   const m=plan[logical-1]; if(!doc||!m) return null;
   try{
@@ -4149,8 +4187,161 @@ function toast(msg,kind){
 function showBusy(b){ $("#busy").classList.toggle("show",b); }
 function showEmpty(){ $("#empty").style.display=(S.docA||S.docB)?"none":"flex"; }
 
+/* ============ v1.21 下版（B）を複数まとめて／追加で読み込み、タブで切り替える ============
+   背景：元データ（A）は同じで、修正のあったページだけを抜き出した下版（B）が何本も来る。
+     これまでは1本ずつ入れ替えてチェックしており、B を差し替えるたびに A の絵柄の指紋（pageSig）まで
+     捨てていたため、A の全ページを毎回描き直していた（＝毎回 A を読み直しているのと同じ重さ）。
+   対応：
+     ・B を差し替えても A の読み込み結果・指紋・トンボ検出結果はそのまま使う（B 側の指紋だけ捨てる）。
+     ・B 欄には複数ファイルをまとめて入れられ、後から追加もできる。1本ごとにタブを作り、順番に
+       照合→全ページ走査して結果をタブに保存する。タブをクリックすると、その結果に切り替わる。
+     ・A を入れ直したときは、全タブを新しい A で自動的にチェックし直す。 */
+const JOB_KEYS=["docB","nameB","boxesA","boxesB","rawBoxesB","tomboBoxesA","tomboBoxesB","tomboChecked","profB",
+  "planA","planB","spreadA","spreadB","bindRTL","bindManual","matchMode","foliosA","foliosB","mapBtoA","manualA",
+  "pairCorrSum","pageSummary","page","offX","offY","aLogical","bLogical","gAStr","gBStr","gAgram","gBgram",
+  "inkActive","alignedByBox","aTrimPx","aBleedPx","regions","activeRegion","originMode"];
+const JOBS=[]; let activeJob=null, jobSeq=0, jobRunning=false;
+function snapJob(job){ if(!job) return; const o={}; for(const k of JOB_KEYS) o[k]=S[k]; job.snap=o; }
+function restoreJob(job){ if(!job||!job.snap) return; for(const k of JOB_KEYS) S[k]=job.snap[k]; }
+function jobInfoNow(){
+  const n=maxPages(); let diff=0, um=0;
+  const ps=S.pageSummary;
+  if(ps){ for(const s of ps){ if(!s) continue; if(s.aMissing||s.bMissing) um++; else if(s.count>0) diff++; } }
+  else if(S.docB){ if(!getA(1)||!getB(1)) um=1; else if(S.regions&&S.regions.length) diff=1; }
+  return {n, diff, um};
+}
+function isPdfFile(f){ return f && (!f.type || f.type==="application/pdf" || /\.pdf$/i.test(f.name)); }
+function jobBusy(){ return jobRunning || S.scanning || S.pairing; }
+function syncJobUI(){
+  const lb=$("#lblB");
+  if(lb){
+    if(S.docB) lb.innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(S.nameB)}</b> · ${S.docB.numPages}p${JOBS.length>1?`（下版 ${JOBS.length}本）`:""}`;
+    else lb.innerHTML="ここにドラッグ＆ドロップ、またはクリックして選択（複数可）";
+  }
+  const db=$("#dropB"); if(db) db.classList.toggle("loaded", !!S.docB);
+  if($("#matchMode")) $("#matchMode").value=S.matchMode;
+  if($("#bindDir")) $("#bindDir").value=S.bindRTL?"rtl":"ltr";
+  if($("#originMode")) $("#originMode").value=S.originMode;
+}
+function renderJobTabs(){
+  const bar=$("#jobTabs"); if(!bar) return;
+  bar.classList.toggle("show", JOBS.length>0);
+  if(!JOBS.length){ bar.innerHTML=""; return; }
+  const html=JOBS.map(j=>{
+    let cls="", txt="";
+    if(j.status==="run")      { cls="run";  txt="照合中…"; }
+    else if(j.status==="wait"){ cls="";     txt="待機"; }
+    else if(j.status==="err") { cls="warn"; txt="読込失敗"; }
+    else { const i=j.info||{n:0,diff:0,um:0};
+      if(i.diff>0)      { cls="diff"; txt=`差分 ${i.diff}p`; }
+      else if(i.um>0)   { cls="warn"; txt=`相手なし ${i.um}p`; }
+      else              { cls="ok";   txt="差分なし"; }
+      if(j.partial) txt+="（途中）";
+    }
+    const i=j.info;
+    const tip = i ? `${j.name}\nBのページ数 ${i.n}／差分あり ${i.diff}ページ／相手ページなし ${i.um}ページ${j.partial?"\n※走査を途中で止めました":""}` : j.name;
+    return `<div class="jtab${j===activeJob?" active":""}" data-id="${j.id}" title="${esc(tip)}">`+
+      `<span class="jn">${esc(j.name)}</span><span class="jb ${cls}">${txt}</span>`+
+      `<button class="jx" data-x="${j.id}" title="このタブを閉じる">×</button></div>`;
+  }).join("");
+  bar.innerHTML = html + `<button class="jadd" id="jobAdd" title="下版PDFを追加（複数可）">＋ 下版を追加</button>`;
+}
+async function addBFiles(files){
+  files=[...(files||[])].filter(isPdfFile);
+  if(!files.length){ toast("PDFファイルを指定してください"); return; }
+  for(const f of files) JOBS.push({id:++jobSeq, file:f, name:f.name, status:"wait", snap:null, info:null, partial:false});
+  renderJobTabs();
+  if(files.length>1) toast(`下版 ${files.length}本を順番にチェックします`,"ok");
+  await runJobQueue();
+}
+async function runJobQueue(first){
+  if(jobRunning) return;
+  jobRunning=true; S.userStopped=false;
+  try{
+    let job=first||JOBS.find(j=>j.status==="wait");
+    while(job){
+      await processJob(job);
+      if(S.userStopped) break;                 // キャンセルされたら残りは「待機」のまま
+      job=JOBS.find(j=>j.status==="wait");
+    }
+  }finally{ jobRunning=false; renderJobTabs(); setLoadUI(); }
+}
+// 1本の下版を読み込んで照合・走査し、結果をタブに保存する
+async function processJob(job){
+  if(activeJob && activeJob!==job) snapJob(activeJob);     // 表示中のタブを退避（docBは破棄しない）
+  const old = job.snap && job.snap.docB;
+  job.snap=null; job.info=null; job.partial=false;
+  S.docB=null;                                              // loadPdf が他タブの下版を破棄しないように
+  if(old){ try{ await old.destroy(); }catch(e){} }          // このタブ自身の古い下版だけ破棄（Aの入れ直し時）
+  activeJob=job; job.status="run"; renderJobTabs();
+  S.userStopped=false;
+  const ok=await loadPdf(job.file, "B", {fromJob:true});
+  if(!ok){ job.status="err"; renderJobTabs(); return; }
+  job.partial=!!S.userStopped;
+  snapJob(job); job.info=jobInfoNow(); job.status="done";
+  syncJobUI(); renderJobTabs();
+}
+async function switchJob(id){
+  const job=JOBS.find(j=>j.id===id); if(!job||job===activeJob) return;
+  if(jobBusy()){ toast("チェック中です。終わってから切り替えてください"); return; }
+  if(job.status==="wait"||job.status==="err"||!job.snap){ await runJobQueue(job); return; }
+  snapJob(activeJob);
+  restoreJob(job); activeJob=job;
+  clearSigCache("B");                                       // B の指紋はタブごとに別物
+  S.scale=S.dpi/72;
+  syncJobUI(); renderJobTabs();
+  showBusy(true);
+  try{ await refreshPage(false); }catch(e){ console.error(e); }
+  finally{ showBusy(false); }
+  renderAllPages(); updatePageLabel(); setLoadUI();
+}
+async function closeJob(id){
+  const idx=JOBS.findIndex(j=>j.id===id); if(idx<0) return;
+  if(jobBusy()){ toast("チェック中は閉じられません"); return; }
+  const job=JOBS[idx];
+  const doc = (job===activeJob) ? S.docB : (job.snap && job.snap.docB);
+  JOBS.splice(idx,1);
+  try{ if(doc) await doc.destroy(); }catch(e){}
+  if(job!==activeJob){ renderJobTabs(); syncJobUI(); return; }
+  activeJob=null;
+  const next=JOBS[Math.min(idx, JOBS.length-1)];
+  if(next && next.snap){
+    restoreJob(next); activeJob=next; clearSigCache("B"); S.scale=S.dpi/72;
+    syncJobUI(); renderJobTabs();
+    showBusy(true); try{ await refreshPage(false); }catch(e){} finally{ showBusy(false); }
+    renderAllPages(); updatePageLabel(); setLoadUI();
+    return;
+  }
+  // 下版が1本も無くなった
+  S.docB=null; S.nameB=""; S.boxesB=[]; S.rawBoxesB=[]; S.profB=[]; S.planB=[]; S.mapBtoA=null;
+  S.tomboBoxesA=null; S.tomboBoxesB=null; S.tomboChecked=false;
+  S.regions=[]; S.activeRegion=-1; S.page=1; invalidateScan(); clearSigCache("B");
+  syncJobUI(); renderJobTabs();
+  if(next) await runJobQueue(next);
+  else { try{ await refreshPage(false); }catch(e){} updatePanel(); updatePageLabel(); updateHud(); setLoadUI(); showEmpty(); }
+}
+// A を読み込み（入れ直し）たあと：表示中のタブは loadPdf 内で新しい A と照合済み。残りのタブはチェックし直す。
+async function afterALoaded(){
+  if(!JOBS.length) return;
+  if(activeJob && S.docB){ snapJob(activeJob); activeJob.info=jobInfoNow(); activeJob.status="done"; activeJob.partial=false; }
+  let n=0; for(const j of JOBS) if(j!==activeJob && j.status!=="wait"){ j.status="wait"; n++; }
+  renderJobTabs();
+  if(n) toast(`元データが変わったので、ほかの下版 ${n}本もチェックし直します`,"ok");
+  await runJobQueue();
+}
+$("#jobTabs").addEventListener("click", e=>{
+  const x=e.target.closest("[data-x]"); if(x){ e.stopPropagation(); closeJob(+x.dataset.x); return; }
+  if(e.target.closest("#jobAdd")){ $("#fileBAdd").click(); return; }
+  const t=e.target.closest(".jtab"); if(t) switchJob(+t.dataset.id);
+});
+$("#fileBAdd").addEventListener("change", e=>{ const fs=[...e.target.files]; e.target.value=""; if(fs.length) addBFiles(fs); });
+
 /* ============ リセット ============ */
 function resetAll(){
+  if(jobRunning){ S.userStopped=true; toast("チェック中です。止めてからリセットしてください"); stopScan(); return; }
+  // v1.21 下版タブもすべて閉じる（表示中以外の下版もここで破棄）
+  for(const j of JOBS){ if(j!==activeJob && j.snap && j.snap.docB){ try{ j.snap.docB.destroy(); }catch(e){} } }
+  JOBS.length=0; activeJob=null; renderJobTabs();
   // クリア時もpdf.jsのドキュメントを明示的に破棄する（参照を外すだけではワーカーとPDFの実体が残る）
   try{ if(S.docA) S.docA.destroy(); }catch(e){}
   try{ if(S.docB) S.docB.destroy(); }catch(e){}
@@ -4185,7 +4376,7 @@ function resetAll(){
     $("#file"+s).value="";
   });
   $("#lblA").innerHTML="ここにドラッグ＆ドロップ、またはクリックして選択";
-  $("#lblB").innerHTML="ここにドラッグ＆ドロップ、またはクリックして選択";
+  $("#lblB").innerHTML="ここにドラッグ＆ドロップ、またはクリックして選択（複数可）";
   S.scanning=false; S.scanAbort=false; setBusyProgress(-1);
   cctx.clearRect(0,0,viewSize().w,viewSize().h);
   updatePanel(); renderAllPages(); updatePageLabel(); updateHud(); setLoadUI();
@@ -4196,6 +4387,7 @@ $("#resetBtn").onclick=resetAll;
 
 /* ============ 読み込み制御（全ページ／表示ページのみ／停止） ============ */
 function stopScan(){
+  S.userStopped=true;                       // v1.21 まとめてチェック中なら残りの下版は待機のまま止める
   if(S.pairing){ S.pairAbort=true; toast("ページ対応の照合をキャンセルしています…","ok"); }
   if(S.scanning){ S.scanAbort=true; toast("キャンセルしています…","ok"); }
 }
