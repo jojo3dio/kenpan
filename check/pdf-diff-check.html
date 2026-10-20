@@ -373,7 +373,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.19　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.20　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -658,6 +658,8 @@ const S = {
   planA:[], planB:[],                    // 論理ページ列 [{src,crop}]（見開き自動判定の結果）
   boxesA:[], boxesB:[],                   // 物理ページごとのボックス {media,crop,trim,bleed}（pt）実際に使う値（推定込み）
   rawBoxesA:[], rawBoxesB:[],             // PDFから読んだ生のボックス（推定前）。プラン変更時に再推定するため保持
+  tomboBoxesA:null, tomboBoxesB:null,     // v1.20 TrimBoxが実際のトンボと違うPDFを、描かれたトンボで補正したボックス（無ければnull）
+  tomboChecked:false, tomboToastShown:false,
   profA:[], profB:[],                     // 物理ページごとの内容バイト数（絵柄マッチの候補絞り込み用）
   pairing:false, pairAbort:false,         // ページ対応の照合中フラグ／中断要求
   originMode:"center",                   // 位置合わせ起点 center/trim/bleed/page
@@ -707,10 +709,10 @@ async function loadPdf(file, side){
       cMapPacked:true,
       standardFontDataUrl:"https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/"
     }).promise;
-    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes; S.rawBoxesA=boxes; S.profA=prof;
+    if(side==="A"){ S.docA=doc; S.nameA=file.name; S.boxesA=boxes; S.rawBoxesA=boxes; S.tomboBoxesA=null; S.tomboBoxesB=null; S.tomboChecked=false; S.profA=prof;
       $("#lblA").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropA").classList.add("loaded"); }
-    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes; S.profB=prof;
+    else        { S.docB=doc; S.nameB=file.name; S.boxesB=boxes; S.rawBoxesB=boxes; S.tomboBoxesA=null; S.tomboBoxesB=null; S.tomboChecked=false; S.profB=prof;
       $("#lblB").innerHTML=`<span class="ok">✓ 読込済</span><b>${esc(file.name)}</b> · ${doc.numPages}p`;
       $("#dropB").classList.add("loaded"); }
     S.page=1; S.offX=0; S.offY=0; S.pageSummary=null;   // 走査結果を無効化
@@ -1411,6 +1413,11 @@ async function buildPagePlan(doc, spread){
     let isSpread;
     if(mixed) isSpread = ws[i] > minW*1.5;            // 幅が約2倍のページ＝見開き
     else      isSpread = (ws[i]/hs[i]) > 1.15;        // 全ページ均一なら横長＝見開きとみなす
+    // v1.20：描かれたトンボから仕上がりを確定できたページは、その仕上がり幅で単ページ／見開きを決める。
+    // Illustratorの出力見本では、表紙・奥付だけ単ページのトンボを見開きと同じ大きさのアートボードに
+    // 置くことがあり、用紙の形だけで判定すると表紙が背の位置で真っ二つに割られていた。
+    const tk=tomboKOf(doc, i+1);
+    if(tk===1) isSpread=false; else if(tk===2) isSpread=true;
     if(!isSpread){ plan.push({src:i+1,crop:null}); }
     else {
       const first = S.bindRTL ? 'R' : 'L';            // 右綴じ=右が先 / 左綴じ=左が先
@@ -1522,12 +1529,15 @@ function inferBoxesFrom(rawBoxes, plan, fin){
   return n ? {boxes:out, n} : null;
 }
 function applyInferredBoxes(){
-  S.boxesA = (S.rawBoxesA||[]).slice();
-  S.boxesB = (S.rawBoxesB||[]).slice();
+  // v1.20：トンボで補正済みならそれを「生のBox」として扱う（PDFそのものは書き換えない）
+  const baseA = S.tomboBoxesA || S.rawBoxesA || [];
+  const baseB = S.tomboBoxesB || S.rawBoxesB || [];
+  S.boxesA = baseA.slice();
+  S.boxesB = baseB.slice();
   if(!S.boxesA.length || !S.boxesB.length) return;
   // 推定の元になる仕上がりサイズは、必ず「推定前の生のBox」から両側とも先に求める
-  const finA=logicalFinishSize(S.rawBoxesA, S.planA);
-  const finB=logicalFinishSize(S.rawBoxesB, S.planB);
+  const finA=logicalFinishSize(baseA, S.planA);
+  const finB=logicalFinishSize(baseB, S.planB);
   const msg=[];
   if(finB){ const r=inferBoxesFrom(S.boxesA, S.planA, finB); if(r){ S.boxesA=r.boxes; msg.push(`A・顧客入稿 ${r.n}p`); } }
   if(finA){ const r=inferBoxesFrom(S.boxesB, S.planB, finA); if(r){ S.boxesB=r.boxes; msg.push(`B・最終下版 ${r.n}p`); } }
@@ -1536,9 +1546,220 @@ function applyInferredBoxes(){
     toast(`トンボ情報が無いPDFの仕上がり位置を相手PDFから推定：${msg.join(" / ")}`,"ok");
   }
 }
+/* ---------- v1.20 TrimBoxが実際の仕上がりと違うPDFを、描かれたトンボで補正 ----------
+   背景（実データ shinshu_summer_book_1006_OL.pdf × 01-21.pdf）：
+     顧客入稿がIllustratorの出力見本で、B6見開き（256×182mm）を約426×303mmの大きなアートボードの
+     中央に置き、トンボを描いている。PDFのTrimBoxはアートボード基準（外周から3mm内側＝約420×297mm）で、
+     実際の仕上がりとは無関係。TrimBoxが「入っている」ため相手PDFからの推定（inferBoxesFrom）も働かず、
+     見開きを割った半ページ（A4相当）の中にB6が小さく入った状態で照合し、絵柄の一致度が0.5未満
+     ＝「対応なし」になって、Aのページが1枚も見つからなかった。表紙と奥付は単ページのトンボを
+     同じアートボードに置いてあり、用紙の形だけで見開きと判定して背の位置で割ってもいた。
+   考え方：
+     A/Bの1ページあたりの仕上がりが食い違うときだけ、片方のページを描画して「相手の仕上がり寸法
+     （単ページ／見開き）に合うトンボ」を探す。見つかったら、その中心に相手の寸法で仕上がりを置き直す。
+     元のPDFは一切書き換えず、ツール内部のボックス情報だけを差し替える。
+     寸法が合うトンボが見つからなければ何もしない（＝意図的にサイズが違うデータは従来どおり）。 */
+// v1.20：期待する仕上がり寸法(px)が分かっているときに、描かれたトンボから仕上がり線を探す。
+// 戻り値：{x,y,w,h,score}（px, 左上原点・線の中心）または null。
+function findTrimByTombo(imgData, W, H, dpi, expW, expH){
+  if(!imgData||!W||!H||!dpi||!(expW>0)||!(expH>0)) return null;
+  const d=imgData.data, N=W*H;
+  const lum=new Uint8Array(N);
+  for(let i=0,j=0;i<N;i++,j+=4) lum[i]=(d[j]+d[j+1]+d[j+2])/3;
+  const DARK=200, LIGHT=225;
+  const mm=v=>v/25.4*dpi;
+  const minLen=Math.round(mm(3));                 // トンボの線は3mm以上
+  const g=Math.max(2, Math.round(mm(0.6)));       // 線の両脇を見る距離（細線かどうか）
+  const maxGap=Math.max(2, Math.round(mm(0.4)));  // 交差部などの途切れを許容
+  const near=Math.round(mm(12));                  // 線の端がコーナーからこの範囲にあること
+  const tol=Math.max(2, Math.round(mm(0.8)));     // 期待寸法との許容差
+  const et=Math.max(2, Math.round(mm(0.6)));      // 線の端の位置の許容差
+  // 縦の細線
+  const V=new Map(), Hh=new Map();
+  const add=(m,k,seg)=>{ if(!m.has(k)) m.set(k,[]); m.get(k).push(seg); };
+  for(let x=g;x<W-g;x++){
+    let start=-1, last=-1;
+    for(let y=0;y<=H;y++){
+      let on=false;
+      if(y<H){ const i=y*W+x; on = lum[i]<DARK && lum[i-g]>LIGHT && lum[i+g]>LIGHT; }
+      if(on){ if(start<0) start=y; last=y; }
+      else if(start>=0 && (y-last>maxGap || y===H)){
+        if(last-start+1>=minLen) add(V,x,[start,last+1]);
+        start=-1;
+      }
+    }
+  }
+  for(let y=g;y<H-g;y++){
+    let start=-1, last=-1; const row=y*W;
+    for(let x=0;x<=W;x++){
+      let on=false;
+      if(x<W){ const i=row+x; on = lum[i]<DARK && lum[i-g*W]>LIGHT && lum[i+g*W]>LIGHT; }
+      if(on){ if(start<0) start=x; last=x; }
+      else if(start>=0 && (x-last>maxGap || x===W)){
+        if(last-start+1>=minLen) add(Hh,y,[start,last+1]);
+        start=-1;
+      }
+    }
+  }
+  // 隣り合う列（線の太さ・アンチエイリアス）をまとめる
+  function merge(m){
+    const keys=[...m.keys()].sort((a,b)=>a-b), out=[];
+    for(const k of keys){
+      const last=out[out.length-1];
+      if(last && k-last.k1<=1){ last.k1=k; last.segs.push(...m.get(k)); last.ws.push(k); }
+      else out.push({k0:k,k1:k,ws:[k],segs:m.get(k).slice()});
+    }
+    return out.map(o=>({p:(o.k0+o.k1)/2+0.5, segs:o.segs}));
+  }
+  const vl=merge(V), hl=merge(Hh);
+  if(vl.length<2||hl.length<2) return null;
+  const pairs=(ls,exp)=>{ const r=[];
+    for(let i=0;i<ls.length;i++) for(let j=i+1;j<ls.length;j++){
+      const e=Math.abs(ls[j].p-ls[i].p-exp); if(e<=tol) r.push([ls[i],ls[j],e]);
+    } return r; };
+  const px=pairs(vl,expW), py=pairs(hl,expH);
+  if(!px.length||!py.length) return null;
+  // コーナーの形：仕上がり線（縦）は天の外側から仕上がり天の近くまで伸びて止まる、など
+  const above=(L,yt)=>L.segs.some(([a,b])=>b<=yt+et && b>=yt-near);
+  const below=(L,yb)=>L.segs.some(([a,b])=>a>=yb-et && a<=yb+near);
+  let best=null;
+  for(const [l,r,ex] of px) for(const [t,b,ey] of py){
+    const xl=l.p, xr=r.p, yt=t.p, yb=b.p;
+    const s = above(l,yt)+below(l,yb)+above(r,yt)+below(r,yb)
+            + above(t,xl)+below(t,xr)+above(b,xl)+below(b,xr);
+    const err=ex+ey;
+    if(!best || s>best.score || (s===best.score && err<best.err)) best={x:xl,y:yt,w:xr-xl,h:yb-yt,score:s,err};
+  }
+  return (best && best.score>=6) ? best : null;     // 8条件中6以上で採用
+}
+const tomboDetectCache=new WeakMap();   // doc -> Map(key -> {k,trim}|null)
+function tomboKOf(doc, src){
+  const bx = !doc ? null : doc===S.docA ? S.tomboBoxesA : doc===S.docB ? S.tomboBoxesB : null;
+  const b = bx && bx[src-1];
+  return (b && b.tomboK) ? b.tomboK : 0;
+}
+function finClose(a,b){
+  return !!(a&&b) && Math.abs(a.w-b.w)<=Math.max(1.5,b.w*0.01) && Math.abs(a.h-b.h)<=Math.max(1.5,b.h*0.01);
+}
+// 1物理ページを100dpiで描き、寸法finの単ページ／見開きに合うトンボを探す。{k, trim(pt)} または null。
+async function detectTomboOnPage(doc, src, fin){
+  let m=tomboDetectCache.get(doc); if(!m){ m=new Map(); tomboDetectCache.set(doc,m); }
+  const key=`${src}|${fin.w.toFixed(1)}|${fin.h.toFixed(1)}`;
+  if(m.has(key)) return m.get(key);
+  let res=null;
+  try{
+    const page=await doc.getPage(src);
+    if(!page.rotate){                                   // 回転ページは座標の向きが変わるので対象外
+      const dpi=100, sc=dpi/72;
+      const vp=page.getViewport({scale:sc});
+      const cv=document.createElement("canvas");
+      cv.width=Math.max(1,Math.round(vp.width)); cv.height=Math.max(1,Math.round(vp.height));
+      const ctx=cv.getContext("2d",{willReadFrequently:true});
+      ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,cv.width,cv.height);
+      await page.render({canvasContext:ctx, viewport:vp}).promise;
+      const img=ctx.getImageData(0,0,cv.width,cv.height);
+      try{ page.cleanup(); }catch(e){}
+      let best=null;
+      for(const k of [1,2]){
+        if(fin.w*k*sc > cv.width+2 || fin.h*sc > cv.height+2) continue;
+        const r=findTrimByTombo(img, cv.width, cv.height, dpi, fin.w*k*sc, fin.h*sc);
+        if(r && (!best || r.score>best.r.score || (r.score===best.r.score && r.err<best.r.err))) best={k,r};
+      }
+      if(best){
+        const v=page.view, r=best.r;
+        const cx=v[0]+(r.x+r.w/2)/sc, cy=v[3]-(r.y+r.h/2)/sc;   // 仕上がりの中心（pt, 左下原点）
+        const w=fin.w*best.k, h=fin.h;                           // 寸法は相手PDFの仕上がりにそろえる
+        res={k:best.k, trim:{x:cx-w/2, y:cy-h/2, w, h}};
+      }
+    }
+  }catch(e){ console.warn("トンボ検出に失敗", e); }
+  m.set(key,res); return res;
+}
+// rawの各ページについて、相手の仕上がりfinに合うトンボを探して補正したボックス列を返す。無ければnull。
+async function fixBoxesByTombo(doc, raw, fin, label){
+  const n=raw.length; if(!n||!doc) return null;
+  // ページが多いときは間引いて調べ、同じ用紙・同じTrimBoxのページには多数派の結果を使う
+  let targets=[...Array(n).keys()].map(i=>i+1);
+  if(n>40){
+    const set=new Set([1,2,n-1,n]);
+    for(let j=0;j<12;j++) set.add(1+Math.round(j*(n-1)/11));
+    targets=[...set].filter(p=>p>=1&&p<=n).sort((a,b)=>a-b);
+  }
+  const found=new Map(); let done=0;
+  setBusyProgress(0,targets.length,"トンボから仕上がり位置を確認中");
+  for(const p of targets){
+    if(S.pairAbort) break;
+    const bx=raw[p-1];
+    if(bx && bx.media){
+      const r=await detectTomboOnPage(doc, p, fin);
+      if(r) found.set(p, r);
+    }
+    setBusyProgress(++done,targets.length,"トンボから仕上がり位置を確認中");
+    await new Promise(r=>setTimeout(r,0));
+  }
+  setBusyProgress(-1);
+  if(!found.size || found.size < targets.length/2) return null;    // 半分以上で取れないなら信用しない
+  // 同じ用紙・同じTrimBoxのグループごとに、多数派の結果（用紙からの相対位置）を作る
+  const gk=bx=>{ const t=bx.trim||bx.bleed||bx.media, M=bx.media;
+    return [M.w,M.h,t.x-M.x,t.y-M.y,t.w,t.h].map(v=>v.toFixed(1)).join(","); };
+  const votes=new Map();
+  for(const [p,r] of found){
+    const bx=raw[p-1], g=gk(bx), M=bx.media;
+    const rk=[r.k,(r.trim.x-M.x).toFixed(0),(r.trim.y-M.y).toFixed(0)].join(",");
+    if(!votes.has(g)) votes.set(g,new Map());
+    const vm=votes.get(g); const v=vm.get(rk)||{c:0,r,M}; v.c++; vm.set(rk,v);
+  }
+  const major=new Map();
+  for(const [g,vm] of votes){ let b=null; for(const v of vm.values()) if(!b||v.c>b.c) b=v; major.set(g,b); }
+  const bleedPt=3/25.4*72;
+  let cnt=0;
+  const out=raw.map((bx,i)=>{
+    if(!bx||!bx.media) return bx;
+    let r=found.get(i+1);
+    if(!r){ const mj=major.get(gk(bx)); if(!mj) return bx;
+      const M=bx.media;
+      r={k:mj.r.k, trim:{x:M.x+(mj.r.trim.x-mj.M.x), y:M.y+(mj.r.trim.y-mj.M.y), w:mj.r.trim.w, h:mj.r.trim.h}};
+    }
+    const M=bx.media, t=r.trim;
+    const x0=Math.max(M.x,t.x-bleedPt), y0=Math.max(M.y,t.y-bleedPt);
+    const x1=Math.min(M.x+M.w,t.x+t.w+bleedPt), y1=Math.min(M.y+M.h,t.y+t.h+bleedPt);
+    cnt++;
+    return Object.assign({}, bx, {trim:{...t}, bleed:{x:x0,y:y0,w:x1-x0,h:y1-y0}, tomboK:r.k, trimFromTombo:true});
+  });
+  return cnt ? {boxes:out, n:cnt} : null;
+}
+// A/Bの1ページあたりの仕上がりが食い違うときだけ、トンボで補正する。補正したらtrue。
+async function correctTrimsByTombo(){
+  if(!S.docA||!S.docB) return false;
+  if(S.tomboChecked) return false;                      // この組み合わせでは確認済み
+  S.tomboChecked=true;
+  const rawA=S.rawBoxesA||[], rawB=S.rawBoxesB||[];
+  if(!rawA.length||!rawB.length) return false;
+  const finA=logicalFinishSize(rawA, S.planA), finB=logicalFinishSize(rawB, S.planB);
+  if(!finA||!finB||finClose(finA,finB)) return false;    // 片方にBox情報が無い／もともと一致
+  const sides=[["A",S.docA,rawA,finB,"A・顧客入稿"],["B",S.docB,rawB,finA,"B・最終下版"]];
+  for(const [side,doc,raw,fin,label] of sides){
+    if(S.pairAbort) break;
+    const r=await fixBoxesByTombo(doc, raw, fin, label);
+    if(r){
+      if(side==="A") S.tomboBoxesA=r.boxes; else S.tomboBoxesB=r.boxes;
+      clearSigCache();
+      if(!S.tomboToastShown){
+        S.tomboToastShown=true;
+        toast(`TrimBoxが実際のトンボと違うため、${label} ${r.n}pの仕上がり位置を描かれたトンボから補正（元のPDFは変更しません）`,"ok");
+      }
+      return true;
+    }
+  }
+  return false;
+}
 async function rebuildPlans(){
   S.planA = await buildPagePlan(S.docA, S.spreadA);
   S.planB = await buildPagePlan(S.docB, S.spreadB);
+  if(await correctTrimsByTombo()){              // v1.20 TrimBoxが実際のトンボと違えば補正し、プランを作り直す
+    S.planA = await buildPagePlan(S.docA, S.spreadA);
+    S.planB = await buildPagePlan(S.docB, S.spreadB);
+  }
   applyInferredBoxes();          // プラン（見開き分割の有無）が決まってから仕上がり矩形を推定
   await ensurePairing();
 }
@@ -3941,7 +4162,7 @@ function resetAll(){
   S.content=null; S.contentW=S.contentH=0; S.zoom=1; S.panX=S.panY=0;
   S.pageSummary=null; S.gAStr=null; S.gBStr=null; S.gAgram=null; S.gBgram=null; setPanelView("current");
   S.spreadA=false; S.spreadB=false; S.bindRTL=true; S.bindManual=false; S.planA=[]; S.planB=[];
-  S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.profA=[]; S.profB=[]; S.inferToastShown=false; S.originMode="center";
+  S.boxesA=[]; S.boxesB=[]; S.rawBoxesA=[]; S.rawBoxesB=[]; S.tomboBoxesA=null; S.tomboBoxesB=null; S.tomboChecked=false; S.tomboToastShown=false; S.profA=[]; S.profB=[]; S.inferToastShown=false; S.originMode="center";
   S.aTrimPx=null; S.aBleedPx=null; S.alignedByBox=false;
   S.matchMode="index"; S.foliosA=[]; S.foliosB=[]; S.mapBtoA=null; S.manualA={}; S.aLogical=1; S.bLogical=1;
   if($("#matchMode")) $("#matchMode").value="index";
