@@ -2325,6 +2325,11 @@ const $ = (id) => document.getElementById(id);
 const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
 // 和文フォント（CID）の表示に CMap が必要
+/* 表示用と解析用で pdf.js の文書を分ける（NOTES 11章「pdf.js 3.11 で写真が反転」）。
+   pdf.js 3.11 は /Decode で反転指定された無圧縮の画像を「元のバイト列の上で」反転するので、
+   同じ文書でページを2回読み直す（page.cleanup() の後・annotationMode を変えたとき）たびに写真がネガ⇔ポジに入れ替わる。
+   解析は毎回その場で開いた文書で各ページ1回だけ描き、終わったら閉じる。表示用の文書は cleanup しない */
+const withWorkDoc = async (bytes, fn) => { const d = await openPdf(bytes); try { return await fn(d); } finally { d.destroy(); } };
 const openPdf = (bytes) => pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, cMapUrl: PDFJS_BASE + 'cmaps/', cMapPacked: true, standardFontDataUrl: PDFJS_BASE + 'standard_fonts/' }).promise;
 const SIDES = ['top', 'bottom', 'left', 'right'];
 const ROLE_NAME = { ten: '天', chi: '地', koguchi: '小口', nodo: 'ノド' };
@@ -2459,7 +2464,8 @@ async function load(file) {
       bleed: p.boxes.trim ? E.effectiveBleed(p.boxes, o.defaultBleedPt) : null, fix: {}, before: null, after: null, state: 'wait',
     }));
     S.revertable = !!info.base;
-    S.jsDoc = await openPdf(await viewBytes(S.bytes));
+    S.viewBytes = await viewBytes(S.bytes);
+    S.jsDoc = await openPdf(S.viewBytes);
   } catch (err) {
     console.error(err);
     alert(/暗号化/.test(err.message || '') ? 'このPDFにはパスワード（権限）が設定されています。権限ロック解除ツールで解除してから入れてください。' : 'PDFを開けませんでした（' + (err.message || err) + '）');
@@ -2483,6 +2489,7 @@ async function viewBytes(bytes) {
 function resetAll(keepUI) {
   resetOutput();
   if (S.jsDoc) { S.jsDoc.destroy(); S.jsDoc = null; }
+  S.viewBytes = null;
   Object.assign(S, { file: null, bytes: null, pages: [], cur: 0, busy: false, revertable: false, viewBox: null });
   if (keepUI) return;
   $('drop').classList.remove('hidden'); $('viewer').classList.add('hidden');
@@ -2578,8 +2585,7 @@ async function findMarks(jsDoc, pg) {
     // TrimBox が用紙全体と同じでトンボも見つからないページは、仕上がりが分からないので「判定不可」にする
     // （以前は断ち代がページの外になり「表示範囲外で測れません」のまま OK 扱いになっていた。2026-10-16 wine.pdf）
     else if (pg.boxes.trim) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
-    pg.marks = m;
-    page.cleanup();
+    pg.marks = m;   // ここで page.cleanup() しない（続く analyzeOne が同じページを読み直すと写真が反転する）
   } catch (err) {
     console.warn('marks', err); pg.marks = { error: String(err.message || err) };
     if (pg.boxes.trim && !pg.boxes.fromMarks) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
@@ -2603,14 +2609,15 @@ async function analyzeAll() {
   const o = opts();
   S.pages.forEach((pg) => { pg.bleed = pg.boxes.trim ? E.effectiveBleed(pg.boxes, o.defaultBleedPt) : null; pg.before = null; pg.fix = {}; pg.state = 'wait'; pg.error = null; });
   refresh();
+  await withWorkDoc(S.viewBytes || S.bytes, async (work) => {
   for (const pg of S.pages) {
     pg.state = 'busy'; renderRow(pg);
     showBusy(`チェック中… ${pg.index + 1} / ${S.pages.length} ページ`, pg.index / S.pages.length);
-    if (pg.needMarks && !pg.marks) await findMarks(S.jsDoc, pg);
+    if (pg.needMarks && !pg.marks) await findMarks(work, pg);
     if (pg.boxes.fromMarks) pg.bleed = pg.marks.fillBleed;
     if (pg.boxes.trim) {
       try {
-        pg.before = await analyzeOne(S.jsDoc, pg, o);
+        pg.before = await analyzeOne(work, pg, o);
         for (const k of SIDES) pg.fix[k] = pg.before.edges[k].status === 'short' ? o.method : '';
       } catch (err) { console.error(err); pg.error = String(err.message || err); }
     }
@@ -2620,6 +2627,7 @@ async function analyzeAll() {
     renderSummary();
     if (pg.index % 6 === 0) await new Promise(requestAnimationFrame);
   }
+  });
   $('pgProgress').textContent = '';
   hideBusy();
   S.busy = false;
@@ -3130,14 +3138,17 @@ async function rebuildOutput(newly, label) {
   const r = await E.fillEdges(S.bytes, jobs, { srcPt: o.srcPt, useOcg: o.useOcg });
   if (S.outJsDoc) S.outJsDoc.destroy();
   S.outBytes = r.data; S.warnings = r.warnings; S.baseLen = r.base.length;
-  S.outJsDoc = await openPdf(await viewBytes(S.outBytes));
+  const outView = await viewBytes(S.outBytes);
+  S.outJsDoc = await openPdf(outView);
   let i = 0;
+  await withWorkDoc(outView, async (work) => {   // 確かめも表示用とは別の文書で（表示用を cleanup すると写真が反転する）
   for (const pg of newly) {
     showBusy(`補正後を再チェック中… ${++i} / ${newly.length} ページ`, (i - 1) / newly.length);
-    pg.after = await analyzeOne(S.outJsDoc, pg, o, false);   // 補正後の確かめは判定だけ（測り直しは要らない）
+    pg.after = await analyzeOne(work, pg, o, false);   // 補正後の確かめは判定だけ（測り直しは要らない）
 
     renderRow(pg);
   }
+  });
   $('btnSave').disabled = false;
 }
 async function guarded(fn, noHistory, label) {

@@ -3482,7 +3482,7 @@ async function loadFiles(list){
       const info=await NodoShiro.info(buf);
       const doc=await pdfjsLib.getDocument({data:buf.slice()}).promise;
       if(FILES.some(x=>x.name===file.name&&x.info.pageCount===info.pageCount))continue;
-      await findMarks(info,doc,file.name,(k,n)=>progress(`${file.name}：トンボを探しています… ${k} / ${n} ページ`,(i-1+k/n)/list.length));
+      await findMarks(info,buf,file.name,(k,n)=>progress(`${file.name}：トンボを探しています… ${k} / ${n} ページ`,(i-1+k/n)/list.length));
       FILES.push({id:'f'+Date.now()+'_'+i,name:file.name,bytes:buf,info,doc,kind:guessKind(file.name,info)});
     }catch(e){toast(file.name+'：'+e.message,'err');}
   }
@@ -3498,12 +3498,17 @@ async function loadFiles(list){
    断ち代チェックと同じく、TrimBox が無い・用紙全体と同じページだけ四隅の二重トンボを探す（shared/edge-core.js。NOTES 3章・6b章）。
    見つかったら info のページの仕上がりを差し替え、保存のときも同じ値を NodoShiro.add に trims で渡す */
 const MARK_DPI=200,MARK_FINE_DPI=1200;
-async function findMarks(info,doc,name,onStep){
+async function findMarks(info,bytes,name,onStep){
   const E=window.KenpanEdge; if(!E)return;
   const box=a=>({l:a[0],b:a[1],r:a[2],t:a[3]});
   const todo=info.pages.map((g,i)=>i).filter(i=>{const g=info.pages[i];
     return g.trimSrc!=='TrimBox'||E.needsMarks({trim:box(g.trim),media:box(g.media)});});
+  if(!todo.length)return;
+  /* 表示用とは別の文書で探す（pdf.js 3.11 は /Decode で反転指定された画像を元のバイト列の上で反転するので、
+     表示用の文書で cleanup したり annotationMode を変えて描き直すと写真がネガになる。NOTES 11章） */
+  const doc=await pdfjsLib.getDocument({data:bytes.slice()}).promise;
   const miss=[];
+  try{
   for(let k=0;k<todo.length;k++){
     const i=todo[k],g=info.pages[i];
     if(onStep){onStep(k+1,todo.length);await new Promise(r=>setTimeout(r,0));}
@@ -3533,7 +3538,6 @@ async function findMarks(info,doc,name,onStep){
           m=E.refineMarks(m,imgs)||m;
         }catch(e){console.warn('marks refine',e);}
       }
-      pg.cleanup&&pg.cleanup();
     }catch(e){m={error:String(e.message||e)};}
     if(m&&m.trim&&!m.error){
       const T=[m.trim.l,m.trim.b,m.trim.r,m.trim.t];
@@ -3541,6 +3545,7 @@ async function findMarks(info,doc,name,onStep){
         dobu:{L:(T[0]-g.media[0])/MM,R:(g.media[2]-T[2])/MM,B:(T[1]-g.media[1])/MM,T:(g.media[3]-T[3])/MM}});
     }else{g.marksError=m&&m.error||'不明';miss.push(i+1);}
   }
+  }finally{doc.destroy();}
   if(miss.length)toast(`${name}：p.${miss.slice(0,5).join('・')}${miss.length>5?' ほか':''} は TrimBox が用紙全体と同じで、トンボも見つかりません。白は用紙の端に付きます`,'err');
 }
 /* 「このページ」に出す仕上がりの出どころ。トンボから求めたとき・求められなかったときだけ出す */
