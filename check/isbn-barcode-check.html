@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-09-26</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -1328,12 +1328,14 @@ function stripDummyPrint(txt){
 }
 
 /* --- 目視されない(＝印刷されない)テキストの検出 ---
-   PDFは「描いた順に上へ重ねる」構造なので、あるテキストより後に、
-   そのテキストを覆う不透明なベタ塗りが描かれていれば、その文字は
-   最終的に見えない＝印刷されない。テンプレートのダミー印字の上に
-   白いフタを置き、その上に正しい印字をアウトラインで乗せる作りの
-   データで、getTextContent()が下敷きのダミーを拾ってしまうのを防ぐ。
-   pdf.jsの操作リスト(描画順)からCTM・クリップ・不透明度を追跡して判定する。 */
+   「見えている（印刷される）文字だけで判断する」ための解析。
+   pdf.jsの操作リスト(描画順)からCTM・クリップ・不透明度・描画モードを追跡し、
+   次のいずれかに当たる文字を「印刷されない」とみなす。
+   ①後から描かれた不透明なベタ塗り(白フタなど)で覆われている
+   ②クリップ(画像・PDF配置枠のトリミング、フォームのBBox、ページ外)の外にある
+   ③描画モードが不可視(Tr 3/7)、または塗りの不透明度が0
+   旧版の奥付をPDF配置して枠でトリミングしたデータなどで、
+   getTextContent()が見えない旧ISBNを拾ってしまうのを防ぐ。 */
 const _hiddenRunsCache=new WeakMap();
 function _pathToRect(ops,coords,mm){
   const O=pdfjsLib.OPS;
@@ -1351,14 +1353,16 @@ function _pathToRect(ops,coords,mm){
 }
 function _devRect(r,ctm){
   const U=pdfjsLib.Util;
-  const a=U.applyTransform([r[0],r[1]],ctm), b=U.applyTransform([r[2],r[3]],ctm);
-  return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
+  const pts=[[r[0],r[1]],[r[2],r[1]],[r[0],r[3]],[r[2],r[3]]].map(p=>U.applyTransform(p,ctm));
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
 }
 function _isectRect(a,b){
   if(!a) return b; if(!b) return a;
   const r=[Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])];
   return (r[0]<r[2]&&r[1]<r[3])?r:[0,0,0,0];
 }
+/* 戻り値: 文字の塊(showText単位)ごとの {x,y(始点・ベースライン, scale=1のデバイス座標), x0,x1, hidden} */
 async function hiddenTextRuns(page){
   if(_hiddenRunsCache.has(page)) return _hiddenRunsCache.get(page);
   let out=[];
@@ -1368,31 +1372,54 @@ async function hiddenTextRuns(page){
     const ol=await page.getOperatorList();
     const F=ol.fnArray, A=ol.argsArray;
     const inv={}; for(const k in O) inv[O[k]]=k;
-    let ctm=vp.transform.slice(), alpha=1, clip=null, clipExact=true;
+    let ctm=vp.transform.slice(), alpha=1, clip=null, clipExact=true, tr=0;
+    // clipBB: クリップ領域の外接矩形(複雑な形でも外接矩形の外は確実に描かれない)。初期値はページ
+    let clipBB=[0,0,vp.width,vp.height];
     const st=[];
-    let tm=null,tlm=null,leading=0,fsize=0,cs=0,ws=0,pend=null,clipPending;
+    const push=()=>st.push({ctm:ctm.slice(),alpha,clip:clip&&clip.slice(),clipExact,clipBB:clipBB.slice(),tr});
+    const pop=()=>{ const s=st.pop(); if(s){ctm=s.ctm;alpha=s.alpha;clip=s.clip;clipExact=s.clipExact;clipBB=s.clipBB;tr=s.tr;} };
+    let tm=null,tlm=null,leading=0,fsize=0,cs=0,ws=0,pend=null,pendBB=null,clipPending;
     const fills=[], texts=[];
     for(let i=0;i<F.length;i++){
       const n=inv[F[i]], a=A[i];
       switch(n){
-        case 'save': st.push({ctm:ctm.slice(),alpha,clip:clip&&clip.slice(),clipExact}); break;
-        case 'restore': { const s=st.pop(); if(s){ctm=s.ctm;alpha=s.alpha;clip=s.clip;clipExact=s.clipExact;} break; }
+        case 'save': push(); break;
+        case 'restore': pop(); break;
         case 'transform': ctm=U.transform(ctm,a); break;
         case 'setGState': for(const kv of (a[0]||[])){ if(kv[0]==='ca') alpha=kv[1]; if(kv[0]==='SMask'&&kv[1]) clipExact=false; } break;
-        case 'constructPath': pend=_pathToRect(a[0],a[1],a[2]); break;
-        case 'clip': case 'eoClip': clipPending = pend ? _devRect(pend,ctm) : 'complex'; break;
+        case 'setTextRenderingMode': tr=a[0]; break;
+        case 'paintFormXObjectBegin': {
+          push();
+          if(Array.isArray(a[0])&&a[0].length===6) ctm=U.transform(ctm,a[0]);
+          const bb=a[1];
+          if(Array.isArray(bb)&&bb.length===4){
+            const r=_devRect([Math.min(bb[0],bb[2]),Math.min(bb[1],bb[3]),Math.max(bb[0],bb[2]),Math.max(bb[1],bb[3])],ctm);
+            clip=_isectRect(clip,r); clipBB=_isectRect(clipBB,r);
+          }
+          break;
+        }
+        case 'paintFormXObjectEnd': pop(); break;
+        case 'constructPath': {
+          pend=_pathToRect(a[0],a[1],a[2]);
+          const mm=a[2];
+          pendBB=(mm&&isFinite(mm[0])&&isFinite(mm[1]))?_devRect([mm[0],mm[2],mm[1],mm[3]],ctm):null;
+          break;
+        }
+        case 'clip': case 'eoClip':
+          clipPending={exact:pend?_devRect(pend,ctm):null, bb:pendBB}; break;
         case 'endPath':
           if(clipPending!==undefined){
-            if(clipPending==='complex') clipExact=false; else clip=_isectRect(clip,clipPending);
+            if(clipPending.exact) clip=_isectRect(clip,clipPending.exact); else clipExact=false;
+            if(clipPending.bb) clipBB=_isectRect(clipBB,clipPending.bb);
             clipPending=undefined;
           }
-          pend=null; break;
+          pend=null; pendBB=null; break;
         case 'fill': case 'eoFill': case 'fillStroke': case 'eoFillStroke':
           if(pend && alpha>=0.999 && clipExact){
             let r=_isectRect(_devRect(pend,ctm), clip);
             if(r[2]>r[0] && r[3]>r[1]) fills.push({i,rect:r});
           }
-          pend=null; break;
+          pend=null; pendBB=null; break;
         case 'beginText': tm=[1,0,0,1,0,0]; tlm=tm.slice(); break;
         case 'setTextMatrix': tm=a.slice(); tlm=a.slice(); break;
         case 'setLeading': leading=a[0]; break;
@@ -1414,7 +1441,15 @@ async function hiddenTextRuns(page){
           if(s.trim()){
             const M=U.transform(ctm,tm);
             const p0=U.applyTransform([0,0],M), p1=U.applyTransform([adv,0],M);
-            texts.push({i,x0:p0[0],y0:p0[1],x1:p1[0],y1:p1[1]});
+            const box=_devRect([0,0,Math.max(adv,0.01),Math.max(fsize*0.7,0.01)],M);
+            // ②クリップ外: 文字の箱のうち、クリップ内に入っている面積が半分未満なら印刷されない
+            const ib=_isectRect(box,clipBB);
+            const area=Math.max((box[2]-box[0])*(box[3]-box[1]),1e-6);
+            const inArea=Math.max(0,ib[2]-ib[0])*Math.max(0,ib[3]-ib[1]);
+            const clipped=inArea/area<0.5;
+            // ③不可視の描画モード(3:描かない／7:クリップのみ)・不透明度0
+            const invisible=(tr===3||tr===7)||alpha<0.01;
+            texts.push({i,str:s,x:p0[0],y:p0[1],x0:Math.min(p0[0],p1[0]),x1:Math.max(p0[0],p1[0]),hidden:clipped||invisible});
           }
           tm=U.transform(tm,[1,0,0,1,adv,0]);
           break;
@@ -1422,24 +1457,37 @@ async function hiddenTextRuns(page){
       }
     }
     for(const t of texts){
-      const a=Math.min(t.x0,t.x1), b=Math.max(t.x0,t.x1), w=Math.max(b-a,0.01);
+      if(t.hidden) continue;
+      const w=Math.max(t.x1-t.x0,0.01);
+      // ①後から描かれた不透明なベタ塗りで覆われている
       const f=fills.find(f=>{
         if(f.i<=t.i) return false;
-        if(t.y0<f.rect[1]-0.5 || t.y0>f.rect[3]+0.5) return false;
-        return (Math.min(b,f.rect[2])-Math.max(a,f.rect[0]))/w >= 0.9;
+        if(t.y<f.rect[1]-0.5 || t.y>f.rect[3]+0.5) return false;
+        return (Math.min(t.x1,f.rect[2])-Math.max(t.x0,f.rect[0]))/w >= 0.9;
       });
-      if(f) out.push({x0:a, x1:b, y:t.y0});
+      if(f) t.hidden=true;
     }
+    out=texts.some(t=>t.hidden)?texts:[];   // 隠れ文字がなければ判定不要
   }catch(e){ out=[]; }   // 解析できないPDFでは従来通り全テキストを使う
   _hiddenRunsCache.set(page,out);
   return out;
 }
+/* getTextContentの1項目(始点x,ベースラインy)が、どの文字の塊に属するかを探し、それが印刷されないものなら true。
+   1つの塊が複数項目に分かれることがあるため「塊の範囲内に始点があるか」で対応付け、
+   候補が複数ならベースラインが最も近い塊を採る（見えている印字と見えない旧印字が重なっていても取り違えない）。 */
 function _isHiddenAt(runs, x, y, scale){
-  const tol=2*scale;
+  const tol=3*scale;
+  let best=null, bs=Infinity;
   for(const r of runs){
-    if(Math.abs(y-r.y*scale)<=tol && x>=r.x0*scale-tol && x<=r.x1*scale+tol) return true;
+    const dy=Math.abs(y-r.y*scale);
+    if(dy>tol) continue;
+    const x0=r.x0*scale, x1=r.x1*scale;
+    const out=x<x0?x0-x:(x>x1?x-x1:0);
+    if(out>tol) continue;
+    const sc=dy*10+out;
+    if(sc<bs){ bs=sc; best=r; }
   }
-  return false;
+  return !!(best&&best.hidden);
 }
 
 async function pageTextItems(page,scale){
@@ -1451,7 +1499,7 @@ async function pageTextItems(page,scale){
     if(!it.str || !it.str.trim()) continue;
     const m=pdfjsLib.Util.transform(vp.transform,it.transform);
     const x=m[4], y=m[5], w=(it.width||0)*scale;
-    if(hidden.length && _isHiddenAt(hidden,x,y,scale)) continue; // 白フタの下＝印刷されない
+    if(hidden.length && _isHiddenAt(hidden,x,y,scale)) continue; // 白フタの下・クリップ外など＝印刷されない
     out.push({str:normalizePuaDigits(it.str), x, y, w}); // x,y はデバイス座標(左上原点), yはベースライン
   }
   return out;
@@ -2300,8 +2348,8 @@ window.selectObPage=selectObPage;
 async function obConfirmPage(){
   const n=obState.curPage;
   showBanner(true,"奥付けページのテキストを抽出中…",30);
+  // 見えている(印刷される)文字だけで判断する。見える文字が無ければ下のOCRで補う(隠れた文字には戻らない)
   let text=await obGetPageTextVisible(n);
-  if(!text) text=await obGetPageText(n);
   let ocrUsed=false;
   obState.ocrWords=null;
   if((text||"").replace(/\s/g,"").length<20){
@@ -2338,10 +2386,12 @@ window.obConfirmPage=obConfirmPage;
 async function obPageTextLines(page, scale){
   const vp=page.getViewport({scale});
   let tc; try{ tc=await page.getTextContent(); }catch(e){ return []; }
+  const hidden=await hiddenTextRuns(page);
   const items=[];
   for(const it of tc.items){
     if(!it.str || !it.str.trim()) continue;
     const m=pdfjsLib.Util.transform(vp.transform,it.transform);
+    if(hidden.length && _isHiddenAt(hidden,m[4],m[5],scale)) continue; // 印刷されない文字は読取位置にしない
     const x=m[4], w=(it.width||0)*scale, h=Math.abs(m[3])||10, y=m[5]-h; // yはベースラインなので上端側へおおまかに補正
     items.push({str:it.str, x, y, w, h:h*1.3});
   }
