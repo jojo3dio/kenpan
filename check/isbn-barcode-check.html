@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22b</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22c</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -766,7 +766,7 @@ def cross_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
                 add(lbl("ISBN 表紙印字↔奥付け",same2),same2,"表紙:%s ／ 奥付:%s%s"%(ti["isbn13"],ci["isbn13"],d2),
                     rid="ISBN-C2", exp=ti["isbn13"], act=ci["isbn13"], box="isbn")
         else:
-            add("奥付け ISBN の読取",False,"奥付けページからISBNを読み取れませんでした",level="WARN",
+            add("奥付け ISBN の記載が見当たりません",False,"奥付けページの見えている文字にISBNが見つかりませんでした。奥付けページの選択違い、またはISBNが画像化・アウトライン化されている可能性があります。プレビューで記載をご確認ください",level="WARN",
                 rid="ISBN-C3", exp="奥付けISBNの読取成功", act="読取失敗", box="isbn")
         if cc is not None:
             if dnc:
@@ -778,7 +778,7 @@ def cross_check_colophon(isbn_bc,dnc_bc,cover_text,colophon_text):
                 add(lbl("Cコード 表紙印字↔奥付け",cs2),cs2,"表紙:C%s ／ 奥付:C%s%s"%(tc,cc,d4),
                     rid="ISBN-C5", exp=tc, act=cc, box="dnc")
         else:
-            add("奥付け Cコード の読取",False,"奥付けページからCコードを読み取れませんでした",level="WARN",
+            add("奥付けにCコードの記載なし",False,"奥付けページにCコードの記載が見当たりません。Cコードを載せない奥付けも多いため、記載がない本であれば問題ありません（ISBNの照合結果が一致していればOKです）",level="WARN",
                 rid="ISBN-C6", exp="奥付けCコードの読取成功", act="読取失敗", box="dnc")
     rep["colophon"]={"isbn":ci,"ccode":cc}
     ng=any((not it["ok"]) and it["level"]=="NG" for it in rep["items"])
@@ -2474,7 +2474,11 @@ function showColophonPreview(idx){
   const ng=cItems.some(it=>!it.ok && it.level==="NG");
   const warn=cItems.some(it=>!it.ok && it.level==="WARN");
   const status=ng?"NG":(warn?"WARN":"OK");
-  const label={NG:"✕ 照合NG（不一致あり）",WARN:"△ 要確認（読取不可あり）",OK:"✓ 照合OK（一致）"}[status];
+  const label={NG:"✕ 照合NG（不一致あり）",WARN:"△ 要確認",OK:"✓ 照合OK（一致）"}[status];
+  // 要確認・NGのとき、何を確認すればよいかを帯の中に書く(下までスクロールしなくても分かるように)
+  const why=cItems.filter(it=>!it.ok && (it.level==="NG"||it.level==="WARN"));
+  const whyHtml=(status!=="OK"&&why.length)?`<div style="margin-top:8px;font-size:13px;font-weight:500;color:var(--ink);text-align:left;line-height:1.6">
+    ${why.map(it=>`<div>${it.level==="NG"?"✕":"△"} <b>${esc(it.label)}</b>：${esc(it.detail)}</div>`).join("")}</div>`:"";
   const color={NG:"var(--err)",WARN:"var(--warn)",OK:"var(--ok)"}[status];
   const bg={NG:"var(--err-bg)",WARN:"var(--warn-bg)",OK:"var(--ok-bg)"}[status];
   const boxHtml=pv.box?`<div style="position:absolute;left:${(pv.box.x*100).toFixed(3)}%;top:${(pv.box.y*100).toFixed(3)}%;
@@ -2487,7 +2491,7 @@ function showColophonPreview(idx){
   document.getElementById('obPreviewBody').innerHTML=`
     <div style="position:sticky;top:-1px;z-index:5;font-size:20px;font-weight:800;color:${color};background:${bg};
       border:2px solid ${color};border-radius:10px;padding:14px 18px;text-align:center;margin-bottom:16px;
-      box-shadow:0 4px 10px rgba(0,0,0,.08)">${label}</div>
+      box-shadow:0 4px 10px rgba(0,0,0,.08)">${label}${whyHtml}</div>
     <div style="position:relative;display:inline-block;border:1px solid var(--line);line-height:0;max-width:100%">
       <img src="${pv.img}" style="max-width:100%;display:block">
       ${boxHtml}
