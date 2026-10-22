@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22b</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -600,7 +600,11 @@ def extract_isbn_text(text):
     else: res["error"]="桁数異常(%d桁)"%len(digits)
     return res
 def extract_ccode_text(text):
-    t=norm(text)
+    # 著作権表示(Ⓒ1970 など)はNFKC正規化で「C1970」に化けてCコードと誤認されるため、
+    # 正規化の前に丸囲みC・©を「©」に、正規化後に (C)／（Ｃ）も「©」にそろえて対象外にする。
+    t=re.sub(r"[\u24B8\u24D2\U0001F12B\U0001F132\U0001F152\u00A9]","©",text or "")
+    t=norm(t)
+    t=re.sub(r"\(\s*[Cc]\s*\)","©",t)
     # "C"の文字のみを対象とする(©記号や括弧は対象外)。©2026のような発行年の誤検出を防ぐため、
     # 直前が英数字でない・直後に5桁目の数字が続かないことも確認する。
     m=re.search(r"(?<![A-Za-z0-9])[Cc]\s?([0-9]{4})(?!\d)", t)
