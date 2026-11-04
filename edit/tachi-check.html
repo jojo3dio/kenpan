@@ -910,6 +910,24 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
 
   /* ---------- 実測 ---------- */
 
+  const INTRUDE_PT = 1.5 * 72 / 25.4;   // 食い込みとして補う上限（1.5mm）。これより深い白は意図した余白とみなす
+
+  /* 仕上がり線の内側が白い列で、内側 maxPx 以内に絵柄の端があるか。
+     あれば、その端の位置（仕上がり線から外へ px・負の値）を返す。無ければ NaN。
+     細い線（罫など）を拾わないよう、端から内側へ thickPx（0.3mm 相当）続けて絵柄であること */
+  function intrusionAt(inked, horiz, edgeIdx, edgePx, out, a, maxPx, thickPx) {
+    const at = (d) => { let c = 0; for (let j = -1; j <= 1; j++) if (horiz ? inked(a + j, d) : inked(d, a + j)) c++; return c >= 2; };
+    const first = out < 0 ? edgeIdx : edgeIdx - 1;            // 仕上がり線のすぐ内側の画素
+    for (let k = 0; k <= maxPx; k++) {
+      const d = first - out * k;
+      if (!at(d)) continue;
+      for (let j = 1; j <= thickPx; j++) if (!at(d - out * j)) return NaN;   // すぐ途切れる＝細い線。食い込みではない
+      // 端の画素の外側の境目（仕上がり線から外へ）。0.5px 内側へ寄せる（隙間より重なりの側に倒す）
+      return (out < 0 ? edgePx - d : d + 1 - edgePx) - 0.5;
+    }
+    return NaN;
+  }
+
   /* 長さが min 未満の区間を、隣の区間に吸収する（いちばん短いものから順に）。
      near=true のときは値が近い方の隣へ（段差の区切り用）、それ以外は両隣と一緒にまとめる */
   function absorb(runs, min, near) {
@@ -962,6 +980,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     const lightAsPhoto = o.lightAsPhoto ?? true;
     const lightMaxPt = o.lightMaxPt ?? mm2pt(15);   // この長さ以下の区間だけ
     const lightInk = o.lightInk ?? 26;              // 内側の平均の濃さがこれ未満（≒10%）なら明るい
+    // 傾いて置かれた画像などで、絵柄の端が斜めに仕上がり線の内側へ食い込んでいる列。
+    // 0.4mm 内側が白なので「仕上がり際が白（補う必要なし）」と見なされ、区間が隅の手前で止まっていた（2026-11-04 p.76）。
+    // 食い込みが intrudePt 以内で、隣の列が「足りない」ときだけ、足りない区間の続きとして扱う
+    const intrudePt = o.intrudePt ?? INTRUDE_PT;
 
     const px = (x) => (x - view.l) * s;
     const py = (y) => (view.t - y) * s;
@@ -1010,6 +1032,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       // firstOut 画素の内側の境目が、仕上がり線から外へ何px ずれているか
       const offPx = out > 0 ? edgeIdx - edgePx : edgePx - edgeIdx;
       const covs = new Float32Array(n);      // 端の画素の塗られ具合（0〜1）
+      const intr = new Float32Array(n).fill(NaN);   // 食い込み：元の絵柄の端（仕上がり線から外へ、px、負）。NaN = 食い込みではない
+      const intrPx = Math.round(intrudePt * s);
+      const thickPx = Math.max(2, Math.round(mm2pt(0.3) * s));
+      const inkIn = (a) => intrusionAt(inked, horiz, edgeIdx, edgePx, out, a, intrPx, thickPx);
 
       let inkCols = 0;
       for (let i = 0; i < n; i++) {
@@ -1019,7 +1045,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         let sum = 0;
         for (let k = 0; k < inN; k += 2) { const [x, y] = P(probe - out * k, a); sum += inkOf(x, y); }
         inside[i] = sum / Math.ceil(inN / 2);
-        if (!inkedAround(qx, qy, horiz ? 1 : 0, horiz ? 0 : 1)) { ext[i] = Infinity; sub[i] = NaN; continue; }
+        if (!inkedAround(qx, qy, horiz ? 1 : 0, horiz ? 0 : 1)) { ext[i] = Infinity; sub[i] = NaN; intr[i] = inkIn(a); continue; }
         inkCols++;
         let last = -1, gap = 0;
         for (let k = 0; k < needPx + 2; k++) {
@@ -1045,6 +1071,16 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         for (let i = 0; i < n; i++) if (!isNaN(sub[i])) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
         const aa = cnt > 0 && mid / cnt >= 0.2;
         for (let i = 0; i < n; i++) if (!isNaN(sub[i])) sub[i] = Math.max(0, sub[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i]));
+      }
+
+      // 食い込みの列を、隣の「足りない」列から両方向へつなぐ（断ち代 0 として扱い、端は仕上がり線の内側）
+      let intruded = 0;
+      {
+        const needLim0 = needPx - tolPt * s;
+        const shortCol = (i) => ext[i] !== Infinity && ext[i] < needLim0;
+        const grow = (i) => { ext[i] = 0; sub[i] = intr[i]; inkCols++; intruded++; };
+        for (let i = 1; i < n; i++) if (ext[i] === Infinity && !isNaN(intr[i]) && shortCol(i - 1)) grow(i);
+        for (let i = n - 2; i >= 0; i--) if (ext[i] === Infinity && !isNaN(intr[i]) && shortCol(i + 1)) grow(i);
       }
 
       const inkRatio = n ? inkCols / n : 0;
@@ -1141,7 +1177,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const worst = segments.length ? Math.min(...segments.map((g) => g.extPt)) : null;
       res[side] = {
         status: segments.length ? 'short' : 'ok',
-        needPt, inkRatio, lightDropped,
+        needPt, inkRatio, lightDropped, intrudedPt: intruded / s,
         shortRatio: shortLen / ((horiz ? trim.r - trim.l : trim.t - trim.b) || 1),   // 足りない区間の長さの割合
         partial: segments.length > 0 && shortLen < 0.97 * (horiz ? trim.r - trim.l : trim.t - trim.b),
         minPt: percentile(finite, 0.05),
@@ -1175,7 +1211,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       let m = Infinity;
       for (let i = Math.max(0, idx(a - stepPt / 2 - pxPt) - 1); i < n && A[i] <= a + stepPt / 2 + pxPt; i++) m = Math.min(m, F[i]);
       if (m === Infinity) m = F[Math.min(n - 1, idx(a))];
-      return Math.max(0, Math.min(m, maxD));
+      return Math.max(-INTRUDE_PT, Math.min(m, maxD));
     };
     const margin = pxPt + mm2pt(0.05);
     const fit = (list) => {
@@ -1246,7 +1282,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     for (let a = a0; a <= a1; a++) {
       let c = 0; for (let k = -1; k <= 1; k++) { const [x, y] = P(probe, a + k); if (inkOf(x, y) > whiteTol) c++; }
       A.push(horiz ? (a + 0.5) / s + view.l : view.t - (a + 0.5) / s);
-      if (c < 2) { D.push(NaN); covs.push(0); continue; }
+      if (c < 2) {
+        const v = intrusionAt((x, y) => inkOf(x, y) > whiteTol, horiz, edgeIdx, edgePx, out, a, Math.round((o.intrudePt ?? INTRUDE_PT) * s), Math.max(2, Math.round(mm2pt(0.3) * s)));
+        D.push(isNaN(v) ? NaN : v / s); covs.push(-1); continue;
+      }
       let last = -1, gap = 0;
       for (let k = 0; k < needPx + 2; k++) {
         const d = firstOut + out * k; let hit = false;
@@ -1259,16 +1298,16 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       covs.push(cov); D.push(last + offPx);
     }
     let mid = 0, cnt = 0;
-    for (let i = 0; i < D.length; i++) if (!isNaN(D[i])) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
+    for (let i = 0; i < D.length; i++) if (!isNaN(D[i]) && covs[i] >= 0) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
     const aa = cnt > 0 && mid / cnt >= 0.2;
-    for (let i = 0; i < D.length; i++) if (!isNaN(D[i])) D[i] = Math.max(0, D[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i])) / s;
+    for (let i = 0; i < D.length; i++) if (!isNaN(D[i]) && covs[i] >= 0) D[i] = Math.max(0, D[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i])) / s;
     if (!horiz) { A.reverse(); D.reverse(); }
     return { A, D };
   }
 
   /** 補正のための辺の帯（pt）。refineEdges に渡す画像はこの範囲を描けばよい（仕上がり線の 1mm 内側〜断ち代の外端） */
   function stripRect(side, trim, bleed) {
-    const i = mm2pt(1);
+    const i = INTRUDE_PT + mm2pt(0.5);
     if (side === 'top') return { l: trim.l, r: trim.r, b: trim.t - i, t: bleed.t };
     if (side === 'bottom') return { l: trim.l, r: trim.r, b: bleed.b, t: trim.b + i };
     if (side === 'left') return { l: bleed.l, r: trim.l + i, b: trim.b, t: trim.t };
@@ -1334,7 +1373,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         // 元の絵柄の端（ここから外だけに描く）。無ければ軸から
         // exact でないページ（透明効果なし）は軸から描く＝元の絵柄に少し重ねる
         let edge = exact && g.edge && g.edge.length >= 2 ? g.edge.map(([aa, d]) => [Math.min(Math.max(aa, a0), a1), Math.min(Math.max(d, axisD(aa)), full[k])])
-          : [[a0, Math.max(0, axisD(a0))], [a1, Math.max(0, axisD(a1))]];
+          : [[a0, Math.max(-INTRUDE_PT, axisD(a0))], [a1, Math.max(-INTRUDE_PT, axisD(a1))]];   // 食い込みでは軸が仕上がり線の内側に来る
         const width = full[k] - Math.min(axisD(a0), axisD(a1));
         return { k, a0, a1, axisD, line: (aa) => ax.o + ax.m * (aa - ax.ref), edge, kf: how[k] === 'stretch' ? Math.max(1, width / srcPt) : 1,
           atStart: g.a0 <= span[k][0] + 0.01, atEnd: g.a1 >= span[k][1] - 0.01, ax };
@@ -1397,9 +1436,12 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const hM = gh && mat(false, outC(kh, gh.axisD(cy)), 0, gh.kf);
       if (gv && gh) {
         const eV = outC(kv, edgeEnd(gv, vEnd)), eH = outC(kh, edgeEnd(gh, hEnd));
-        draw(rectPts(xo, yt, eH, eV), hM);                                    // 左右側の続き
-        draw(rectPts(eH, eV, xt, yo), vM);                                    // 天地側の続き
-        draw(rectPts(xo, eV, eH, yo), [hM[0], 0, 0, vM[3], hM[4], vM[5]]);    // 外側の角（縦横とも折り返す＝点対称）
+        // 透明効果の無いページは、角の矩形を内側へ少し重ねる。端が仕上がり線の内側に食い込んでいると、
+        // 区間と角の境目が仕上がりの中に来て、表示のアンチエイリアスで髪の毛ほどの白い筋が見えるため
+        const ov = exact ? 0 : 0.3, ix = kh === 'left' ? ov : -ov, iy = kv === 'top' ? -ov : ov;
+        draw(rectPts(xo, yt + iy, eH + ix, eV), hM);                          // 左右側の続き
+        draw(rectPts(eH, eV + iy, xt + ix, yo), vM);                          // 天地側の続き
+        draw(rectPts(xo, eV + iy, eH + ix, yo), [hM[0], 0, 0, vM[3], hM[4], vM[5]]);    // 外側の角（縦横とも折り返す＝点対称）
       } else if (gv) {
         // 片方だけ：その区間を角まで延ばす（斜めの端・軸もそのまま延長して、元の絵柄と重ねず継ぎ目も出さない）
         const d0 = edgeEnd(gv, vEnd), d1 = Math.min(Math.max(d0 + gv.ax.m * (xo - xt), gv.line(xo)), full[kv]);
@@ -2075,7 +2117,7 @@ details.adv .rin{background:var(--panel)}
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M3 3h18v18H3z" stroke-dasharray="2.2 2.2" stroke-width="1.4"/></svg>
       </span>
-      <b>断ち代チェック</b><span>天地小口の不足検出・補正 <small style="opacity:.6;font-size:11px">rev.2026-10-01</small></span>
+      <b>断ち代チェック</b><span>天地小口の不足検出・補正 <small style="opacity:.6;font-size:11px">rev.2026-11-04</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -2649,9 +2691,11 @@ const sideName = (pg, k) => (opts().mode === 'sheet' ? SHEET_NAME[k] : ROLE_NAME
 // 部分的な不足の書き方：「一部」「2か所」など
 function segNote(e, short) {
   const g = e.segments || [];
-  if (g.length > 1) return short ? `（${g.length}か所）` : `${g.length}か所・${mm1(Math.min(...g.map((x) => e.needPt - x.extPt)))}〜${mm1(Math.max(...g.map((x) => e.needPt - x.extPt)))}mm 不足`;
-  if (e.partial) return short ? '（一部）' : `一部 ${Math.round(E.pt2mm(g[0].lenPt))}mm の区間`;
-  return '';
+  // 絵柄の端が斜めに仕上がりの内側へ食い込んでいる（傾いた画像など）。1mm 以上の長さがあるときだけ知らせる
+  const tilt = e.intrudedPt > E.mm2pt(1) ? (short ? '（食い込み）' : '・仕上がり内へ斜めに食い込み') : '';
+  if (g.length > 1) return (short ? `（${g.length}か所）` : `${g.length}か所・${mm1(Math.min(...g.map((x) => e.needPt - x.extPt)))}〜${mm1(Math.max(...g.map((x) => e.needPt - x.extPt)))}mm 不足`) + tilt;
+  if (e.partial) return (short ? '（一部）' : `一部 ${Math.round(E.pt2mm(g[0].lenPt))}mm の区間`) + tilt;
+  return tilt.replace(/^・/, '');
 }
 const mm1 = (pt) => (pt == null || isNaN(pt) ? '—' : E.pt2mm(pt).toFixed(1));
 

@@ -15,7 +15,7 @@
   --ink:#e8eef0; --ink-dim:#9fabb1; --ink-faint:#74818a;
   --main:#5DE0F0; --main-soft:#0d3d47;
   --pink:#FF6E97; --green:#2BD4A4; --orange:#FFA94D; --cyan:#3AD8ED;
-  --need:#FF6E97; --need-soft:#3a1f2c;
+  --need:#FF6E97; --need-soft:#3a1f2c; --need-solid:#C42A5B;
   --no:#2BD4A4; --no-soft:#16332a;
   --check:#FFA94D; --check-soft:#3a2a16;
   --headerGrad:linear-gradient(180deg,#171b1e,#141719);
@@ -29,7 +29,7 @@ body.light{
   --ink:#17262b; --ink-dim:#566970; --ink-faint:#8ea0a7;
   --main:#00B4D8; --main-soft:#d9f5fb;
   --pink:#FF4D7E; --green:#12B886; --orange:#FF922B; --cyan:#12BDD4;
-  --need:#FF4D7E; --need-soft:#ffe9f0;
+  --need:#FF4D7E; --need-soft:#ffe9f0; --need-solid:#D3255A;
   --no:#12B886; --no-soft:#e2f7f0;
   --check:#FF922B; --check-soft:#fff0e0;
   --headerGrad:linear-gradient(180deg,#ffffff,#ffffff);
@@ -251,6 +251,20 @@ input[type=checkbox]{accent-color:var(--main);width:15px;height:15px}
 .rstatus.check{background:var(--check)} .rstatus.info{background:var(--ink-faint)}
 .result .rmain{font-size:25px;font-weight:700;line-height:1.4;color:var(--main)}
 .result .rsub{font-size:13px;color:var(--ink-dim);margin-top:10px;line-height:1.8}
+/* 判定結果は種類で見た目を変える：必要＝ベタ塗りの反転、不要＝破線枠だけの静かな表示 */
+.result.k-need{background:var(--need-solid);border:2px solid var(--need-solid);box-shadow:0 10px 30px -14px var(--need-solid)}
+.result.k-need .rstatus{background:#fff;color:var(--need-solid);font-size:13px;padding:5px 18px}
+.result.k-need .rmain{color:#fff;font-size:28px}
+.result.k-need .rsub{color:rgba(255,255,255,.9)}
+.result.k-need .rnum span{background:#fff;border-color:#fff;color:var(--need-solid)}
+.result.k-need .rnotes{background:var(--panel);border-top:0;border-radius:12px;padding:16px 18px;margin-top:24px}
+.result.k-no,.result.k-info{background:transparent;border:2px dashed var(--line)}
+.result.k-no .rmain,.result.k-info .rmain{color:var(--ink-dim);font-weight:500;font-size:22px}
+.result.k-no .rmain::before,.result.k-info .rmain::before{content:"✓";display:block;font-size:30px;line-height:1;
+  margin-bottom:8px;color:var(--no);font-weight:700}
+.result.k-no .rnum span,.result.k-info .rnum span{border-color:var(--line);color:var(--ink-dim)}
+.result.k-check{background:var(--check-soft);border:2px solid var(--check)}
+.result.k-check .rmain{color:var(--ink)}
 .rnum{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
 .rnum span{font-family:var(--mono);font-size:12px;background:var(--panel);border:1.5px solid var(--main);
   color:var(--main);border-radius:9px;padding:5px 13px;font-weight:600}
@@ -3136,10 +3150,10 @@ function wizRender(){
     const ns=notesFor(W);
     const notesHtml=ns.length?'<div class="rnotes"><div class="rnotes-h">参考：共通ルール／脚注</div>'+
       ns.map(k=>`<div class="rnote"><span class="nt">${NOTES[k].nt}</span><span>${NOTES[k].tx}</span></div>`).join('')+'</div>':'';
-    const label={need:'白が必要',no:'白は不要',check:'要確認',info:'不要'}[r.kind];
+    const label={need:'白が必要',no:'白は不要',check:'要確認',info:'白は不要'}[r.kind];
     const num=(r.inner!==null&&!r.cover)
       ?`<div class="rnum"><span>内側 ${r.inner}mm</span><span>ドブ側 ${r.outer}mm</span></div>`:'';
-    c.innerHTML=`<div class="result"><div class="rstatus ${r.kind}">${label}</div>
+    c.innerHTML=`<div class="result k-${r.kind}"><div class="rstatus ${r.kind}">${label}</div>
       <div class="rmain">${r.main}</div>${r.sub?`<div class="rsub">${r.sub}</div>`:''}${num}${notesHtml}</div>
       <div class="wizbar"><button onclick="wizBack()">← 戻る</button>
       <button class="primary" onclick="wizReset()">↺ 最初から</button></div>`;
