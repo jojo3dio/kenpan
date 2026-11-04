@@ -1380,11 +1380,22 @@ function computeDims(tl,pgW,pgH,ignoreCenterOpt){
   const allInnerV=tl.filter(l=>l.role==='inner-V'||l.role==='inner-V-single').sort((a,b)=>a.cx-b.cx);
   const tolX=(parseFloat($("#clTol").value)||2.0)*MM2PT;
 
+  // 天側（または地側）にだけ付いた背幅トンボも拾う。
+  // 片側だけの線は迷い線の可能性があるので、同じ側にセンターをはさんで
+  // 左右対称の相方がいるとき（＝背幅トンボの形）だけ採用する。
+  const ctrXs=[...tl.filter(l=>l.role==='center-T'||l.role==='center-B').map(l=>l.cx),
+               (fr.x0+fr.x1)/2];
+  const mirrored=(l,arr)=>ctrXs.some(c=>{
+    const d=l.cx-c;
+    if(Math.abs(d)<=tolX) return false;          // センター自身は対象外
+    return arr.some(o=>o!==l&&o._edgeZone===l._edgeZone&&Math.abs((o.cx-c)+d)<=tolX);
+  });
   const pairedV=ignoreCenter?[]:allInnerV.filter((l,_,arr)=>{
     if(l.role==='inner-V') return true;
     if(!l._edgeZone||l._edgeZone==='M') return true;
     const opp=l._edgeZone==='T'?'B':'T';
-    return arr.some(o=>o!==l&&(o._edgeZone===opp||o._edgeZone==='M')&&Math.abs(o.cx-l.cx)<=tolX);
+    if(arr.some(o=>o!==l&&(o._edgeZone===opp||o._edgeZone==='M')&&Math.abs(o.cx-l.cx)<=tolX)) return true;
+    return mirrored(l,arr);
   });
 
   const innerV=pairedV.filter((l,i,arr)=>{
