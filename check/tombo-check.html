@@ -881,7 +881,11 @@ function centerViewer(cw, w, h){
   vw.style.marginTop=extraY+'px';
 }
 
-/* ---------- LINE EXTRACTION via constructPath (PDF.js 3.11) ---------- */
+/* ---------- LINE EXTRACTION via constructPath (PDF.js 3.11) ----------
+   線（stroke）に加え、アウトライン化されたトンボ（細い塗り図形）も拾う。
+   塗りパスの外形から平行な辺の対を探し、間隔が maxLW 以下なら
+   その中心線を「線」として扱う（曲線を含むパスは文字等とみなし対象外）。 */
+const FILL_MAXEDGES = 400;
 async function extractLines(page){
   const ops  = await page.getOperatorList();
   const fns  = ops.fnArray, args = ops.argsArray;
@@ -916,8 +920,78 @@ async function extractLines(page){
   };
 
   let lw = 1;
-  let pendingSegs = [];
+  let pendingSegs = [];   // stroke 用（従来どおり矩形は対象外）
+  let fillSegs = [];      // fill 用（矩形も含む閉じた外形）
+  let fillCurve = false;
+  let fillCount = 0;
   const out = [];
+
+  const fillCenterlines = (evenOdd) => {
+    if(fillCurve || !fillSegs.length || fillSegs.length > FILL_MAXEDGES) return;
+    const EPS = 0.02;
+    // ページ座標（上原点）に変換
+    const E = [];
+    for(const s of fillSegs){
+      const [ax,ay] = ap(s.x1,s.y1), [bx,by] = ap(s.x2,s.y2);
+      E.push({x1:ax, y1:pgH-ay, x2:bx, y2:pgH-by});
+    }
+    for(const e of E){
+      const dx=Math.abs(e.x2-e.x1), dy=Math.abs(e.y2-e.y1);
+      if(dx>EPS && dy>EPS) return;                 // 斜め辺を含む → 対象外
+    }
+    const inside = (px,py) => {                     // 塗り判定（nonzero / evenodd）
+      let wn=0, cr=0;
+      for(const e of E){
+        if((e.y1<=py) !== (e.y2<=py)){
+          const xi = e.x1 + (py-e.y1)*(e.x2-e.x1)/(e.y2-e.y1);
+          if(xi > px){ cr++; wn += (e.y2>e.y1)?1:-1; }
+        }
+      }
+      return evenOdd ? (cr%2===1) : (wn!==0);
+    };
+    // 同一直線上の辺を結合
+    const collect = (horiz) => {
+      const arr=[];
+      for(const e of E){
+        const isH = Math.abs(e.y2-e.y1)<=EPS, isV = Math.abs(e.x2-e.x1)<=EPS;
+        if(horiz ? !isH : (!isV || isH)) continue;
+        const c  = horiz ? (e.y1+e.y2)/2 : (e.x1+e.x2)/2;
+        const lo = horiz ? Math.min(e.x1,e.x2) : Math.min(e.y1,e.y2);
+        const hi = horiz ? Math.max(e.x1,e.x2) : Math.max(e.y1,e.y2);
+        if(hi-lo <= EPS) continue;
+        arr.push({c,lo,hi});
+      }
+      arr.sort((a,b)=>a.c-b.c||a.lo-b.lo);
+      const m=[];
+      for(const a of arr){
+        const t=m.find(q=>Math.abs(q.c-a.c)<=EPS && a.lo<=q.hi+EPS && a.hi>=q.lo-EPS);
+        if(t){ t.lo=Math.min(t.lo,a.lo); t.hi=Math.max(t.hi,a.hi); }
+        else m.push({...a});
+      }
+      return m;
+    };
+    const emit = (horiz) => {
+      const L = collect(horiz);
+      for(let i=0;i<L.length;i++){
+        const a=L[i];
+        for(let j=i+1;j<L.length;j++){
+          const b=L[j], sep=b.c-a.c;
+          if(sep<=EPS) continue;
+          if(sep>maxLW) break;
+          const ol=Math.max(a.lo,b.lo), oh=Math.min(a.hi,b.hi);
+          if(oh-ol<=EPS) continue;
+          const mc=(a.c+b.c)/2, mm=(ol+oh)/2;
+          if(!(horiz ? inside(mm,mc) : inside(mc,mm))) continue;  // 帯の内側が塗られているか
+          const lo=Math.min(a.lo,b.lo), hi=Math.max(a.hi,b.hi);
+          if(hi-lo < minL) continue;
+          out.push(horiz ? {x1:lo,y1:mc,x2:hi,y2:mc,lw:sep,fill:true}
+                         : {x1:mc,y1:lo,x2:mc,y2:hi,lw:sep,fill:true});
+          fillCount++;
+        }
+      }
+    };
+    emit(true); emit(false);
+  };
 
   for(let i=0;i<fns.length;i++){
     const fn=fns[i], a=args[i]||[];
@@ -928,30 +1002,43 @@ async function extractLines(page){
     if(fn===OPS.setLineWidth){ lw=a[0]; continue; }
 
     if(fn===CP){
-      pendingSegs = [];
+      pendingSegs = []; fillSegs = []; fillCurve = false;
       const cmds  = a[0];
       const coords= a[1];
       let ci=0, cx=0, cy=0, startX=0, startY=0;
       for(const cmd of cmds){
-        if(cmd===13){
+        if(cmd===OPS.moveTo){
+          if(cx!==startX||cy!==startY)                       // 塗りは暗黙に閉じる
+            fillSegs.push({x1:cx,y1:cy,x2:startX,y2:startY});
           cx=coords[ci++]; cy=coords[ci++];
           startX=cx; startY=cy;
-        } else if(cmd===14){
+        } else if(cmd===OPS.lineTo){
           const nx=coords[ci++], ny=coords[ci++];
-          pendingSegs.push({x1:cx,y1:cy,x2:nx,y2:ny});
+          const s={x1:cx,y1:cy,x2:nx,y2:ny};
+          pendingSegs.push(s); fillSegs.push(s);
           cx=nx; cy=ny;
-        } else if(cmd===15){
-          ci+=6;
-        } else if(cmd===17){
-          if(cx!==startX||cy!==startY)
-            pendingSegs.push({x1:cx,y1:cy,x2:startX,y2:startY});
+        } else if(cmd===OPS.curveTo){
+          cx=coords[ci+4]; cy=coords[ci+5]; ci+=6; fillCurve=true;
+        } else if(cmd===OPS.curveTo2||cmd===OPS.curveTo3){
+          cx=coords[ci+2]; cy=coords[ci+3]; ci+=4; fillCurve=true;
+        } else if(cmd===OPS.closePath){
+          if(cx!==startX||cy!==startY){
+            const s={x1:cx,y1:cy,x2:startX,y2:startY};
+            pendingSegs.push(s); fillSegs.push(s);
+          }
           cx=startX; cy=startY;
-        } else if(cmd===19){
+        } else if(cmd===OPS.rectangle){
           const rx=coords[ci++],ry=coords[ci++],rw=coords[ci++],rh=coords[ci++];
+          if(cx!==startX||cy!==startY)
+            fillSegs.push({x1:cx,y1:cy,x2:startX,y2:startY});
+          fillSegs.push({x1:rx,y1:ry,x2:rx+rw,y2:ry},{x1:rx+rw,y1:ry,x2:rx+rw,y2:ry+rh},
+                        {x1:rx+rw,y1:ry+rh,x2:rx,y2:ry+rh},{x1:rx,y1:ry+rh,x2:rx,y2:ry});
+          cx=startX=rx; cy=startY=ry;
           pendingSegs = [];
-        } else {
         }
       }
+      if(cx!==startX||cy!==startY)
+        fillSegs.push({x1:cx,y1:cy,x2:startX,y2:startY});
       continue;
     }
 
@@ -968,17 +1055,23 @@ async function extractLines(page){
           }
         }
       }
-      pendingSegs = [];
+      pendingSegs = []; fillSegs = [];
       continue;
     }
 
-    if(fn===OPS.fill||fn===OPS.eoFill||fn===OPS.fillStroke||
-       fn===OPS.eoFillStroke||fn===OPS.endPath||fn===28){
-      pendingSegs = [];
+    if(fn===OPS.fill||fn===OPS.eoFill){
+      fillCenterlines(fn===OPS.eoFill);
+      pendingSegs = []; fillSegs = [];
+      continue;
+    }
+    if(fn===OPS.fillStroke||fn===OPS.eoFillStroke||
+       fn===OPS.closeFillStroke||fn===OPS.closeEOFillStroke||fn===OPS.endPath){
+      pendingSegs = []; fillSegs = [];
     }
   }
 
   extractLines._lastOpsSeen = opsSeen;
+  extractLines._lastFillCount = fillCount;
   return out;
 }
 
