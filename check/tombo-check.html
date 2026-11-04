@@ -327,7 +327,7 @@ table.cmpt{border-collapse:collapse;width:100%;font-size:12.5px}
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4" stroke-linecap="round"/></svg>
       </span>
-      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-09-26</small></span>
+      <b>トンボ計測</b><span>トリムサイズ自動検出 <small style="opacity:.6;font-size:11px">rev.2026-11-04</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -982,6 +982,62 @@ async function extractLines(page){
   return out;
 }
 
+/* ---------- VISIBILITY ----------
+   PDFの描画命令には、クリッピングマスクで切り抜かれた線や、上から白い図形で
+   覆われた線も残っている。命令だけを読むとこれらも「トンボ」として拾ってしまう
+   ため、ページを実際に描画し、線の位置にインクが見えているかを確かめて、
+   見えていない線を除外する。描画に失敗したときや、全部消えてしまうときは
+   従来どおり全線を使う（安全側）。 */
+const VIS_PXMM=8, VIS_MAXPX=16e6, VIS_INK=215, VIS_RATIO=0.4;
+async function filterVisibleLines(page, raw){
+  if(!raw||!raw.length) return {lines:raw||[], hidden:0};
+  let cv=null;
+  try{
+    const view=page.view, wPt=view[2]-view[0], hPt=view[3]-view[1];
+    let sc=VIS_PXMM/MM2PT;                       // px / pt
+    if(wPt*hPt*sc*sc>VIS_MAXPX) sc=Math.sqrt(VIS_MAXPX/(wPt*hPt));
+    const vp=page.getViewport({scale:sc, rotation:0});   // extractLines と同じ座標系（回転なし）
+    const W=Math.ceil(vp.width), H=Math.ceil(vp.height);
+    cv=(filterVisibleLines._mk||((w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;}))(W,H);
+    const ctx=cv.getContext('2d',{willReadFrequently:true});
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+    const px=ctx.getImageData(0,0,W,H).data;
+    const ink=(x,y)=>{
+      if(x<0||y<0||x>=W||y>=H) return false;
+      const i=(y*W+x)*4;
+      return px[i+3]>0 && Math.min(px[i],px[i+1],px[i+2])<VIS_INK;
+    };
+    const stepPx=0.5*MM2PT*sc;                   // 0.5mmごとに確認
+    const kept=[]; let hidden=0;
+    for(const l of raw){
+      const x1=l.x1*sc, y1=l.y1*sc, x2=l.x2*sc, y2=l.y2*sc;
+      const L=Math.hypot(x2-x1,y2-y1);
+      if(L<1){ kept.push(l); continue; }
+      const ux=(x2-x1)/L, uy=(y2-y1)/L, nx=-uy, ny=ux;
+      const r=Math.max(2, Math.ceil((l.lw||0.3)*sc/2)+1);
+      const n=Math.max(5, Math.min(80, Math.round(L/stepPx)));
+      let hit=0;
+      for(let k=0;k<n;k++){
+        const t=(k+0.5)/n, cx=x1+(x2-x1)*t, cy=y1+(y2-y1)*t;
+        let found=false;
+        for(let d=-r; d<=r && !found; d++){
+          if(ink(Math.round(cx+nx*d), Math.round(cy+ny*d))) found=true;
+        }
+        if(found) hit++;
+      }
+      if(hit/n>=VIS_RATIO) kept.push(l); else hidden++;
+    }
+    if(!kept.length) return {lines:raw, hidden:0};
+    return {lines:kept, hidden};
+  }catch(e){
+    console.warn('visibility check skipped:', e);
+    return {lines:raw, hidden:0};
+  }finally{
+    if(cv){ cv.width=0; cv.height=0; }
+  }
+}
+
 /* ---------- FRAME ----------
    トンボの外側に広い余白（白場）が付いたPDFでは、ページ端から
    一定距離という基準ではコーナートンボを拾えない。
@@ -1476,7 +1532,10 @@ async function computePageAnalysis(n,doc,ign){
   const page=await doc.getPage(n);
   const view=page.view;
   const pgW=view[2]-view[0], pgH=view[3]-view[1];
-  const raw=await extractLines(page);
+  const raw0=await extractLines(page);
+  const opsSeen=extractLines._lastOpsSeen||new Map();
+  const vis=await filterVisibleLines(page, raw0);   // マスク・白で隠れた線を除外
+  const raw=vis.lines;
   const tl=classify(raw,pgW,pgH);
   const dims=computeDims(tl,pgW,pgH,ign);
   const tolPt=(parseFloat($("#clTol").value)||2.0)*MM2PT;
@@ -1492,8 +1551,7 @@ async function computePageAnalysis(n,doc,ign){
     }
   }
   const warns=buildWarnings(tl,dims,tb,tolPt);
-  const opsSeen=extractLines._lastOpsSeen||new Map();
-  return {tl,dims,pgW,pgH,rawN:raw.length,opsSeen,trim:tb,size,warns};
+  return {tl,dims,pgW,pgH,rawN:raw.length,hiddenN:vis.hidden,opsSeen,trim:tb,size,warns};
 }
 async function analyze(){
   if(!pdfDoc) return;
@@ -1984,6 +2042,7 @@ updateTomboToggleUI();
 /* ---------- DBG ---------- */
 function updateStatus(r){
   let t='検出: '+r.tl.filter(l=>!/^content-/.test(l.role)).length+'本';
+  if(r.hiddenN) t+='（隠れ線 '+r.hiddenN+'本を除外）';
   if(r.size) t+=' / 仕上がり '+r.size.w.toFixed(2)+'×'+r.size.h.toFixed(2)+'mm'
                  +(r.size.std?'（'+r.size.std+'）':'');
   if(r.warns&&r.warns.length) t+=' / 要確認 '+r.warns.length+'件';
