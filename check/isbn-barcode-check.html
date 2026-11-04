@@ -330,7 +330,7 @@ a.lnk{color:var(--amber)}
   <header>
     <div class="brand">
       <span class="mk" aria-hidden="true" style="background:none;border:none;width:26px;height:26px;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5v14M7 5v14M10 5v10M13 5v14M16 5v10M20 5v14" stroke-linecap="round"/></svg></span>
-      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-10-22c</small></span>
+      <b>ISBN検版</b><span>バーコード照合チェッカー <small style="opacity:.6;font-size:11px">rev.2026-11-04</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -1059,6 +1059,8 @@ function checkBarcodeQuality(canvas, box, label){
   // barBox は目視数字行を含まない「バー本体だけ」の範囲。OCR時にバーを白で塗る
   // 用途に使う(tightBoxで塗るとバー直下の印字数字まで消えてしまうため)。
   const barBox={x:(px0+cx0)/W, y:(py0+ry0)/H, w:(cx1-cx0+1)/W, h:(ry1-ry0+1)/H};
+  // 左右の余白(クワイエットゾーン)を、box外も含むキャンバス全幅で実測する
+  const quiet=measureQuietZone(canvas, px0+cx0, px0+cx1, py0+ry0, py0+ry1, DARK);
   // 3) バー帯内の複数走査線でrun-length
   const lines=[]; const nScan=7;
   for(let k=0;k<nScan;k++){
@@ -1079,7 +1081,7 @@ function checkBarcodeQuality(canvas, box, label){
       lines.push({bars, trans:runs.length, maxRatio});
     }
   }
-  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox, barBox, barColor};
+  if(!lines.length) return {ok:false, note:"読み込みができません（バーコードが潰れ・かすれの可能性）", tightBox, barBox, barColor, quiet};
   const med=arr=>{const a=[...arr].sort((p,q)=>p-q);return a[Math.floor(a.length/2)];};
   const barsMed=med(lines.map(l=>l.bars));
   const transMed=med(lines.map(l=>l.trans));
@@ -1094,9 +1096,50 @@ function checkBarcodeQuality(canvas, box, label){
   if(maxRatioMed>5.5) issues.push("読み込みができません（バーのつぶれ・つながりの可能性）");
   if(transOutliers>=2) issues.push("読み込みができません（バーの欠け・かすれの可能性）");
   const uniq=[...new Set(issues)];
-  return {ok:issues.length===0, note:uniq.join(" / "), tightBox, barBox, barColor,
+  return {ok:issues.length===0, note:uniq.join(" / "), tightBox, barBox, barColor, quiet,
           metrics:{bars:barsMed,trans:transMed,maxRatio:+maxRatioMed.toFixed(1),transOutliers}};
 }
+
+/* 左右の余白(クワイエットゾーン)の実測。
+   EAN-13(ISBN・日本図書コード・JAN)は、バーの外側に左11・右7モジュール以上の
+   明るい余白が必要(JIS X 0507)。白ラベルが狭く、すぐ外側に色地や絵柄が
+   かかっていると、スキャナがバーの端を見失って読めないことがある。
+   バー行(目視数字を含まない範囲)で、バーの外側へ「紙色に近い明るさ」の列が
+   何px続くかを数え、モジュール数に換算する。キャンバス端に達した場合は
+   それ以上を測れないので edge=true として判定から外す。 */
+function measureQuietZone(canvas, x0, x1, y0, y1, DARK){
+  const W=canvas.width, H=canvas.height;
+  x0=Math.round(x0); x1=Math.round(x1); y0=Math.max(0,Math.round(y0)); y1=Math.min(H-1,Math.round(y1));
+  const rows=y1-y0+1;
+  if(rows<4 || x1-x0<40) return null;
+  let d; try{ d=canvas.getContext('2d').getImageData(0,y0,W,rows).data; }catch(e){ return null; }
+  const lum=(x,y)=>{ const i=(y*W+x)*4, af=d[i+3]/255;
+    return af*(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])+(1-af)*255; };
+  const mod=(x1-x0+1)/95;
+  // 紙色(バーの間の白)の明るさ：バー範囲内の輝度の上位10%点
+  const vals=[];
+  for(let y=0;y<rows;y+=3) for(let x=x0;x<=x1;x+=2) vals.push(lum(x,y));
+  vals.sort((a,b)=>a-b);
+  const paper=vals[Math.floor(vals.length*0.9)]||255;
+  // 紙色から大きく暗い(色地・絵柄)か、バーと同等に暗ければ「余白ではない」
+  const thr=Math.max(DARK, paper-70);
+  const ys=[]; const st=Math.max(1,Math.floor(rows/24));
+  for(let y=Math.floor(rows*0.1); y<rows*0.9; y+=st) ys.push(y);
+  if(!ys.length) return null;
+  const clear=x=>{ let c=0; for(const y of ys) if(lum(x,y)>=thr) c++; return c>=ys.length*0.95; };
+  // バー端のアンチエイリアス分(0.5モジュール)は無条件で余白側に数える
+  const skip=Math.max(1,Math.ceil(mod*0.5));
+  let l=0, x=x0-1;
+  while(x>=0 && (l<skip || clear(x))){ l++; x--; }
+  const leftEdge=x<0;
+  let r=0; x=x1+1;
+  while(x<W && (r<skip || clear(x))){ r++; x++; }
+  const rightEdge=x>=W;
+  const left=l/mod, right=r/mod;
+  const ok=(leftEdge||left>=QZ_MIN_LEFT-0.5) && (rightEdge||right>=QZ_MIN_RIGHT-0.5);
+  return {left:+left.toFixed(1), right:+right.toFixed(1), leftEdge, rightEdge, ok};
+}
+const QZ_MIN_LEFT=11, QZ_MIN_RIGHT=7;
 
 /* 品質判定を、検出用canvas(DETECT_SCALE=3.2固定)ではなく、
    該当box部分だけをPDFから高解像度で再レンダリングした画像に対して行う。
@@ -1694,6 +1737,127 @@ function collectWords(data){
   return out;
 }
 
+/* ---------- バーコードが画像で配置されているかの判定 ----------
+   pdf.jsの操作リストから、画像の配置矩形・ピクセル数と、塗りパス(線画)の
+   範囲を集める。バー本体の範囲を覆う画像があり、その画像より後(上)に
+   バーらしい線画が描かれていなければ「バーコードが画像」とみなし、
+   実効解像度(ppi)を返す。背景写真の上に線画のバーコードが載っている
+   通常のデータは、後から描かれた線画があるので画像扱いにしない。 */
+const RASTER_MIN_PPI = 1200;   // 2値画像で再現できる目安(製版はこれ未満の画像バーコードを不可とする)
+const _placedCache=new WeakMap();
+async function placedGraphics(page){
+  if(_placedCache.has(page)) return _placedCache.get(page);
+  const imgs=[], fills=[];
+  try{
+    const O=pdfjsLib.OPS, U=pdfjsLib.Util;
+    const vp=page.getViewport({scale:1});
+    const ol=await page.getOperatorList();
+    const F=ol.fnArray, A=ol.argsArray;
+    let ctm=vp.transform.slice(); const st=[];
+    let pend=null;
+    const unit=()=>_devRect([0,0,1,1],ctm);
+    for(let i=0;i<F.length;i++){
+      const f=F[i], a=A[i];
+      if(f===O.save) st.push(ctm.slice());
+      else if(f===O.restore){ const c=st.pop(); if(c) ctm=c; }
+      else if(f===O.transform) ctm=U.transform(ctm,a);
+      else if(f===O.paintFormXObjectBegin){ st.push(ctm.slice());
+        if(Array.isArray(a[0])&&a[0].length===6) ctm=U.transform(ctm,a[0]); }
+      else if(f===O.paintFormXObjectEnd){ const c=st.pop(); if(c) ctm=c; }
+      else if(f===O.paintImageXObject || f===O.paintInlineImageXObject || f===O.paintImageMaskXObject){
+        let w=0,h=0;
+        if(f===O.paintImageXObject){ w=+a[1]||0; h=+a[2]||0; }
+        else if(a&&a[0]){ w=+a[0].width||0; h=+a[0].height||0; }
+        if(!w||!h) continue;
+        const sw=Math.hypot(ctm[0],ctm[1]), sh=Math.hypot(ctm[2],ctm[3]);   // 配置寸法(pt)
+        if(sw<0.01||sh<0.01) continue;
+        imgs.push({idx:i, rect:unit(), w, h, ppi:Math.round(Math.min(w*72/sw, h*72/sh))});
+      }
+      else if(f===O.constructPath){
+        const ops=a[0]||[], mm=a[2];
+        let n=0; for(const o of ops) if(o===O.rectangle||o===O.moveTo) n++;
+        pend=(mm&&isFinite(mm[0])&&isFinite(mm[1]))?{bb:_devRect([mm[0],mm[2],mm[1],mm[3]],ctm), n}:null;
+      }
+      else if(f===O.fill||f===O.eoFill||f===O.fillStroke||f===O.eoFillStroke||
+              f===O.closeFillStroke||f===O.closeEOFillStroke){
+        if(pend) fills.push({idx:i, bb:pend.bb, n:pend.n});
+        pend=null;
+      }
+      else if(f===O.endPath||f===O.stroke||f===O.closeStroke) pend=null;
+    }
+  }catch(e){}
+  const out={imgs, fills, vp:page.getViewport({scale:1})};
+  _placedCache.set(page,out);
+  return out;
+}
+/* nbox: ページ正規化座標(左上原点)のバー本体範囲 */
+async function rasterInfoForBox(page, nbox){
+  if(!nbox||!nbox.w||!nbox.h) return null;
+  const g=await placedGraphics(page);
+  const W=g.vp.width, H=g.vp.height;
+  const b=[nbox.x*W, nbox.y*H, (nbox.x+nbox.w)*W, (nbox.y+nbox.h)*H];
+  const area=r=>Math.max(0,r[2]-r[0])*Math.max(0,r[3]-r[1]);
+  const inter=(p,q)=>[Math.max(p[0],q[0]),Math.max(p[1],q[1]),Math.min(p[2],q[2]),Math.min(p[3],q[3])];
+  const bA=area(b); if(bA<=0) return null;
+  // バー本体の8割以上を覆う画像のうち、最後に(=いちばん上に)描かれたもの
+  let img=null;
+  for(const m of g.imgs){ if(area(inter(m.rect,b))>=bA*0.8 && (!img||m.idx>img.idx)) img=m; }
+  if(!img) return {raster:false};
+  // その画像より後に、バー範囲内へ線画(塗り)がバー数ほど描かれていれば線画のバーコード
+  const bw=b[2]-b[0];
+  let vec=0;
+  for(const f of g.fills){
+    if(f.idx<img.idx) continue;
+    const ia=area(inter(f.bb,b)); if(ia<=0) continue;
+    if(f.bb[2]-f.bb[0]>bw*1.4) continue;           // バー範囲より大きい塗り(地色・ラベル)は数えない
+    vec+=Math.max(1,f.n);
+  }
+  if(vec>=15) return {raster:false};
+  return {raster:true, ppi:img.ppi, w:img.w, h:img.h};
+}
+async function attachRasterInfo(page, q, box){
+  if(!q) return;
+  try{ q.raster=await rasterInfoForBox(page, q.barBox||q.tightBox||box); }catch(e){}
+}
+/* 品質系の判定行(縞・形式・余白)を1か所で組み立てる。
+   画面表示・集計(要確認)・フィードバック記録で同じ内容を使う。 */
+function qualityItems(s){
+  const out=[]; if(!s||!s.quality) return out;
+  const defs=[["isbn","ISBNバーコード"],["dnc","日本図書コード"],["jan","JANコード"]];
+  const fq=(v,edge)=>(edge?"≥":"")+v;
+  for(const [k,nm] of defs){
+    const q=s.quality[k]; if(!q) continue;
+    const K=k.toUpperCase();
+    const lowRes=!!(q.raster&&q.raster.raster&&q.raster.ppi<RASTER_MIN_PPI);
+    out.push({key:k, label:nm+"品質", ok:!!q.ok, level:"WARN", ruleId:"QUAL-STRIPE-"+K,
+      detail: q.ok ? "縞パターン正常"
+        : (q.note||"異常の疑い")+(lowRes?"（低解像度の画像のため、バーの太さが不揃いになっている可能性が高い）":"")});
+    if(q.raster&&q.raster.raster){
+      const r=q.raster;
+      out.push({key:k, label:nm+"の形式", ok:!lowRes, level:"WARN", ruleId:"QUAL-RASTER-"+K,
+        expected:"線画 または "+RASTER_MIN_PPI+"ppi以上", actual:r.ppi+"ppi",
+        detail: lowRes
+          ? `画像で配置されています（約${r.ppi}ppi・${r.w}×${r.h}px）。この解像度ではバーの太さが正確に再現されません。線画（ベクター）か${RASTER_MIN_PPI}ppi以上の2値画像に差し替えてください。`
+          : `画像（約${r.ppi}ppi）`});
+    }
+    if(q.quiet){
+      const z=q.quiet;
+      const txt=`左${fq(z.left,z.leftEdge)}・右${fq(z.right,z.rightEdge)}モジュール`;
+      out.push({key:k, label:nm+"の余白", ok:!!z.ok, level:"WARN", ruleId:"QUAL-QZ-"+K,
+        expected:`左${QZ_MIN_LEFT}・右${QZ_MIN_RIGHT}以上`, actual:txt,
+        detail: z.ok ? txt
+          : `余白が不足しています：${txt}（規格は左${QZ_MIN_LEFT}・右${QZ_MIN_RIGHT}以上）。余白に色地や絵柄がかかると読み取れないことがあります。`});
+    }
+  }
+  return out;
+}
+/* 照合はOKでも、品質系に異常があれば組の判定を「要確認」に上げる */
+function applyQualityStatus(s){
+  if(!s) return s;
+  if(s.status==="OK" && qualityItems(s).some(it=>!it.ok)) s.status="WARN";
+  return s;
+}
+
 /* ---------- バーコードのペアリング(1段目↔2段目) ---------- */
 function buildSets(bars){
   const isbns=bars.filter(b=>/^(978|979)/.test(b.value));
@@ -1774,6 +1938,7 @@ async function analyzePage(pageNum){
       // 塗る際にZXingの粗い検出枠を使うと、縦余白(ページ高の4.5%)が大きいため
       // バー直下の目視数字まで消えてOCRが何も読めなくなる。
       const qJan = s.other.box ? await checkBarcodeQualityHiRes(page,s.other.box,'jan',s.other.rot) : null;
+      await attachRasterInfo(page, qJan, s.other.box);
       const maskPx = maskBoxesPx(cv,[qJan],boxesPx);
       let txt=stripDummyPrint(textNearBarcodes(items,boxesPx,cv.width,cv.height));
       const hasJanText=/[0-9][0-9\s]{10,20}[0-9]/.test(txt);
@@ -1798,12 +1963,15 @@ async function analyzePage(pageNum){
       rep.quality={};
       if(qJan){ rep.quality.jan=qJan;
         if(qJan.tightBox) rep.boxes.jan=tightenWidth(s.other.box, qJan.tightBox); }
+      applyQualityStatus(rep);
       results.push(rep);
       continue;
     }
     // 品質判定を先に走らせて、実測したバー本体の範囲を得ておく(OCRの塗り潰し用)
     const qIsbn = (s.isbn&&s.isbn.box) ? await checkBarcodeQualityHiRes(page,s.isbn.box,'isbn',s.isbn.rot) : null;
     const qDnc  = (s.dnc &&s.dnc.box ) ? await checkBarcodeQualityHiRes(page,s.dnc.box ,'dnc' ,s.dnc.rot ) : null;
+    await attachRasterInfo(page, qIsbn, s.isbn&&s.isbn.box);
+    await attachRasterInfo(page, qDnc,  s.dnc &&s.dnc.box);
     const boxesPx=[], qs=[];
     if(s.isbn){ boxesPx.push({x:s.isbn.box.x*cv.width,y:s.isbn.box.y*cv.height,w:s.isbn.box.w*cv.width,h:s.isbn.box.h*cv.height}); qs.push(qIsbn); }
     if(s.dnc) { boxesPx.push({x:s.dnc.box.x*cv.width, y:s.dnc.box.y*cv.height, w:s.dnc.box.w*cv.width, h:s.dnc.box.h*cv.height });  qs.push(qDnc);  }
@@ -1841,6 +2009,7 @@ async function analyzePage(pageNum){
       if(qIsbn.tightBox) rep.boxes.isbn=tightenWidth(s.isbn.box, qIsbn.tightBox); }
     if(qDnc){ rep.quality.dnc=qDnc;
       if(qDnc.tightBox) rep.boxes.dnc=tightenWidth(s.dnc.box, qDnc.tightBox); }
+    applyQualityStatus(rep);
     results.push(rep);
   }
   runCheck.destroy?.(); runCheckJan.destroy?.();
@@ -2189,14 +2358,25 @@ function renderResult(rec){
       html+=`<div class="chk ${cls}"><span class="mark">${mk}</span>
         <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span>${fbBtn}</div>`;
     });
-    // バーコード品質判定の結果(欠け・かすれ等)
+    // バーコード品質(縞・形式・余白)。照合OKでもここに異常があれば組は「要確認」になる
+    qualityItems(s).forEach(it=>{
+      let fbBtn="";
+      if(!it.ok){
+        const fbIdx=fbIssues.length;
+        fbIssues.push({
+          ruleId: it.ruleId, expected: it.expected||"", actual: it.actual||"",
+          box: s.boxes ? s.boxes[it.key] : null,
+          page: rec.page, msg: it.label+"："+it.detail, setIdx: idx
+        });
+        fbBtn=`<button class="issfb" title="この判定は誤検知だと報告する" onclick="event.stopPropagation();fbFromIssue(${fbIdx})">👎 誤検知?</button>`;
+      }
+      html+=`<div class="chk ${it.ok?'OK':'WARN'}"><span class="mark">${it.ok?'✓':'△'}</span>
+        <span class="body"><span class="t">${esc(it.label)}</span><span class="d">${esc(it.detail)}</span></span>${fbBtn}</div>`;
+    });
     if(s.quality){
-      const qrows=[["ISBNバーコード品質",s.quality.isbn],["日本図書コード品質",s.quality.dnc],["JANコード品質",s.quality.jan]];
+      const qrows=[["ISBNバーコード",s.quality.isbn],["日本図書コード",s.quality.dnc],["JANコード",s.quality.jan]];
       qrows.forEach(([nm,q])=>{
         if(!q) return;
-        const ok=q.ok;
-        html+=`<div class="chk ${ok?'OK':'NG'}"><span class="mark">${ok?'✓':'✕'}</span>
-          <span class="body"><span class="t">${esc(nm)}</span><span class="d">${ok?'縞パターン正常':esc(q.note||'異常の疑い')}</span></span></div>`;
         // バーが黒以外のインキで刷られている場合の注意喚起。
         // EAN読取機の光源は赤(660nm前後)なので、シアン・青・緑系のバーは
         // 反射してしまい読み取れないことがある。
@@ -2207,7 +2387,7 @@ function renderResult(rec){
           if(mx-mn>60 || lm>110){
             const sw=`rgb(${bc.r},${bc.g},${bc.b})`;
             html+=`<div class="chk WARN"><span class="mark">▲</span>
-              <span class="body"><span class="t">${esc(nm.replace('品質','のインキ色'))}</span>
+              <span class="body"><span class="t">${esc(nm+'のインキ色')}</span>
               <span class="d">バーが黒以外の色（<span style="display:inline-block;width:9px;height:9px;border:1px solid #999;background:${sw};vertical-align:middle"></span> R${bc.r} G${bc.g} B${bc.b}）で刷られています。赤色光源のスキャナで読み取れない可能性があるため、現物での読み取り確認を推奨します。</span></span></div>`;
           }
         }
@@ -2249,6 +2429,7 @@ async function recheckManual(atIdx){
     const dncBc =old.dnc ?old.dnc.raw :"";
     const nrep=JSON.parse(rc(isbnBc,dncBc,txt)); rc.destroy?.();
     nrep.boxes=old.boxes; nrep.ocrText=txt; nrep.manual={isbn,ccode,price};
+    nrep.quality=old.quality; applyQualityStatus(nrep);
     rec.sets[atIdx]=nrep;
     rec.status=rollup(rec.sets);
     renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
@@ -2272,6 +2453,7 @@ async function recheckManualJan(idx){
     const txt=janTxt.replace(/[^0-9]/g,"");
     const nrep=JSON.parse(rc(janBc,txt)); rc.destroy?.();
     nrep.boxes=old.boxes; nrep.ocrText=txt; nrep.isJan=true; nrep.manual={jan:janTxt};
+    nrep.quality=old.quality; applyQualityStatus(nrep);
     rec.sets[idx]=nrep;
     rec.status=rollup(rec.sets);
     renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
@@ -2526,6 +2708,7 @@ async function applyColophon(){
     nrep.boxes=old.boxes; nrep.ocrText=coverTxt; nrep.manual=old.manual;
     nrep.colophonMeta={page:obState.curPage, fileName:obState.fileName, ocrUsed:obState.ocrUsed};
     nrep.colophonPreview=await buildColophonPreview(nrep);
+    nrep.quality=old.quality; applyQualityStatus(nrep);
     rec.sets[bookIdx]=nrep;
     rec.status=rollup(rec.sets);
     renderResult(rec); renderPreviewBar(rec); drawOverlay(rec); renderList();
@@ -2674,7 +2857,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
 // 判定ロジック（cross_check等）は変更しない。ここは送信まわりのメタデータ収集のみ。
 (function(){
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
-  const FB_APP_VERSION = "v1.3";
+  const FB_APP_VERSION = "v1.4";
   const modal = $("#fbModal");
   let fbVerdict = "";
   let fbIssueIndex = null;  // 指摘一覧から開いた場合のfbIssuesインデックス（自動添付用）
@@ -2746,6 +2929,7 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({'&':'&amp;',
           lines.push("  奥付けCコード: "+(cc!=null?("C"+cc):"（読取不可）"));
         }
         (s.items||[]).forEach(it=>lines.push("  ["+(it.ok?"OK":it.level)+"] "+it.label+"："+it.detail));
+        qualityItems(s).forEach(it=>lines.push("  ["+(it.ok?"OK":it.level)+"] "+it.label+"："+it.detail));
       });
       return lines.join("\n");
     }catch(e){ return ""; }
