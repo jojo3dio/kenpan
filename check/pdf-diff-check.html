@@ -389,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.21　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.22　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -768,6 +768,9 @@ async function loadPdf(file, side, opts){
         } else {
           toast(`『絵柄で自動対応』：${matched}/${lb}ページを絵柄で一致`, matched?"ok":undefined);
         }
+        const low=Object.keys(S.lowPair||{});
+        if(S.matchMode==="visual" && low.length)
+          toast(`絵柄の一致度が低いため、B ${low.join("・")}ページは一番近いAのページ（${low.map(b=>S.mapBtoA[b]).join("・")}）と比べています。別の版かもしれないので、ページ対応を確認してください`);
       }
     }
     await refreshPage(true);   // 新規読み込み時は中央寄せ提案
@@ -1849,6 +1852,7 @@ async function ensurePairing(){
   S.scale=S.dpi/72;
   if(!S.docA || !S.docB){ S.mapBtoA=null; return; }
   if(S.matchMode==="visual"){ await computeVisualPairing(); return; }
+  S.lowPair={}; S.pairBest=null;
   if(S.matchMode!=="folio"){ S.mapBtoA=null; return; }
   S.foliosA=await detectFoliosFor(S.docA,S.planA,S.boxesA);
   S.foliosB=await detectFoliosFor(S.docB,S.planB,S.boxesB);
@@ -2023,14 +2027,32 @@ async function pairByFullScan(lenA, lenB){
   const asg=monotonicAssign(C, lenB, lenA);
   const MIN=0.5;   // これ未満は「対応なし」
   let corrSum=0;
+  S.pairBest=new Array(lenB+1).fill(null); S.lowPair={};
   for(let b=0;b<lenB;b++){ const a=asg[b]; const ok=(a>=0 && C[b][a]>=MIN);
-    S.mapBtoA[b+1]=ok?(a+1):null; if(ok) corrSum+=C[b][a]; }
-  S.pairCorrSum=corrSum;                      // 綴じ方向の自動判別で使う一致度の合計
+    S.mapBtoA[b+1]=ok?(a+1):null; if(ok) corrSum+=C[b][a];
+    let ba=-1,bv=-2; for(let k=0;k<lenA;k++) if(C[b][k]>bv){ bv=C[b][k]; ba=k; }
+    S.pairBest[b+1]=ba>=0?{a:ba+1,corr:bv}:null; }
+  // v1.22 ペラ物（A＝表裏2ページ・B＝表だけ/裏だけ）で、別店舗版など絵柄が少し違うと一致度が
+  //  0.5に届かず「対応なし」になり、何もチェックされなかった（報告 10/06 ZDM_kanshaday26）。
+  //  Aが4ページ以下なら取り違えても目で分かるので、相手の無いBページは一番近いAページと比べる。
+  //  （一致度は記録しておき、トーストとdiagで「絵柄の一致度が低い」ことを知らせる）
+  if(lenA<=4){
+    const used=new Set(S.mapBtoA.filter(x=>x));
+    for(let b=1;b<=lenB;b++){
+      if(S.mapBtoA[b]) continue;
+      let ba=-1,bv=-2;
+      for(let k=0;k<lenA;k++){ if(used.has(k+1) && lenB<=lenA) continue; if(C[b-1][k]>bv){ bv=C[b-1][k]; ba=k; } }
+      if(ba<0) continue;
+      S.mapBtoA[b]=ba+1; used.add(ba+1); S.lowPair[b]=bv;
+    }
+  }
+  S.pairCorrSum=corrSum;                      // 綴じ方向の自動判別で使う一致度の合計（低一致の救済分は含めない）
   return {matched:S.mapBtoA.filter(x=>x).length, lenB, corrSum};
 }
 async function computeVisualPairing(){
   const lenA=logicalLen(S.planA), lenB=logicalLen(S.planB);
   S.mapBtoA=new Array(lenB+1).fill(null);
+  S.lowPair={}; S.pairBest=null;
   if(!lenA||!lenB) return {matched:0, lenB};
   sigPageCache=new Map();          // 見開きの左右で同じ描画を使い回す（走査後に破棄）
   const wasPairing=S.pairing;
@@ -2337,7 +2359,18 @@ function computePlacement(){
 function computeDiff(){
   computePlacement();
   S.regions=[]; S.overlay=null; S.activeRegion=-1;
-  if(!S.aData || !S.bData || !S.place) return;   // 片方しか無ければ差分なし
+  S.diag=null;   // v1.22 前のページの診断が残って送られないように毎回作り直す
+  if(!S.aData || !S.bData || !S.place){   // 片方しか無ければ差分なし
+    // v1.22 「チェックしてくれない」報告（ペラ物 A表裏2p×B1p）で diag が空だった。
+    // 相手ページが見つからず比較自体をしていないときも、その理由と照合の一致度を残す。
+    const pb=(S.pairBest&&S.bLogical)?S.pairBest[S.bLogical]:null;
+    S.diag={ ran:false,
+      note:(!S.aData&&S.docA? "対応するAのページが見つからず比較していない（ページ対応："+S.matchMode+"）"
+           : !S.bData&&S.docB? "対応するBのページが無い" : "片方のPDFが未読込"),
+      inputs:{ aLogical:S.aLogical, bLogical:S.bLogical, lenA:logicalLen(S.planA), lenB:logicalLen(S.planB),
+               bestA:pb?pb.a:null, bestCorr:pb?Math.round(pb.corr*100)/100:null } };
+    return;
+  }
   const p=S.place;
   // 重なり矩形（共通座標）
   const ox0=Math.max(p.ax,p.bx), oy0=Math.max(p.ay,p.by);
@@ -2708,6 +2741,9 @@ function computeDiff(){
     }
   }
 
+  // v1.22 写真1枚の大きな色補正で「削除」「内容が変わっています」が何十件も出るのを1件にまとめる
+  try{ regions=mergeImageRegions(regions, p, ox0, oy0, ox1, oy1); }catch(e){ console.warn("mergeImageRegions",e); }
+
   // 仕上がり(trim)より外側の検出（ページ情報・トンボ等）は除外。trim既知＆全体モード以外。
   if(S.alignedByBox && S.aTrimPx && S.compareScope!=="full"){
     const pp=S.place;
@@ -2720,6 +2756,105 @@ function computeDiff(){
 
   textFindings.sort((a,b)=> a.y-b.y);
   S.regions = textFindings.concat(regions);
+}
+
+/* ============ v1.22 配置画像ごとの差分のまとめ ============
+   背景（報告 11/04 昆布色校正_261101 ⇔ 01-60_ds・誤検出52）：写真1枚を補正で大きく色を変えると、
+   変化がしきい値を超えた所だけがバラバラの差分になり、明るくなった所は「要素が消えています」、
+   それ以外は「内容が変わっています」と、1枚の写真に何十件も出ていた。
+   考え方：その写真の範囲で「Aの色 → Bの色」の対応表（色を8×8×8に区切った3次元の表）を作る。
+     ・補正（トーンカーブ・色相・彩度など）は「同じ色は同じ色に変わる」ので、表で置き換えると
+       Bとほぼ一致する（残差が小さい）。→ 同じ写真の色補正。表で説明できる差分を1件にまとめる。
+     ・写真の上に足した文字・消した要素は、表で置き換えても合わない（残差が大きい）ので、
+       まとめずに個別の差分として残す（補正に紛れて見逃さない）。
+     ・写真そのものの差し替えは、表で説明できない差が写真全体に広がる。→「画像が変わっています」1件。 */
+function mergeImageRegions(regions, p, ox0, oy0, ox1, oy1){
+  const rects=(S.bImgRects||[]).map(r=>{ let x0=Math.max(r.x+p.bx,ox0), y0=Math.max(r.y+p.by,oy0), x1=Math.min(r.x+p.bx+r.w,ox1), y1=Math.min(r.y+p.by+r.h,oy1);
+    return {x0:Math.floor(x0),y0:Math.floor(y0),x1:Math.ceil(x1),y1:Math.ceil(y1)}; })
+    .filter(R=>R.x1>R.x0 && R.y1>R.y0);
+  const minSide=S.dpi*10/25.4;                       // 1cm角未満の画像は対象外
+  const big=rects.filter(R=>(R.x1-R.x0)>=minSide && (R.y1-R.y0)>=minSide)
+                 .sort((u,v)=>(u.x1-u.x0)*(u.y1-u.y0)-(v.x1-v.x0)*(v.y1-v.y0));   // 小さい画像から（入れ子は内側優先）
+  if(!big.length || !regions.length) return regions;
+  const aD=S.aData.data, bD=S.bData.data, th=S.thresh, RES=40;
+  const pxA=(x,y)=>{ const ax=x-p.ax, ay=y-p.ay; return (ax<0||ay<0||ax>=S.aW||ay>=S.aH)?-1:((ay*S.aW+ax)<<2); };
+  const pxB=(x,y)=>{ const bx=x-p.bx, by=y-p.by; return (bx<0||by<0||bx>=S.bW||by>=S.bH)?-1:((by*S.bW+bx)<<2); };
+  const owner=new Map();                             // region -> rect index
+  big.forEach((R,k)=>{ const ra=(R.x1-R.x0)*(R.y1-R.y0);
+    for(const rg of regions){ if(owner.has(rg)) continue;
+      if(rg.cls && (rg.cls.key==="weight" || rg.cls.key==="moved" || /^TXT/.test(rg.cls.ruleId||""))) continue;
+      const ar=Math.max(1,rg.w*rg.h);
+      if(rectOverlap(rg,{x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0}) >= ar*0.6 && ar<=ra*1.05) owner.set(rg,k); } });
+  let out=regions.slice();
+  big.forEach((R,k)=>{
+    const members=out.filter(rg=>owner.get(rg)===k);
+    if(!members.length) return;
+    if(members.length===1 && members[0].cls && members[0].cls.key==="color") return;   // もともと1件の色変更
+    // (1) 写真の範囲で A色→B色 の対応表を作る
+    const area=(R.x1-R.x0)*(R.y1-R.y0), st=Math.max(1,Math.floor(Math.sqrt(area/160000)));
+    // 表の値は平均でなく中央値（写真の上に足した黒ベタ等に引っぱられて、周りの同じ色まで差分にしないため）
+    const hist=new Uint32Array(512*3*32), cnt=new Uint32Array(512), sum=new Float64Array(512*3);
+    const bin=i=>((aD[i]>>5)<<6)|((aD[i+1]>>5)<<3)|(aD[i+2]>>5);
+    for(let y=R.y0;y<R.y1;y+=st) for(let x=R.x0;x<R.x1;x+=st){ const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue;
+      const k2=bin(ai); cnt[k2]++; for(let c=0;c<3;c++) hist[(k2*3+c)*32+(bD[bi+c]>>3)]++; }
+    for(let k2=0;k2<512;k2++){ const c=cnt[k2]; if(!c) continue;
+      for(let ch=0;ch<3;ch++){ const h=(k2*3+ch)*32; let acc=0,lv=0; for(;lv<32;lv++){ acc+=hist[h+lv]; if(acc*2>=c) break; }
+        sum[k2*3+ch]=(lv*8+4)*c; } }      // sum/c が中央値になるように入れておく（下の式をそのまま使う）
+    // 標本の少ない色（表に載らない珍しい色）は判断できないので「説明できる」側に倒す（ノイズで差分を作らない）
+    const resid=(ai,bi)=>{ const k2=bin(ai), c=cnt[k2]; if(c<4) return 0;
+      return Math.max(Math.abs(bD[bi]-sum[k2*3]/c),Math.abs(bD[bi+1]-sum[k2*3+1]/c),Math.abs(bD[bi+2]-sum[k2*3+2]/c)); };
+    const raw=(ai,bi)=>Math.max(Math.abs(aD[ai]-bD[bi]),Math.abs(aD[ai+1]-bD[bi+1]),Math.abs(aD[ai+2]-bD[bi+2]));
+    // (2) 写真全体：しきい値超えの割合（変化の広がり）と、表で説明できない割合
+    let n=0, nRaw=0, nRes=0;
+    for(let y=R.y0;y<R.y1;y+=st) for(let x=R.x0;x<R.x1;x+=st){ const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue;
+      n++; if(raw(ai,bi)>th){ nRaw++; if(resid(ai,bi)>RES) nRes++; } }
+    if(!n) return;
+    const rawFrac=nRaw/n, resFrac=nRes/n;
+    if(rawFrac<0.12) return;                         // 写真の一部だけの変化＝補正ではない。個別のまま
+    const same = resFrac < 0.12;                     // 対応表でほぼ説明できる＝同じ写真の色補正
+    let take, cls, extra=[];
+    if(same){
+      take=members;
+      // (3) 補正では説明できない局所の変化（写真の上に足した／消した要素）を拾い直して、別の差分として残す。
+      //  画素の差分は補正部分とつながって1つの塊になることがあるので、塊単位ではなく残差のセルで探し直す。
+      const cs=Math.max(4, Math.round(S.dpi/26)), cw=Math.ceil((R.x1-R.x0)/cs), ch=Math.ceil((R.y1-R.y0)/cs);
+      const hit=new Uint16Array(cw*ch), need=Math.max(2, Math.floor(cs*cs*0.16));
+      for(let y=R.y0;y<R.y1;y++){ const r0=((y-R.y0)/cs|0)*cw;
+        for(let x=R.x0;x<R.x1;x++){ const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue;
+          if(raw(ai,bi)>th && resid(ai,bi)>RES) hit[r0+((x-R.x0)/cs|0)]++; } }
+      const on=new Uint8Array(cw*ch); for(let i=0;i<on.length;i++) on[i]=hit[i]>=need?1:0;
+      const seen=new Uint8Array(cw*ch), stk=new Int32Array(cw*ch), minN=Math.max(1,S.noise);
+      for(let i=0;i<on.length;i++){ if(!on[i]||seen[i]) continue;
+        let sp=0; stk[sp++]=i; seen[i]=1; let c0=cw,c1=-1,r0=ch,r1=-1,nn=0;
+        while(sp>0){ const q=stk[--sp], c=q%cw, r=(q-c)/cw; nn++; if(c<c0)c0=c; if(c>c1)c1=c; if(r<r0)r0=r; if(r>r1)r1=r;
+          for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ const nc=c+dc,nr=r+dr; if(nc<0||nr<0||nc>=cw||nr>=ch) continue; const ni=nr*cw+nc; if(on[ni]&&!seen[ni]){seen[ni]=1;stk[sp++]=ni;} } }
+        if(nn<minN) continue;
+        const ex={x:R.x0+c0*cs-2, y:R.y0+r0*cs-2, w:(c1-c0+1)*cs+4, h:(r1-r0+1)*cs+4};
+        // 明るさの向きで増減を言う（補正後の予想より暗い＝何かが足された／明るい＝何かが消えた）
+        let sB=0,sE=0,k3=0;
+        for(let y=Math.max(R.y0,ex.y);y<Math.min(R.y1,ex.y+ex.h);y+=2) for(let x=Math.max(R.x0,ex.x);x<Math.min(R.x1,ex.x+ex.w);x+=2){
+          const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue; const kk=bin(ai), c=cnt[kk]; if(c<4) continue;
+          sB+=rgbLum(bD[bi],bD[bi+1],bD[bi+2]); sE+=rgbLum(sum[kk*3]/c,sum[kk*3+1]/c,sum[kk*3+2]/c); k3++; }
+        const dl=k3?(sB-sE)/k3:0;
+        ex.cells=nn; ex.pix=0;
+        ex.cls= dl<-20 ? mkCls("added","要素が増えています","写真の色補正とは別に、写真の上で要素が増えています","PIX-7","要素なし","要素あり")
+              : dl>20  ? mkCls("removed","要素が消えています","写真の色補正とは別に、写真の上の要素が消えています","PIX-8","要素あり","要素なし")
+              :          mkCls("changed","内容が変わっています","写真の色補正とは別の変化があります","PIX-9","変化なし","局所的な変化");
+        extra.push(ex);
+      }
+      cls=mkCls("color","色が変わっています",`同じ写真で色味・明るさが大きく変化（補正の可能性）。細かい差分${take.length}件を1件にまとめました`+(extra.length?`（補正と別の変化 ${extra.length}件は個別に表示）`:""),"CLR-6","色味変化なし","写真全体の色味・明るさが変化");
+    } else {
+      if(rawFrac<0.35 || members.length<3) return;     // 差し替えとまでは言えない
+      take=members;
+      cls=mkCls("changed","画像が変わっています",`画像の差し替え、または大幅な加工の可能性。細かい差分${take.length}件を1件にまとめました`,"PIX-6","画像は同一","画像の絵柄が変化");
+    }
+    const pix=take.reduce((s,rg)=>s+(rg.pix||0),0), cells=take.reduce((s,rg)=>s+(rg.cells||0),0);
+    const merged={x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0,cells,pix,cls,mergedFrom:take.length};
+    const set=new Set(take); const at=out.findIndex(rg=>set.has(rg));
+    out=out.filter(rg=>!set.has(rg)); out.splice(Math.max(0,at),0,merged,...extra);
+    if(S.diag){ S.diag.merged=(S.diag.merged||0)+take.length; }
+  });
+  return out;
 }
 
 /* ============ 差分の種類を推定 ============ */
@@ -3089,7 +3224,8 @@ function diffChars(a,b){
   // 「ほぼ全文字が一致＝別ページへ移動しただけ」と誤認されて検出漏れになる不具合があった
   // （実データで確認・修正：v1.7）。上限を4,000,000→25,000,000に引き上げ、この規模のページ
   // （文字数5000字程度まで）でも粗いフォールバックを使わず文字単位の正確なLCSで差分を取る。
-  if(n*m>25000000){ const as=a.map(c=>c.ch).join(""),bs=b.map(c=>c.ch).join(""); return as===bs?[]:[{aChars:a,bChars:b}]; }
+  diffChars.mode="dp";
+  if(n*m>25000000) return diffCharsLarge(a,b);
   const W=m+1, dp=new Uint32Array((n+1)*W);
   for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--){
     dp[i*W+j] = a[i].ch===b[j].ch ? dp[(i+1)*W+(j+1)]+1 : Math.max(dp[(i+1)*W+j], dp[i*W+(j+1)]);
@@ -3104,6 +3240,71 @@ function diffChars(a,b){
   while(i<n){ (cur||(cur={aChars:[],bChars:[]})).aChars.push(a[i++]); }
   while(j<m){ (cur||(cur={aChars:[],bChars:[]})).bChars.push(b[j++]); }
   flush();
+  return blocks;
+}
+/* v1.22 文字の多いページ（n×m が 2500万超）の差分。
+   背景（報告 10/14「0編 (2).pdf」p23・誤検出28件）：InDesignで同じ本文の枠が何重にも重なった
+   ページで、A/Bとも約1.7万字・違いは15字ほど。従来はDP表が大きすぎるため「ページ全体を1個の
+   置換ブロック」として扱っており、その巨大ブロックを紙面の塊ごとに画素検証した結果、内容が同じ
+   塊でも描画のわずかな差（6%以上）が出たところが全部「文字が変わっています」になっていた。
+   対策：(1) 先頭・末尾の一致部分を落とし、(2) それでも大きければ Myers の差分（計算量は
+   文字数×違いの数）で文字単位の正確な差分を取る。違いが多すぎる（D>MAXD）ときだけ従来の
+   粗い扱いに戻す。結果は通常のDPと同じ「最長一致」なので、判定の基準は変わらない。 */
+function diffCharsLarge(a,b){
+  const n=a.length, m=b.length;
+  let pre=0; while(pre<n && pre<m && a[pre].ch===b[pre].ch) pre++;
+  let suf=0; while(suf<n-pre && suf<m-pre && a[n-1-suf].ch===b[m-1-suf].ch) suf++;
+  const A=a.slice(pre,n-suf), B=b.slice(pre,m-suf);
+  if(!A.length && !B.length){ diffChars.mode="trim"; return []; }
+  if(!A.length || !B.length){ diffChars.mode="trim"; return [{aChars:A,bChars:B}]; }
+  if(A.length*B.length<=25000000){ const r=diffChars(A,B); diffChars.mode="trim+dp"; return r; }
+  const r=myersBlocks(A,B,3000);
+  if(r){ diffChars.mode="myers"; return r; }
+  diffChars.mode="coarse";
+  return [{aChars:A,bChars:B}];
+}
+// Myers O((n+m)D) の差分。D（編集数）が maxD を超えたら null。返り値は diffChars と同じ形のブロック列。
+function myersBlocks(a,b,maxD){
+  const n=a.length, m=b.length, off=maxD+1;
+  const v=new Int32Array(2*maxD+3); v[off+1]=0;
+  const trace=[];
+  let D=-1;
+  outer:
+  for(let d=0; d<=maxD; d++){
+    trace.push(v.slice(off-d-1, off+d+2));          // 手順dの直前の状態（k=-d-1..d+1）
+    for(let k=-d; k<=d; k+=2){
+      let x=(k===-d || (k!==d && v[off+k-1]<v[off+k+1])) ? v[off+k+1] : v[off+k-1]+1;
+      let y=x-k;
+      while(x<n && y<m && a[x].ch===b[y].ch){ x++; y++; }
+      v[off+k]=x;
+      if(x>=n && y>=m){ D=d; break outer; }
+    }
+  }
+  if(D<0) return null;
+  // 後ろからたどって編集列を作る
+  const ops=[];   // [type, index]  type: 0=一致 1=削除(a) 2=追加(b)
+  let x=n, y=m;
+  for(let d=D; d>0; d--){
+    const V=trace[d], g=k=>V[k+d+1];
+    const k=x-y;
+    const prevK=(k===-d || (k!==d && g(k-1)<g(k+1))) ? k+1 : k-1;
+    const prevX=g(prevK), prevY=prevX-prevK;
+    const sx=(prevK===k+1)?prevX:prevX+1, sy=sx-k;   // 編集1手のあとの位置
+    while(x>sx && y>sy){ x--; y--; ops.push(0); }
+    if(prevK===k+1){ ops.push(2); y--; } else { ops.push(1); x--; }
+    x=prevX; y=prevY;
+  }
+  ops.reverse();
+  const blocks=[]; let cur=null, i=0, j=0;
+  // d=0 区間（先頭の一致）は ops に含まれない。ops が消費しない分が先頭の一致なので、そこから始める
+  const cntA=ops.filter(t=>t!==2).length, cntB=ops.filter(t=>t!==1).length;
+  i=n-cntA; j=m-cntB;
+  for(const t of ops){
+    if(t===0){ if(cur){ blocks.push(cur); cur=null; } i++; j++; }
+    else if(t===1){ (cur||(cur={aChars:[],bChars:[]})).aChars.push(a[i++]); }
+    else { (cur||(cur={aChars:[],bChars:[]})).bChars.push(b[j++]); }
+  }
+  if(cur) blocks.push(cur);
   return blocks;
 }
 // 変更ブロックの文字を「紙面上でつながっている塊」ごとに分ける（v1.14）。
@@ -3188,10 +3389,13 @@ function diffFracCommon(p,X0,Y0,X1,Y1){
 
 function textDiff(p){
   const aItems=S.aText, bItems=S.bText;
-  if((aItems?aItems.length:0)<2 || (bItems?bItems.length:0)<2){
+  // v1.22 以前は「2件未満」で打ち切っていた。表4の管理コード「2511-11→2611-12」だけが文字で
+  //  残っているPDF（他はアウトライン化）だと、1件同士のため文字比較をせず、6〜7ptの数字の
+  //  置き換えは画素の差が小さすぎて見逃していた（報告 10/16 03600039-ウラ）。1件でも比べる。
+  if((aItems?aItems.length:0)<1 || (bItems?bItems.length:0)<1){
     // 文字比較が成立しない＝見逃し報告のときに最初に知りたい情報なので残す
     S.diag={ ran:false, inputs:{aItems:(aItems?aItems.length:0), bItems:(bItems?bItems.length:0)},
-             note:"テキスト片が2件未満。文字比較は未実行（画素判定のみ）" };
+             note:"テキスト片が無い。文字比較は未実行（画素判定のみ）" };
     return {findings:[],explained:[]};
   }
   const trunc=s=>{ s=annotateCodepoints(s||""); return s.length>60?s.slice(0,60)+"…":s; };
@@ -3222,10 +3426,12 @@ function textDiff(p){
   // 文字数とLCSの粗いフォールバック発動を記録（v1.11）
   DIAG.inputs.aChars=aC.length; DIAG.inputs.bChars=bC.length;
   DIAG.inputs.nm=aC.length*bC.length;
-  DIAG.inputs.fallback=DIAG.inputs.nm>25000000;
   // まずブロックを収集
   const _blks=[];
-  for(const blk of diffChars(aC,bC)){
+  const _diffs=diffChars(aC,bC);
+  DIAG.inputs.diffMode=diffChars.mode;                       // v1.22 dp / trim / trim+dp / myers / coarse
+  DIAG.inputs.fallback=(diffChars.mode==="coarse");          // 粗い扱い（ページ丸ごと1ブロック）になったときだけ true
+  for(const blk of _diffs){
     const aStr=blk.aChars.map(c=>c.ch).join(""), bStr=blk.bChars.map(c=>c.ch).join("");
     if(!aStr && !bStr) continue;
     _blks.push({blk,aStr,bStr});
@@ -3653,7 +3859,7 @@ function updateHud(){
   const a=getA(S.page), b=getB(S.page);
   if(S.matchMode==="folio" || S.matchMode==="visual" || Object.keys(S.manualA).length){
     const fa=(S.matchMode==="folio" && a&&S.foliosA[a-1]!=null)?`ノンブル${S.foliosA[a-1]}`
-             :(S.matchMode==="visual" && a)?"絵柄一致":"";
+             :(S.matchMode==="visual" && a)?((S.lowPair&&b&&S.lowPair[b]!=null&&!S.manualA[b])?"絵柄の一致度低・要確認":"絵柄一致"):"";
     pairNote = `　|　対応 <b>B p${b||"-"} ↔ A p${a||"なし"}${fa?` (${fa})`:""}</b>`;
   }
   $("#hud").innerHTML=
@@ -4198,7 +4404,7 @@ function showEmpty(){ $("#empty").style.display=(S.docA||S.docB)?"none":"flex"; 
      ・A を入れ直したときは、全タブを新しい A で自動的にチェックし直す。 */
 const JOB_KEYS=["docB","nameB","boxesA","boxesB","rawBoxesB","tomboBoxesA","tomboBoxesB","tomboChecked","profB",
   "planA","planB","spreadA","spreadB","bindRTL","bindManual","matchMode","foliosA","foliosB","mapBtoA","manualA",
-  "pairCorrSum","pageSummary","page","offX","offY","aLogical","bLogical","gAStr","gBStr","gAgram","gBgram",
+  "pairCorrSum","lowPair","pairBest","pageSummary","page","offX","offY","aLogical","bLogical","gAStr","gBStr","gAgram","gBgram",
   "inkActive","alignedByBox","aTrimPx","aBleedPx","regions","activeRegion","originMode"];
 const JOBS=[]; let activeJob=null, jobSeq=0, jobRunning=false;
 function snapJob(job){ if(!job) return; const o={}; for(const k of JOB_KEYS) o[k]=S[k]; job.snap=o; }
@@ -4709,7 +4915,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.19";
+  const APP_VERSION = "v1.22";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
