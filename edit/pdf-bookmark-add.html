@@ -578,6 +578,16 @@
     align-items:center; justify-content:center; padding:24px;
   }
   .modal-bg.show{display:flex;}
+  /* 処理中の表示：重い処理のあいだ画面を覆い、今どの段階かと経過秒数を出す（連打防止も兼ねる） */
+  .busy-bg{display:none; position:fixed; inset:0; z-index:60; background:rgba(30,20,15,.32); backdrop-filter:blur(1.5px); align-items:center; justify-content:center; padding:24px;}
+  .busy-bg.show{display:flex;}
+  .busy-card{background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 60px rgba(40,30,20,.30);
+    padding:22px 26px; min-width:300px; max-width:440px; display:flex; gap:16px; align-items:center;}
+  .busy-spin{flex:none; width:34px; height:34px; border-radius:50%; border:3.5px solid var(--shu-dim); border-top-color:var(--shu); animation:busySpin .8s linear infinite;}
+  @keyframes busySpin{to{transform:rotate(360deg);}}
+  .busy-title{font-size:14px; font-weight:700; color:var(--ink);}
+  .busy-step{font-size:12px; color:var(--sub); margin-top:4px; line-height:1.5;}
+  .busy-time{font-size:11px; color:var(--faint); margin-top:3px; font-family:var(--mono);}
   .modal-panel{
     width:100%; max-width:640px; max-height:80vh;
     background:var(--panel); border:1px solid var(--line); border-radius:16px;
@@ -1063,6 +1073,17 @@
   <div class="preview-right" id="previewRight"></div>
 </div>
 
+<div class="busy-bg" id="busyBg" role="status" aria-live="polite">
+  <div class="busy-card">
+    <div class="busy-spin"></div>
+    <div>
+      <div class="busy-title" id="busyTitle">処理中…</div>
+      <div class="busy-step" id="busyStep"></div>
+      <div class="busy-time" id="busyTime"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="logModalBg">
   <div class="modal-panel">
     <div class="modal-hd">
@@ -1201,7 +1222,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.14";
+const APP_VERSION = "v1.15";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1227,7 +1248,41 @@ const $ = id => document.getElementById(id);
 document.getElementById("appVer").textContent = APP_VERSION;
 const logBox = $("logBox");
 
+// ── 処理中表示 ──
+let busyActive = false, busyTimer = null, busyT0 = 0;
+async function busyStart(title){
+  busyActive = true;
+  busyT0 = performance.now();
+  $("busyTitle").textContent = title;
+  $("busyStep").textContent = "準備しています…";
+  $("busyTime").textContent = "";
+  $("busyBg").classList.add("show");
+  clearInterval(busyTimer);
+  busyTimer = setInterval(() => {
+    $("busyTime").textContent = `経過 ${Math.floor((performance.now() - busyT0) / 1000)} 秒`;
+  }, 500);
+  // 表示を確実に画面へ出してから重い処理に入る
+  await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+}
+// 確認ダイアログを出すあいだは処理中表示を一旦隠す
+function confirmOverBusy(msg){
+  const shown = $("busyBg").classList.contains("show");
+  if(shown) $("busyBg").classList.remove("show");
+  const ok = confirm(msg);
+  if(shown && busyActive) $("busyBg").classList.add("show");
+  return ok;
+}
+function busyEnd(){
+  busyActive = false;
+  clearInterval(busyTimer);
+  $("busyBg").classList.remove("show");
+}
 function log(msg, cls){
+  // 処理中は「── ○○中 ──」の見出しログを、今の段階として表示する
+  if(busyActive){
+    const m = String(msg).match(/^──\s*(.+?)\s*──$/);
+    if(m) $("busyStep").textContent = m[1];
+  }
   const span = document.createElement("span");
   if(cls) span.className = cls;
   span.textContent = msg + "\n";
@@ -1476,45 +1531,28 @@ function createPaneViewer(canvas, stage){
     ctx.drawImage(st.content, st.panX, st.panY, st.contentW * st.zoom, st.contentH * st.zoom);
     if(st.hl) drawHighlight();
   }
-  // 目次の該当箇所：蛍光ペン風の黄色で塗り、赤枠を数回明滅させてから点灯のまま残す
+  // 目次の該当箇所：レモンイエローの蛍光ペンでマーカーを引いたように塗り、黄色そのものを数回点滅させてから点灯のまま残す
+  const HL_BLINK_SEC = 2.0;
   function drawHighlight(){
     const h = st.hl, z = st.zoom;
     const x = st.panX + h.x * z, y = st.panY + h.y * z, w = h.w * z, hh = h.h * z;
     const t = (performance.now() - h.t0) / 1000;
-    const pulse = t < 1.8 ? 0.5 - 0.5 * Math.cos(t * 2 * Math.PI / 0.6) : 0;
-    const r = Math.min(8, w / 2, hh / 2);
-    const path = () => {
-      ctx.beginPath();
-      if(ctx.roundRect) ctx.roundRect(x, y, w, hh, r); else ctx.rect(x, y, w, hh);
-    };
+    // 0.5秒周期で濃淡を4回繰り返し、最後は濃いまま止める
+    const k = t < HL_BLINK_SEC ? 0.5 + 0.5 * Math.cos(t * 2 * Math.PI / 0.5) : 1;
+    const r = Math.min(3 * z + 2, w / 2, hh / 2);
     ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.fillStyle = `rgba(255, 214, 0, ${0.38 + 0.22 * pulse})`;
-    path(); ctx.fill();
-    ctx.restore();
-    ctx.save();
-    ctx.shadowColor = "rgba(220, 38, 38, .85)";
-    ctx.shadowBlur = 4 + 16 * pulse;
-    ctx.strokeStyle = "#dc2626";
-    ctx.lineWidth = 2 + 2 * pulse;
-    path(); ctx.stroke();
-    // 最初の一瞬だけ外側へ広がる輪を出して、視線を引きつける
-    if(t < 0.7){
-      const g = 4 + t * 40, a = 1 - t / 0.7;
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = `rgba(220, 38, 38, ${0.6 * a})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      if(ctx.roundRect) ctx.roundRect(x - g, y - g, w + g * 2, hh + g * 2, r + g); else ctx.rect(x - g, y - g, w + g * 2, hh + g * 2);
-      ctx.stroke();
-    }
+    ctx.globalCompositeOperation = "multiply";   // 文字の黒はそのまま残し、紙の白だけを黄色に染める
+    ctx.fillStyle = `rgba(255, 243, 0, ${0.15 + 0.6 * k})`;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(x, y, w, hh, r); else ctx.rect(x, y, w, hh);
+    ctx.fill();
     ctx.restore();
   }
   function animate(){
     if(animId) return;
     const loop = () => {
       draw();
-      if(st.hl && performance.now() - st.hl.t0 < 1900) animId = requestAnimationFrame(loop);
+      if(st.hl && performance.now() - st.hl.t0 < HL_BLINK_SEC * 1000 + 100) animId = requestAnimationFrame(loop);
       else { animId = 0; draw(); }
     };
     animId = requestAnimationFrame(loop);
@@ -1525,7 +1563,7 @@ function createPaneViewer(canvas, stage){
     const q = st.vp.convertToViewportRectangle([b.x0, b.y0, b.x1, b.y1]);
     const x0 = Math.min(q[0], q[2]), x1 = Math.max(q[0], q[2]);
     const y0 = Math.min(q[1], q[3]), y1 = Math.max(q[1], q[3]);
-    const pad = 4 * (st.vp.scale || 1);
+    const pad = 2.5 * (st.vp.scale || 1);
     st.hl = {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2, t0: performance.now()};
     const v = viewSize(), z = st.zoom, h = st.hl;
     const sx = st.panX + h.x * z, sy = st.panY + h.y * z;
@@ -2160,7 +2198,9 @@ async function loadTxtFile(f){
 async function runFromList(){
   if(!pdfFile){ notifyUser("⚠ 先にPDFファイルを選択してください。"); return; }
   if(!txtFile){ notifyUser("⚠ しおりリスト（.txt）を選択してください。"); return; }
+  if(busyActive) return;
   const btn = $("btnRunList"); btn.disabled = true;
+  await busyStart("しおりを作成しています");
   previewTocPages = []; // しおりリスト経由は目次ページ指定がないため並列表示は無効
   log("=".repeat(44));
   log("── しおりリストを読み込み中 ──");
@@ -2176,6 +2216,7 @@ async function runFromList(){
     log(`  エラー：${e.message || e}`, "err");
     console.error(e);
   }finally{
+    busyEnd();
     btn.disabled = false;
   }
 }
@@ -2410,7 +2451,9 @@ function itemsBox(items, vertical){
     const tx = it.transform[4], ty = it.transform[5];
     let ax0, ax1, ay0, ay1;
     if(vertical){
-      ax0 = tx; ax1 = tx + Math.max(it.width || 0, fs);
+      // pdf.js の縦組みアイテムは x が字面の中心を指すので、幅の半分ずつ左右に取る
+      const w = Math.max(it.width || 0, fs);
+      ax0 = tx - w / 2; ax1 = tx + w / 2;
       ay1 = ty; ay0 = ty - Math.max(it.height || 0, fs);
     }else{
       ax0 = tx; ax1 = tx + Math.max(it.width || 0, fs * 0.5);
@@ -3078,7 +3121,9 @@ async function autoDetectToc(){
   if(!pdfFile){ notifyUser("⚠ 先にPDFファイルを選択してください。"); return; }
   const rangeStr = $("tocPages").value.trim();
 
+  if(busyActive) return;   // 処理中の連打は無視
   const btn = $("btnAutoToc"); btn.disabled = true;
+  await busyStart("目次を照合しています");
   try{
     log("=".repeat(44));
     const buf = await pdfFile.arrayBuffer();
@@ -3163,7 +3208,7 @@ async function autoDetectToc(){
       notifyUser("⚠ 「見出し＋ページ番号」のパターンが見つかりませんでした。指定ページが目次ではない可能性があります。");
       return;
     }
-    if(bmEntries.length > 0 && !confirm(`現在の階層エディタには ${bmEntries.length} 件のしおりがあります。目次からの自動認識結果（${parsed.length} 件）で置き換えますか？`)){
+    if(bmEntries.length > 0 && !confirmOverBusy(`現在の階層エディタには ${bmEntries.length} 件のしおりがあります。目次からの自動認識結果（${parsed.length} 件）で置き換えますか？`)){
       log("  （キャンセルしました）");
       return;
     }
@@ -3269,6 +3314,7 @@ async function autoDetectToc(){
     log(`  エラー：${e.message || e}`, "err");
     console.error(e);
   }finally{
+    busyEnd();
     btn.disabled = false;
   }
 }
