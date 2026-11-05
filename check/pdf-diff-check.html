@@ -389,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.22　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.23　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -1289,7 +1289,17 @@ function applyAlignment(a,b){
   const forcedTrim = ma.crop || mb.crop || spreadActive;
   const trimUsable = !boxIsTrivial(S.boxesA[ma.src-1]) && !boxIsTrivial(S.boxesB[mb.src-1]);
   const mode = forcedTrim ? (trimUsable ? "trim" : "center") : S.originMode;
-  if(mode==="center") return false;
+  if(mode==="center"){
+    // v1.23 中央そろえでも、仕上がりをトンボから取った／相手から推定したときは「仕上がりの中央」どうしで合わせる。
+    //  （A3アートボードの片寄った位置に仕上がりがある出力見本だと、用紙の中央そろえでは大きくずれる）
+    //  仕上がりが用紙の中央にある場合は、従来の用紙中央そろえと同じ結果になる。
+    const bxA=S.boxesA[ma.src-1], bxB=S.boxesB[mb.src-1];
+    if(trimUsable && (bxA.trimFromTombo||bxB.trimFromTombo)){
+      const ra=boxPxForLogical(a,bxA,"trim"), rb=boxPxForLogical(b,bxB,"trim");
+      if(ra&&rb){ S.offX=Math.round(ra.x+ra.w/2-(rb.x+rb.w/2)); S.offY=Math.round(ra.y+ra.h/2-(rb.y+rb.h/2)); return true; }
+    }
+    return false;
+  }
   const aC=logicalBoxCornerPx(a, S.boxesA[ma.src-1], mode);
   const bC=logicalBoxCornerPx(b, S.boxesB[mb.src-1], mode);
   if(!aC||!bC) return false;
@@ -1759,6 +1769,71 @@ async function fixBoxesByTombo(doc, raw, fin, label){
   });
   return cnt ? {boxes:out, n:cnt} : null;
 }
+// v1.23 寸法の手がかりなしで、描かれたトンボから仕上がり矩形を取る（Box情報が全ページ無いPDF用）。
+//  ・150dpiで描き、detectTomboRect で4隅のL字を探す → その寸法で findTrimByTombo を当てて線の中心を精密化
+//  ・誤検出よけ：仕上がり＋3.5mmの外側にインクがほとんど無いこと（トンボ・スラッグ程度）。
+//    トンボの無いPDFで写真の枠などを拾うと、外側に本文が残るのでここで落ちる。
+//  ・ページの半分以上で取れなければ何もしない。単ページ／見開きの判定（tomboK）は変えない。
+async function boxesFromDrawnTombo(doc, raw){
+  const n=raw.length; if(!n||!doc) return null;
+  if(raw.some(bx=>!bx||!boxIsTrivial(bx))) return null;            // Box情報があるPDFは対象外
+  let targets=[...Array(n).keys()].map(i=>i+1);
+  if(n>12){ const set=new Set([1,2,n-1,n]); for(let j=0;j<8;j++) set.add(1+Math.round(j*(n-1)/7)); targets=[...set].sort((a,b)=>a-b); }
+  const found=new Map(); let done=0;
+  setBusyProgress(0,targets.length,"トンボから仕上がり位置を確認中");
+  for(const p of targets){
+    if(S.pairAbort) break;
+    try{
+      const page=await doc.getPage(p);
+      if(!page.rotate){
+        const dpi=200, sc=dpi/72, vp=page.getViewport({scale:sc});
+        const cv=document.createElement("canvas"); cv.width=Math.max(1,Math.round(vp.width)); cv.height=Math.max(1,Math.round(vp.height));
+        const ctx=cv.getContext("2d",{willReadFrequently:true}); ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height);
+        await page.render({canvasContext:ctx, viewport:vp}).promise;
+        const img=ctx.getImageData(0,0,cv.width,cv.height); try{ page.cleanup(); }catch(e){}
+        let r=detectTomboRect(img, cv.width, cv.height, dpi);
+        if(r){
+          // 日本式の二重トンボで外側（塗り足し線）を拾っていることがあるので、6mm小さい組（仕上がり線）を先に探す
+          const in6=dpi/25.4*6, near2=dpi/25.4*2;
+          const fi=findTrimByTombo(img, cv.width, cv.height, dpi, r.w-in6, r.h-in6);
+          const f =findTrimByTombo(img, cv.width, cv.height, dpi, r.w, r.h);
+          if(fi && Math.abs(fi.x-(r.x+in6/2))<=near2 && Math.abs(fi.y-(r.y+in6/2))<=near2) r=fi;
+          else if(f && Math.abs(f.x-r.x)<=near2 && Math.abs(f.y-r.y)<=near2) r=f; }
+        const mmPx=dpi/25.4;
+        if(r && r.w>=mmPx*30 && r.h>=mmPx*30 && r.w<=cv.width-mmPx*6 && r.h<=cv.height-mmPx*6){
+          // 外側のインク量チェック
+          const d=img.data, W=cv.width, H=cv.height, g=Math.round(mmPx*3.5);
+          const X0=r.x-g, Y0=r.y-g, X1=r.x+r.w+g, Y1=r.y+r.h+g; let out=0, ink=0;
+          for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2){ if(x>=X0&&x<X1&&y>=Y0&&y<Y1) continue; out++; const i=(y*W+x)<<2; if(d[i]+d[i+1]+d[i+2]<600) ink++; }
+          if(out && ink/out<0.03){
+            const v=page.view;
+            found.set(p,{x:v[0]+r.x/sc, y:v[3]-(r.y+r.h)/sc, w:r.w/sc, h:r.h/sc});
+          }
+        }
+      }
+    }catch(e){ console.warn("トンボ検出に失敗", e); }
+    setBusyProgress(++done,targets.length,"トンボから仕上がり位置を確認中");
+    await new Promise(r=>setTimeout(r,0));
+  }
+  setBusyProgress(-1);
+  if(!found.size || found.size<targets.length/2) return null;
+  // 仕上がり寸法は全ページの中央値に統一（線の太さ・端数の揺れを消す）
+  const med=a=>{ const s=a.slice().sort((p,q)=>p-q); return s[s.length>>1]; };
+  const fw=med([...found.values()].map(t=>t.w)), fh=med([...found.values()].map(t=>t.h));
+  const first=[...found.entries()][0];
+  const bleedPt=3/25.4*72; let cnt=0;
+  const out=raw.map((bx,i)=>{
+    let t=found.get(i+1);
+    if(!t){ const M0=raw[first[0]-1].media, M=bx.media;     // 取れなかったページは同じ用紙なら同じ位置
+      if(Math.abs(M.w-M0.w)>1||Math.abs(M.h-M0.h)>1) return bx;
+      t={x:M.x+(first[1].x-M0.x), y:M.y+(first[1].y-M0.y), w:first[1].w, h:first[1].h}; }
+    const cx=t.x+t.w/2, cy=t.y+t.h/2, tt={x:cx-fw/2, y:cy-fh/2, w:fw, h:fh}, M=bx.media;
+    const x0=Math.max(M.x,tt.x-bleedPt), y0=Math.max(M.y,tt.y-bleedPt), x1=Math.min(M.x+M.w,tt.x+tt.w+bleedPt), y1=Math.min(M.y+M.h,tt.y+tt.h+bleedPt);
+    cnt++;
+    return Object.assign({}, bx, {trim:tt, bleed:{x:x0,y:y0,w:x1-x0,h:y1-y0}, trimFromTombo:true});
+  });
+  return cnt ? {boxes:out, n:cnt} : null;
+}
 // A/Bの1ページあたりの仕上がりが食い違うときだけ、トンボで補正する。補正したらtrue。
 async function correctTrimsByTombo(){
   if(!S.docA||!S.docB) return false;
@@ -1767,6 +1842,30 @@ async function correctTrimsByTombo(){
   const rawA=S.rawBoxesA||[], rawB=S.rawBoxesB||[];
   if(!rawA.length||!rawB.length) return false;
   const finA=logicalFinishSize(rawA, S.planA), finB=logicalFinishSize(rawB, S.planB);
+  // v1.23 A/BどちらもBox情報が無い（TrimBox＝用紙）とき：描かれたトンボがあればそこから仕上がりを取る。
+  //  実データ（10/06 百瀬さん ZDM_kanshaday26_kofu × fix_*_honten_ds）：AはIllustratorのA3アートボードに
+  //  145×280.5mmの仕上がりとトンボを中央からずらして配置、Bは仕上がり＋四方12.7mmでトンボなし。
+  //  どちらもTrimBox＝用紙のため、A3全体とB全体を比べることになり、絵柄の一致度が0.23〜0.34しか出ず
+  //  ウラがオモテに対応づけられ、位置も用紙の中央そろえで大きくずれていた。
+  if(!finA && !finB){
+    for(const [side,doc,raw,label] of [["A",S.docA,rawA,"A・顧客入稿"],["B",S.docB,rawB,"B・最終下版"]]){
+      if(S.pairAbort) break;
+      const r=await boxesFromDrawnTombo(doc, raw);
+      if(r){
+        if(side==="A") S.tomboBoxesA=r.boxes; else S.tomboBoxesB=r.boxes;
+        // もう片側にもトンボがあれば、取れた寸法を手がかりに探す（日本式の二重トンボは寸法が分かれば確実に拾える）。
+        // 無ければ applyInferredBoxes が「用紙の中央に相手の仕上がり」と推定する。
+        const oDoc=side==="A"?S.docB:S.docA, oRaw=side==="A"?rawB:rawA, oLabel=side==="A"?"B・最終下版":"A・顧客入稿";
+        const fin=logicalFinishSize(r.boxes, side==="A"?S.planA:S.planB);
+        const r2=(fin && !S.pairAbort)? await fixBoxesByTombo(oDoc, oRaw, fin, oLabel) : null;
+        if(r2){ if(side==="A") S.tomboBoxesB=r2.boxes; else S.tomboBoxesA=r2.boxes; }
+        if(!S.tomboToastShown){ S.tomboToastShown=true;
+          toast(`TrimBoxが無いため、${r2?"A・B両方":label}の仕上がり位置を描かれたトンボから取得（元のPDFは変更しません）`,"ok"); }
+        return true;
+      }
+    }
+    return false;
+  }
   if(!finA||!finB||finClose(finA,finB)) return false;    // 片方にBox情報が無い／もともと一致
   const sides=[["A",S.docA,rawA,finB,"A・顧客入稿"],["B",S.docB,rawB,finA,"B・最終下版"]];
   for(const [side,doc,raw,fin,label] of sides){
@@ -4915,7 +5014,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.22";
+  const APP_VERSION = "v1.23";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
