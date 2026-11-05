@@ -389,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.23　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.24　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -827,23 +827,39 @@ function subShift(doc, pageNum, view, scale){
 // doc -> Map(物理ページ番号 -> 画像矩形[scale=1のpx])。PDFを読み直せばdocが変わるので自動的に無効。
 const imgRectCache=new WeakMap();
 // 命令列(ops)をCTM追跡して配置画像の矩形を返す（vpTransform基準のpx）
+// v1.24 クリップ（マスク）も追跡し、画像の「見えている範囲」を返す。以前は画像全体の矩形だったため、
+//  枠で切り抜いた写真では見えていない部分まで囲み、隣の写真の枠と重なって分かりにくかった。
+//  クリップが矩形以外（円・多角形）のときは外接矩形で近似する。
 function imageRectsFromOps(ops, vpTransform){
   const OPS=pdfjsLib.OPS, AT=pdfjsLib.Util.applyTransform, MT=pdfjsLib.Util.transform;
-  let ctm=vpTransform.slice(); const st=[]; const rects=[];
+  const bboxOf=pts=>{ let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18; for(const q of pts){ if(q[0]<x0)x0=q[0]; if(q[0]>x1)x1=q[0]; if(q[1]<y0)y0=q[1]; if(q[1]>y1)y1=q[1]; } return [x0,y0,x1,y1]; };
+  const rectXf=(r,m)=>bboxOf([[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]].map(q=>AT(q,m)));
+  const isect=(a,b)=>{ if(!a) return b; if(!b) return a; return [Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])]; };
+  let g={ctm:vpTransform.slice(), clip:null}; const st=[]; const rects=[]; let path=null;
   for(let i=0;i<ops.fnArray.length;i++){ const fn=ops.fnArray[i], ar=ops.argsArray[i];
-    if(fn===OPS.save) st.push(ctm.slice());
-    else if(fn===OPS.restore){ if(st.length) ctm=st.pop(); }
-    else if(fn===OPS.transform) ctm=MT(ctm, ar);
-    else if(fn===OPS.paintFormXObjectBegin){ st.push(ctm.slice()); if(ar&&ar[0]) ctm=MT(ctm, ar[0]); }
-    else if(fn===OPS.paintFormXObjectEnd){ if(st.length) ctm=st.pop(); }
+    if(fn===OPS.save||fn===OPS.beginGroup) st.push({ctm:g.ctm.slice(), clip:g.clip});
+    else if(fn===OPS.restore||fn===OPS.endGroup){ if(st.length) g=st.pop(); }
+    else if(fn===OPS.transform) g.ctm=MT(g.ctm, ar);
+    else if(fn===OPS.paintFormXObjectBegin){ st.push({ctm:g.ctm.slice(), clip:g.clip}); if(ar&&ar[0]) g.ctm=MT(g.ctm, ar[0]);
+      if(ar && ar[1] && ar[1].length===4) g.clip=isect(g.clip, rectXf(ar[1], g.ctm)); }
+    else if(fn===OPS.paintFormXObjectEnd){ if(st.length) g=st.pop(); }
+    else if(fn===OPS.constructPath){ const mm=ar&&ar[2];
+      path=(mm && mm.length===4 && isFinite(mm[0])) ? rectXf([mm[0],mm[2],mm[1],mm[3]], g.ctm) : null; }   // minMax=[minX,maxX,minY,maxY]
+    else if(fn===OPS.clip||fn===OPS.eoClip){ if(path) g.clip=isect(g.clip, path); }
+    else if(fn===OPS.endPath||fn===OPS.fill||fn===OPS.eoFill||fn===OPS.stroke||fn===OPS.closeStroke||fn===OPS.fillStroke||fn===OPS.eoFillStroke||fn===OPS.closeFillStroke||fn===OPS.closeEOFillStroke) path=null;
     else if(fn===OPS.paintImageXObject||fn===OPS.paintInlineImageXObject||fn===OPS.paintImageMaskXObject||fn===OPS.paintJpegXObject){
-      const c=[[0,0],[1,0],[1,1],[0,1]].map(pt=>AT(pt,ctm));
-      const xs=c.map(q=>q[0]), ys=c.map(q=>q[1]);
-      const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
-      rects.push({x:x0,y:y0,w:x1-x0,h:y1-y0});
+      const r=isect(rectXf([0,0,1,1], g.ctm), g.clip);
+      if(r[2]>r[0] && r[3]>r[1]) rects.push({x:r[0],y:r[1],w:r[2]-r[0],h:r[3]-r[1]});
     }
   }
-  return rects;
+  // ほぼ同じ範囲の画像（同じ写真の重ね置き・レイヤー分け）は1つにまとめる
+  const out=[];
+  for(const r of rects){
+    const dup=out.find(o=>{ const ix=Math.max(0,Math.min(o.x+o.w,r.x+r.w)-Math.max(o.x,r.x)), iy=Math.max(0,Math.min(o.y+o.h,r.y+r.h)-Math.max(o.y,r.y));
+      const inter=ix*iy, uni=o.w*o.h+r.w*r.h-inter; return uni>0 && inter/uni>0.9; });
+    if(!dup) out.push(r);
+  }
+  return out;
 }
 // 描画直後のページから、pdf.jsが描画に使った命令列（内部の_intentStates）を読む。
 // pdf.js 3.11.174固定の内部構造に依存するため、取れなければ何もしない（従来のgetOperatorListに戻る）。
@@ -2885,10 +2901,19 @@ function mergeImageRegions(regions, p, ox0, oy0, ox1, oy1){
       const ar=Math.max(1,rg.w*rg.h);
       if(rectOverlap(rg,{x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0}) >= ar*0.6 && ar<=ra*1.05) owner.set(rg,k); } });
   let out=regions.slice();
+  // v1.24 1枚の画像（見えている範囲）の中の差分は、必ず1件にまとめる（中田さん指摘：枠が重なって分からない）。
+  //  まとめ方（ラベル・枠の大きさ）は変化の広がりで決める：
+  //   ・写真全体の色補正 → 画像の範囲で「色が変わっています」
+  //   ・写真の差し替え・大幅加工 → 画像の範囲で「画像が変わっています」
+  //   ・一部だけの変化 → 差分を合わせた範囲で1件（内訳を表示）
+  const breakdown=ms=>{ const c={}; ms.forEach(rg=>{ const k=(rg.cls&&rg.cls.short)||"変更"; c[k]=(c[k]||0)+1; });
+    return Object.entries(c).map(([k,v])=>`${k}${v}`).join("・"); };
   big.forEach((R,k)=>{
     const members=out.filter(rg=>owner.get(rg)===k);
     if(!members.length) return;
-    if(members.length===1 && members[0].cls && members[0].cls.key==="color") return;   // もともと1件の色変更
+    const clipTo=rg=>{ const x0=Math.max(R.x0,rg.x), y0=Math.max(R.y0,rg.y), x1=Math.min(R.x1,rg.x+rg.w), y1=Math.min(R.y1,rg.y+rg.h);
+      if(x1>x0&&y1>y0){ rg.x=x0; rg.y=y0; rg.w=x1-x0; rg.h=y1-y0; } };
+    if(members.length===1){ clipTo(members[0]); return; }      // 1件だけなら見えている範囲に収めるだけ
     // (1) 写真の範囲で A色→B色 の対応表を作る
     const area=(R.x1-R.x0)*(R.y1-R.y0), st=Math.max(1,Math.floor(Math.sqrt(area/160000)));
     // 表の値は平均でなく中央値（写真の上に足した黒ベタ等に引っぱられて、周りの同じ色まで差分にしないため）
@@ -2898,8 +2923,8 @@ function mergeImageRegions(regions, p, ox0, oy0, ox1, oy1){
       const k2=bin(ai); cnt[k2]++; for(let c=0;c<3;c++) hist[(k2*3+c)*32+(bD[bi+c]>>3)]++; }
     for(let k2=0;k2<512;k2++){ const c=cnt[k2]; if(!c) continue;
       for(let ch=0;ch<3;ch++){ const h=(k2*3+ch)*32; let acc=0,lv=0; for(;lv<32;lv++){ acc+=hist[h+lv]; if(acc*2>=c) break; }
-        sum[k2*3+ch]=(lv*8+4)*c; } }      // sum/c が中央値になるように入れておく（下の式をそのまま使う）
-    // 標本の少ない色（表に載らない珍しい色）は判断できないので「説明できる」側に倒す（ノイズで差分を作らない）
+        sum[k2*3+ch]=(lv*8+4)*c; } }      // sum/c が中央値になるように入れておく
+    // 標本の少ない色（表に載らない珍しい色）は判断できないので「説明できる」側に倒す
     const resid=(ai,bi)=>{ const k2=bin(ai), c=cnt[k2]; if(c<4) return 0;
       return Math.max(Math.abs(bD[bi]-sum[k2*3]/c),Math.abs(bD[bi+1]-sum[k2*3+1]/c),Math.abs(bD[bi+2]-sum[k2*3+2]/c)); };
     const raw=(ai,bi)=>Math.max(Math.abs(aD[ai]-bD[bi]),Math.abs(aD[ai+1]-bD[bi+1]),Math.abs(aD[ai+2]-bD[bi+2]));
@@ -2907,51 +2932,40 @@ function mergeImageRegions(regions, p, ox0, oy0, ox1, oy1){
     let n=0, nRaw=0, nRes=0;
     for(let y=R.y0;y<R.y1;y+=st) for(let x=R.x0;x<R.x1;x+=st){ const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue;
       n++; if(raw(ai,bi)>th){ nRaw++; if(resid(ai,bi)>RES) nRes++; } }
-    if(!n) return;
-    const rawFrac=nRaw/n, resFrac=nRes/n;
-    if(rawFrac<0.12) return;                         // 写真の一部だけの変化＝補正ではない。個別のまま
+    const rawFrac=n?nRaw/n:0, resFrac=n?nRes/n:0;
     const same = resFrac < 0.12;                     // 対応表でほぼ説明できる＝同じ写真の色補正
-    let take, cls, extra=[];
-    if(same){
-      take=members;
-      // (3) 補正では説明できない局所の変化（写真の上に足した／消した要素）を拾い直して、別の差分として残す。
-      //  画素の差分は補正部分とつながって1つの塊になることがあるので、塊単位ではなく残差のセルで探し直す。
+    let box={x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0}, cls;
+    const bd=breakdown(members);
+    if(rawFrac>=0.12 && same){
+      // 補正では説明できない局所の変化（写真の上に足した／消した要素）があるか数えて、説明に添える
       const cs=Math.max(4, Math.round(S.dpi/26)), cw=Math.ceil((R.x1-R.x0)/cs), ch=Math.ceil((R.y1-R.y0)/cs);
       const hit=new Uint16Array(cw*ch), need=Math.max(2, Math.floor(cs*cs*0.16));
       for(let y=R.y0;y<R.y1;y++){ const r0=((y-R.y0)/cs|0)*cw;
         for(let x=R.x0;x<R.x1;x++){ const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue;
           if(raw(ai,bi)>th && resid(ai,bi)>RES) hit[r0+((x-R.x0)/cs|0)]++; } }
       const on=new Uint8Array(cw*ch); for(let i=0;i<on.length;i++) on[i]=hit[i]>=need?1:0;
-      const seen=new Uint8Array(cw*ch), stk=new Int32Array(cw*ch), minN=Math.max(1,S.noise);
+      const seen=new Uint8Array(cw*ch), stk=new Int32Array(cw*ch), minN=Math.max(1,S.noise); let local=0;
       for(let i=0;i<on.length;i++){ if(!on[i]||seen[i]) continue;
-        let sp=0; stk[sp++]=i; seen[i]=1; let c0=cw,c1=-1,r0=ch,r1=-1,nn=0;
-        while(sp>0){ const q=stk[--sp], c=q%cw, r=(q-c)/cw; nn++; if(c<c0)c0=c; if(c>c1)c1=c; if(r<r0)r0=r; if(r>r1)r1=r;
+        let sp=0; stk[sp++]=i; seen[i]=1; let nn=0;
+        while(sp>0){ const q=stk[--sp], c=q%cw, r=(q-c)/cw; nn++;
           for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ const nc=c+dc,nr=r+dr; if(nc<0||nr<0||nc>=cw||nr>=ch) continue; const ni=nr*cw+nc; if(on[ni]&&!seen[ni]){seen[ni]=1;stk[sp++]=ni;} } }
-        if(nn<minN) continue;
-        const ex={x:R.x0+c0*cs-2, y:R.y0+r0*cs-2, w:(c1-c0+1)*cs+4, h:(r1-r0+1)*cs+4};
-        // 明るさの向きで増減を言う（補正後の予想より暗い＝何かが足された／明るい＝何かが消えた）
-        let sB=0,sE=0,k3=0;
-        for(let y=Math.max(R.y0,ex.y);y<Math.min(R.y1,ex.y+ex.h);y+=2) for(let x=Math.max(R.x0,ex.x);x<Math.min(R.x1,ex.x+ex.w);x+=2){
-          const ai=pxA(x,y), bi=pxB(x,y); if(ai<0||bi<0) continue; const kk=bin(ai), c=cnt[kk]; if(c<4) continue;
-          sB+=rgbLum(bD[bi],bD[bi+1],bD[bi+2]); sE+=rgbLum(sum[kk*3]/c,sum[kk*3+1]/c,sum[kk*3+2]/c); k3++; }
-        const dl=k3?(sB-sE)/k3:0;
-        ex.cells=nn; ex.pix=0;
-        ex.cls= dl<-20 ? mkCls("added","要素が増えています","写真の色補正とは別に、写真の上で要素が増えています","PIX-7","要素なし","要素あり")
-              : dl>20  ? mkCls("removed","要素が消えています","写真の色補正とは別に、写真の上の要素が消えています","PIX-8","要素あり","要素なし")
-              :          mkCls("changed","内容が変わっています","写真の色補正とは別の変化があります","PIX-9","変化なし","局所的な変化");
-        extra.push(ex);
-      }
-      cls=mkCls("color","色が変わっています",`同じ写真で色味・明るさが大きく変化（補正の可能性）。細かい差分${take.length}件を1件にまとめました`+(extra.length?`（補正と別の変化 ${extra.length}件は個別に表示）`:""),"CLR-6","色味変化なし","写真全体の色味・明るさが変化");
+        if(nn>=minN) local++; }
+      cls=mkCls("color","色が変わっています",`同じ写真で色味・明るさが大きく変化（補正の可能性）。差分${members.length}件を1件にまとめました`+(local?`。※補正とは別の局所的な変化が${local}か所あります（写真の上の要素の増減など）`:""),"CLR-6","色味変化なし","写真全体の色味・明るさが変化");
+    } else if(rawFrac>=0.35){
+      cls=mkCls("changed","画像が変わっています",`画像の差し替え、または大幅な加工の可能性。差分${members.length}件を1件にまとめました（内訳：${bd}）`,"PIX-6","画像は同一","画像の絵柄が変化");
     } else {
-      if(rawFrac<0.35 || members.length<3) return;     // 差し替えとまでは言えない
-      take=members;
-      cls=mkCls("changed","画像が変わっています",`画像の差し替え、または大幅な加工の可能性。細かい差分${take.length}件を1件にまとめました`,"PIX-6","画像は同一","画像の絵柄が変化");
+      // 一部だけの変化：差分を合わせた範囲（画像の見えている範囲内）を1件に
+      let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const rg of members){ x0=Math.min(x0,rg.x); y0=Math.min(y0,rg.y); x1=Math.max(x1,rg.x+rg.w); y1=Math.max(y1,rg.y+rg.h); }
+      box={x:Math.max(R.x0,x0), y:Math.max(R.y0,y0), w:Math.min(R.x1,x1)-Math.max(R.x0,x0), h:Math.min(R.y1,y1)-Math.max(R.y0,y0)};
+      const allColor=members.every(rg=>rg.cls && rg.cls.key==="color");
+      cls= allColor ? mkCls("color","色が変わっています",`画像の一部で色味・明るさが変化。差分${members.length}件を1件にまとめました`,"CLR-7","色味変化なし","画像の一部の色味が変化")
+                    : mkCls("changed","画像の一部が変わっています",`同じ画像の中の差分${members.length}件を1件にまとめました（内訳：${bd}）`,"PIX-10","変化なし","画像の一部が変化");
     }
-    const pix=take.reduce((s,rg)=>s+(rg.pix||0),0), cells=take.reduce((s,rg)=>s+(rg.cells||0),0);
-    const merged={x:R.x0,y:R.y0,w:R.x1-R.x0,h:R.y1-R.y0,cells,pix,cls,mergedFrom:take.length};
-    const set=new Set(take); const at=out.findIndex(rg=>set.has(rg));
-    out=out.filter(rg=>!set.has(rg)); out.splice(Math.max(0,at),0,merged,...extra);
-    if(S.diag){ S.diag.merged=(S.diag.merged||0)+take.length; }
+    const pix=members.reduce((s,rg)=>s+(rg.pix||0),0), cells=members.reduce((s,rg)=>s+(rg.cells||0),0);
+    const merged=Object.assign(box,{cells,pix,cls,mergedFrom:members.length});
+    const set=new Set(members); const at=out.findIndex(rg=>set.has(rg));
+    out=out.filter(rg=>!set.has(rg)); out.splice(Math.max(0,at),0,merged);
+    if(S.diag){ S.diag.merged=(S.diag.merged||0)+members.length; }
   });
   return out;
 }
@@ -5014,7 +5028,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.23";
+  const APP_VERSION = "v1.24";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
