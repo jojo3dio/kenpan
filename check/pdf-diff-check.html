@@ -389,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.24　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.25　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -568,6 +568,11 @@
           <option value="on">オン</option>
           <option value="off" selected>オフ</option>
         </select>
+        <span class="glabel" title="入稿データ（A）と比べて、下版（B）の配置画像の解像度が大きく下がった箇所を知らせます（Aの半分未満かつ200ppi未満）。リンク不良で低解像度のまま出力された事故の検出用">画像の粗さ</span>
+        <select class="sel" id="resDetect" title="画像の解像度低下（粗さ）の検出">
+          <option value="on" selected>オン</option>
+          <option value="off">オフ</option>
+        </select>
       </div>
     </div>
   </div>
@@ -581,6 +586,7 @@
     <span><i style="background:var(--cyan)"></i>色変更（色味・補正）</span>
     <span><i style="background:var(--amber)"></i>文字／内容変更</span>
     <span><i style="background:#5b9cff"></i>太さ変更（ウエイト）</span>
+    <span><i style="background:#3d4bff"></i>画像の粗さ（解像度低下）</span>
     <span><i style="background:repeating-linear-gradient(45deg,#5a4a2a 0 3px,transparent 3px 6px)"></i>片側のみの領域（アートボード差）</span>
   </div>
 
@@ -651,7 +657,7 @@ const S = {
   docA:null, docB:null, nameA:"", nameB:"",
   page:1, dpi:300, scale:300/72,
   offX:0, offY:0,                       // BをAに対してずらす量(px, 現在のscale基準)
-  thresh:38, noise:3, edgeTol:1, colorDetect:"on", inkMode:"auto", inkActive:false, inkToastShown:false, weightDetect:false, mode:"diff", onionOp:0.5, expDpi:100,
+  thresh:38, noise:3, edgeTol:1, resDetect:"on", colorDetect:"on", inkMode:"auto", inkActive:false, inkToastShown:false, weightDetect:false, mode:"diff", onionOp:0.5, expDpi:100,
   // ページ単位のレンダリング結果
   aCv:null, bCv:null, aData:null, bData:null, aW:0,aH:0,bW:0,bH:0,
   aPtW:0,aPtH:0,bPtW:0,bPtH:0,
@@ -861,13 +867,54 @@ function imageRectsFromOps(ops, vpTransform){
   }
   return out;
 }
+/* ---- v1.25 画像の粗さ（解像度低下）検出用：配置画像ごとの実効解像度 ----
+   背景（実事故 11/05 アルファ通信 H1-4）：Illustratorでリンク画像が正しく読めていない状態
+   （リンク情報のPPI・寸法が「-」）のまま出力され、不透明マスク内の写真が 4000×6000px（実効約1232ppi）
+   ではなく 233×349px（約72ppi＝画面表示用の代理画像）に置き換わって下版PDFに入っていた。
+   画素の差分は色の違い（特色の有無など）に埋もれて「色変更」扱いになり、粗さとして区別できなかった。
+   ここでは描画命令から各画像の「画素数」と「置かれた大きさ」を取り、実効解像度(ppi)を出す。
+   x・yのうち低い方を採用。1bitの画像マスク（ステンシル）は対象外。 */
+const imgResCache=new WeakMap();   // doc -> Map(物理ページ番号 -> [{x,y,w,h, fx,fy,fw,fh, pw,ph, ppi}])（scale=1のpx）
+function imageResFromOps(ops, vpTransform){
+  const OPS=pdfjsLib.OPS, AT=pdfjsLib.Util.applyTransform, MT=pdfjsLib.Util.transform;
+  const bboxOf=pts=>{ let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18; for(const q of pts){ if(q[0]<x0)x0=q[0]; if(q[0]>x1)x1=q[0]; if(q[1]<y0)y0=q[1]; if(q[1]>y1)y1=q[1]; } return [x0,y0,x1,y1]; };
+  const rectXf=(r,m)=>bboxOf([[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]].map(q=>AT(q,m)));
+  const isect=(a,b)=>{ if(!a) return b; if(!b) return a; return [Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.min(a[3],b[3])]; };
+  const sc=Math.hypot(vpTransform[0],vpTransform[1])||1;     // 1pt あたりのpx（scale=1なら1）
+  let g={ctm:vpTransform.slice(), clip:null}; const st=[]; const out=[]; let path=null;
+  for(let i=0;i<ops.fnArray.length;i++){ const fn=ops.fnArray[i], ar=ops.argsArray[i];
+    if(fn===OPS.save||fn===OPS.beginGroup) st.push({ctm:g.ctm.slice(), clip:g.clip});
+    else if(fn===OPS.restore||fn===OPS.endGroup){ if(st.length) g=st.pop(); }
+    else if(fn===OPS.transform) g.ctm=MT(g.ctm, ar);
+    else if(fn===OPS.paintFormXObjectBegin){ st.push({ctm:g.ctm.slice(), clip:g.clip}); if(ar&&ar[0]) g.ctm=MT(g.ctm, ar[0]);
+      if(ar && ar[1] && ar[1].length===4) g.clip=isect(g.clip, rectXf(ar[1], g.ctm)); }
+    else if(fn===OPS.paintFormXObjectEnd){ if(st.length) g=st.pop(); }
+    else if(fn===OPS.constructPath){ const mm=ar&&ar[2];
+      path=(mm && mm.length===4 && isFinite(mm[0])) ? rectXf([mm[0],mm[2],mm[1],mm[3]], g.ctm) : null; }
+    else if(fn===OPS.clip||fn===OPS.eoClip){ if(path) g.clip=isect(g.clip, path); }
+    else if(fn===OPS.endPath||fn===OPS.fill||fn===OPS.eoFill||fn===OPS.stroke||fn===OPS.closeStroke||fn===OPS.fillStroke||fn===OPS.eoFillStroke||fn===OPS.closeFillStroke||fn===OPS.closeEOFillStroke) path=null;
+    else if(fn===OPS.paintImageXObject||fn===OPS.paintJpegXObject||fn===OPS.paintInlineImageXObject){
+      let pw=0, ph=0;
+      if(fn===OPS.paintInlineImageXObject){ const d=ar&&ar[0]; if(d){ pw=d.width|0; ph=d.height|0; } }
+      else { pw=(ar&&ar[1])|0; ph=(ar&&ar[2])|0; }
+      if(pw<2||ph<2) continue;
+      const m=g.ctm, lx=Math.hypot(m[0],m[1])/sc, ly=Math.hypot(m[2],m[3])/sc;   // 画像の幅・高さ（pt）
+      if(lx<1||ly<1) continue;
+      const ppi=Math.min(pw/(lx/72), ph/(ly/72));
+      const f=rectXf([0,0,1,1], m), r=isect(f, g.clip);
+      if(!(r[2]>r[0] && r[3]>r[1])) continue;
+      out.push({x:r[0],y:r[1],w:r[2]-r[0],h:r[3]-r[1], fx:f[0],fy:f[1],fw:f[2]-f[0],fh:f[3]-f[1], pw,ph, ppi});
+    }
+  }
+  return out;
+}
 // 描画直後のページから、pdf.jsが描画に使った命令列（内部の_intentStates）を読む。
 // pdf.js 3.11.174固定の内部構造に依存するため、取れなければ何もしない（従来のgetOperatorListに戻る）。
 // v1.18：同じ命令列から「テキストの見え方」モデル（textVisCache）も作る。
 function cacheImageRectsFromRender(doc, pageNum, page){
-  let m=imgRectCache.get(doc), v=textVisCache.get(doc);
-  const needImg=!(m && m.has(pageNum)), needVis=!(v && v.has(pageNum));
-  if(!needImg && !needVis) return;
+  let m=imgRectCache.get(doc), v=textVisCache.get(doc), rz=imgResCache.get(doc);
+  const needImg=!(m && m.has(pageNum)), needVis=!(v && v.has(pageNum)), needRes=!(rz && rz.has(pageNum));
+  if(!needImg && !needVis && !needRes) return;
   const states=page._intentStates; if(!states || typeof states.values!=="function") return;
   let ops=null;
   for(const st of states.values()){
@@ -879,6 +926,11 @@ function cacheImageRectsFromRender(doc, pageNum, page){
     const rects=imageRectsFromOps(ops, page.getViewport({scale:1}).transform);
     if(!m){ m=new Map(); imgRectCache.set(doc, m); }
     m.set(pageNum, rects);
+  }
+  if(needRes){
+    let res=[]; try{ res=imageResFromOps(ops, page.getViewport({scale:1}).transform); }catch(e){ console.warn("imgRes: 解像度の取得に失敗",e); }
+    if(!rz){ rz=new Map(); imgResCache.set(doc, rz); }
+    rz.set(pageNum, res);
   }
   if(needVis){
     let model=null; try{ model=buildTextVisModel(ops, page); }catch(e){ console.warn("textVis: モデル作成に失敗",e); }
@@ -2299,6 +2351,27 @@ async function getImageRectsLogical(doc, plan, logical, scale){
   }catch(e){ return []; }
 }
 
+// v1.25 配置画像の実効解像度（px, 論理ページ座標。見開き分割は半分にクロップ）
+async function getImageResLogical(doc, plan, logical, scale){
+  const m=plan?plan[logical-1]:null; if(!doc||!m||m.src<1||m.src>doc.numPages) return [];
+  try{
+    const page=await doc.getPage(m.src); const sh=subShift(doc, m.src, page.view, scale);
+    const vp=page.getViewport({scale, offsetX:sh.dx, offsetY:sh.dy});
+    let list;
+    const cached=imgResCache.get(doc);
+    if(cached && cached.has(m.src)){
+      list=cached.get(m.src).map(r=>({x:r.x*scale+sh.dx,y:r.y*scale+sh.dy,w:r.w*scale,h:r.h*scale,
+        fx:r.fx*scale+sh.dx,fy:r.fy*scale+sh.dy,fw:r.fw*scale,fh:r.fh*scale,pw:r.pw,ph:r.ph,ppi:r.ppi}));
+    } else {
+      const ops=await page.getOperatorList();
+      list=imageResFromOps(ops, vp.transform);
+    }
+    if(!m.crop) return list;
+    const fullW=Math.round(vp.width); const halfW=Math.floor(fullW/2); const sx=(m.crop==='L')?0:(fullW-halfW);
+    return list.filter(r=> (r.x+r.w/2)>=sx && (r.x+r.w/2)<sx+halfW).map(r=>Object.assign({},r,{x:r.x-sx, fx:r.fx-sx}));
+  }catch(e){ return []; }
+}
+
 async function refreshPage(suggestCenter){
   if(!S.docA && !S.docB) return;
   showBusy(true);
@@ -2317,6 +2390,8 @@ async function refreshPage(suggestCenter){
     S.aText = await getTextItemsLogical(S.docA, S.planA, S.aLogical, S.scale);
     S.bText = await getTextItemsLogical(S.docB, S.planB, S.bLogical, S.scale);
     S.bImgRects = ((S.colorDetect!=="off"||S.inkActive) && S.docB) ? await getImageRectsLogical(S.docB, S.planB, S.bLogical, S.scale) : [];
+    S.aImgRes = (S.resDetect!=="off" && S.docA) ? await getImageResLogical(S.docA, S.planA, S.aLogical, S.scale) : [];
+    S.bImgRes = (S.resDetect!=="off" && S.docB) ? await getImageResLogical(S.docB, S.planB, S.bLogical, S.scale) : [];
     // 文書全体テキスト（reflow相殺用）を一度だけ構築。単ページ表示でも参考文献等の流れ込み誤検出を防ぐ。
     if(S.docA && S.docB) await ensureGlobalText();
 
@@ -2858,6 +2933,8 @@ function computeDiff(){
 
   // v1.22 写真1枚の大きな色補正で「削除」「内容が変わっています」が何十件も出るのを1件にまとめる
   try{ regions=mergeImageRegions(regions, p, ox0, oy0, ox1, oy1); }catch(e){ console.warn("mergeImageRegions",e); }
+  // v1.25 画像の粗さ（Aより解像度が大きく下がった画像）
+  try{ regions=addLowResRegions(regions, p, ox0, oy0, ox1, oy1); }catch(e){ console.warn("addLowResRegions",e); }
 
   // 仕上がり(trim)より外側の検出（ページ情報・トンボ等）は除外。trim既知＆全体モード以外。
   if(S.alignedByBox && S.aTrimPx && S.compareScope!=="full"){
@@ -2870,7 +2947,62 @@ function computeDiff(){
   }
 
   textFindings.sort((a,b)=> a.y-b.y);
-  S.regions = textFindings.concat(regions);
+  // v1.25 粗さは刷版事故に直結するので一覧の先頭に出す
+  const lowres=regions.filter(rg=>rg.cls&&rg.cls.key==="lowres");
+  S.regions = lowres.concat(textFindings, regions.filter(rg=>!(rg.cls&&rg.cls.key==="lowres")));
+}
+
+/* ============ v1.25 画像の粗さ（解像度低下）============
+   Bの配置画像ごとに、同じ位置にあるAの画像と実効解像度を比べる。
+   ・Aに同じ位置の画像があり、Bがその半分未満かつ200ppi未満 → 「画像が粗くなっています」
+   ・Aにも同じくらい粗い画像が同じ位置にある（元から低解像度・マスク用の代理画像など）→ 出さない
+   ・Bにも同じ位置に十分な解像度の画像がある（画像＋低解像度マスクの組など）→ 出さない
+   比較元（A）の画像と比べるので、元からの低解像度画像（スクショ・ぼかし素材）では警告しない。
+   その範囲の画素差分（色変更など）はこの1件にまとめる。 */
+function addLowResRegions(regions, p, ox0, oy0, ox1, oy1){
+  if(S.resDetect==="off") return regions;
+  const A=S.aImgRes||[], B=S.bImgRes||[];
+  if(!A.length || !B.length) return regions;
+  const minSide=S.dpi*10/25.4;                         // 1cm角未満の画像は対象外
+  const RATIO=0.5, MAXPPI=200;
+  const iou=(u,v)=>{ const ix=Math.max(0,Math.min(u.x+u.w,v.x+v.w)-Math.max(u.x,v.x)), iy=Math.max(0,Math.min(u.y+u.h,v.y+v.h)-Math.max(u.y,v.y));
+    const inter=ix*iy, uni=u.w*u.h+v.w*v.h-inter; return uni>0?inter/uni:0; };
+  // 共通座標の「画像全体」の矩形（クリップ前）で照合する（クリップの切り方がA・Bで違っても同じ画像と分かるように）
+  const fa=A.map(r=>({x:r.fx+p.ax,y:r.fy+p.ay,w:r.fw,h:r.fh,ppi:r.ppi}));
+  const fb=B.map(r=>({x:r.fx+p.bx,y:r.fy+p.by,w:r.fw,h:r.fh,ppi:r.ppi,
+    vx:r.x+p.bx,vy:r.y+p.by,vw:r.w,vh:r.h,pw:r.pw,ph:r.ph}));
+  const found=[];
+  for(const b of fb){
+    if(b.ppi>=MAXPPI) continue;
+    if(b.vw<minSide || b.vh<minSide) continue;
+    const mA=fa.filter(a=>iou(a,b)>=0.7);
+    if(!mA.length) continue;                                       // Aに同じ位置の画像が無い（追加・差し替えは別の差分で出る）
+    if(mA.some(a=>a.ppi<=b.ppi*1.5)) continue;                     // Aにも同程度の粗さの画像がある
+    const aBest=Math.max(...mA.map(a=>a.ppi));
+    if(b.ppi>=aBest*RATIO) continue;
+    if(fb.some(o=>o!==b && iou(o,b)>=0.7 && o.ppi>=aBest*0.67)) continue;   // Bにも十分な解像度の同位置画像がある
+    // 見えている範囲（比較の重なり範囲内）
+    const x0=Math.max(ox0,Math.floor(b.vx)), y0=Math.max(oy0,Math.floor(b.vy)), x1=Math.min(ox1,Math.ceil(b.vx+b.vw)), y1=Math.min(oy1,Math.ceil(b.vy+b.vh));
+    if(x1-x0<minSide || y1-y0<minSide) continue;
+    const box={x:x0,y:y0,w:x1-x0,h:y1-y0};
+    if(found.some(f=>iou(f.box,box)>0.9)){ const f=found.find(f=>iou(f.box,box)>0.9); f.bPpi=Math.min(f.bPpi,b.ppi); f.aPpi=Math.max(f.aPpi,aBest); continue; }   // 同じ画像（本体＋マスク等）は1件に
+    found.push({box, aPpi:aBest, bPpi:b.ppi, pw:b.pw, ph:b.ph});
+  }
+  if(!found.length) return regions;
+  let out=regions.slice(); const add=[];
+  for(const f of found){
+    const R=f.box;
+    const inside=out.filter(rg=>{ const ar=Math.max(1,rg.w*rg.h); return rectOverlap(rg,R)>=ar*0.6; });
+    const set=new Set(inside); out=out.filter(rg=>!set.has(rg));
+    const a=Math.round(f.aPpi), b=Math.round(f.bPpi);
+    const note=inside.length?`。この画像の範囲の差分${inside.length}件もこの1件にまとめました`:"";
+    add.push(Object.assign({},R,{cells:0,pix:0,mergedFrom:inside.length||undefined,
+      cls:mkCls("lowres","画像が粗くなっています",
+        `下版の画像の解像度が、入稿データより大きく下がっています（A 約${a}ppi → B 約${b}ppi・${f.pw}×${f.ph}px）。リンクが正しく読めないまま、画面表示用の低解像度画像で出力された可能性があります。元データで再リンクして書き出し直してください${note}`,
+        "RES-1",`約${a}ppi（Aと同等）`,`約${b}ppi`)}));
+    if(S.diag){ S.diag.lowres=(S.diag.lowres||[]).concat([{aPpi:a,bPpi:b,px:`${f.pw}x${f.ph}`,absorbed:inside.length}]); }
+  }
+  return add.concat(out);
 }
 
 /* ============ v1.22 配置画像ごとの差分のまとめ ============
@@ -2980,6 +3112,7 @@ const KIND={
   text:   {color:"#e04fb0",hex:"#e04fb0",short:"文字変更"},   // v1.18 琥珀色をやめてマゼンタに
   weight: {color:"#5b9cff",    hex:"#5b9cff", short:"太さ変更"},
   changed:{color:"#e04fb0",hex:"#e04fb0",short:"変更"},
+  lowres: {color:"#3d4bff",    hex:"#3d4bff", short:"粗さ"},   // v1.25 画像の解像度低下
 };
 function mkCls(key, label, detail, ruleId, expected, actual){
   // 追記的メタデータ（既存の判定ロジック・分岐条件は変更しない）：
@@ -4004,7 +4137,7 @@ function updatePanel(){
     const cnt={moved:0,removed:0,added:0,color:0,text:0,changed:0};
     S.regions.forEach(rg=>{ const key=(rg.cls&&rg.cls.key)||"changed"; cnt[key]=(cnt[key]||0)+1; });
     const parts=[];
-    for(const key of ["moved","text","weight","removed","added","color","changed"]){
+    for(const key of ["lowres","moved","text","weight","removed","added","color","changed"]){
       if(cnt[key]) parts.push(`<span style="color:${KIND[key].color}">${KIND[key].short} ${cnt[key]}</span>`);
     }
     html+=`<div class="row"><span>違いの内訳</span><span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${parts.join("")}</span></div>`;
@@ -4213,7 +4346,7 @@ function renderAllPages(){
     const zero = s.count===0 && !miss;
     const dot = miss ? `<span class="pdot ng">?</span>` : zero ? `<span class="pdot ok">✓</span>` : `<span class="pdot ng">${s.count}</span>`;
     let chips="";
-    for(const key of ["moved","text","weight","removed","added","color","changed"]){
+    for(const key of ["lowres","moved","text","weight","removed","added","color","changed"]){
       if(s.kinds[key]) chips+=`<span style="color:${KIND[key].hex}">${KIND[key].short}${s.kinds[key]}</span>`;
     }
     if(s.aMissing||s.bMissing) chips=`<span style="color:var(--red)">${s.aMissing?"A":"B"}にこのページ無し</span>`;
@@ -4340,6 +4473,7 @@ $("#colorDetect").addEventListener("change",e=>{S.colorDetect=e.target.value;
 $("#inkMode").addEventListener("change",e=>{S.inkMode=e.target.value; S.inkToastShown=true; invalidateScan(); refreshPage(false);});
 $("#weightDetect").addEventListener("change",e=>{S.weightDetect=(e.target.value!=="off");
   computeDiff();buildContent();draw();updatePanel();invalidateScan();});
+$("#resDetect").addEventListener("change",e=>{S.resDetect=e.target.value; invalidateScan(); refreshPage(false);});
 $("#onionOp").addEventListener("input",e=>{S.onionOp=e.target.value/100;$("#onionVal").textContent=e.target.value+"%";
   buildContent();draw();});
 
@@ -4683,6 +4817,7 @@ function resetAll(){
   S.colorDetect="on"; if($("#colorDetect")) $("#colorDetect").value="on";
   S.inkMode="auto"; S.inkActive=false; S.inkToastShown=false; if($("#inkMode")) $("#inkMode").value="auto";
   S.weightDetect=false; if($("#weightDetect")) $("#weightDetect").value="off";
+  S.resDetect="on"; if($("#resDetect")) $("#resDetect").value="on";
   // 検出の詳細設定（感度・ノイズ除去・エッジ許容・解像度・比較範囲）も既定値に戻す。
   // 前の案件でノイズ調整した設定が残ったまま別件を検査すると、感度が鈍って検出漏れになるため。
   S.dpi=300; if($("#dpi")) $("#dpi").value="300"; S.scale=S.dpi/72;
@@ -4794,6 +4929,8 @@ async function loadPageForExport(pg){
   S.aText=await getTextItemsLogical(S.docA,S.planA,S.aLogical,S.scale);
   S.bText=await getTextItemsLogical(S.docB,S.planB,S.bLogical,S.scale);
   S.bImgRects=((S.colorDetect!=="off"||S.inkActive) && S.docB)?await getImageRectsLogical(S.docB,S.planB,S.bLogical,S.scale):[];
+  S.aImgRes=(S.resDetect!=="off" && S.docA)?await getImageResLogical(S.docA,S.planA,S.aLogical,S.scale):[];
+  S.bImgRes=(S.resDetect!=="off" && S.docB)?await getImageResLogical(S.docB,S.planB,S.bLogical,S.scale):[];
   let alignedExp=false, tomboRectExp=null;
   if(a&&b){
     alignedExp=applyAlignment(a,b);
@@ -4897,7 +5034,7 @@ function buildSummaryImage(p){
   c.font="700 20px 'Zen Kaku Gothic New',sans-serif"; c.fillStyle="#1a1a1a";
   c.fillText(`検出 ${S.regions.length} 件`, pad, y);
   let bx=pad+150;
-  for(const key of ["moved","text","removed","added","color","changed"]){
+  for(const key of ["lowres","moved","text","removed","added","color","changed"]){
     if(!cnt[key]) continue;
     c.fillStyle=KIND[key].hex; c.fillRect(bx, y+3, 14,14);
     c.fillStyle="#333"; c.font="400 17px 'Zen Kaku Gothic New',sans-serif";
@@ -4987,6 +5124,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
         <option value="色変更">色変更（色味・補正）</option>
         <option value="文字／内容変更">文字／内容変更</option>
         <option value="太さ変更">太さ変更（ウエイト）</option>
+        <option value="粗さ">画像の粗さ（解像度低下）</option>
         <option value="片側のみの領域">片側のみの領域（アートボード差）</option>
         <option value="その他">その他</option>
       </select>
@@ -5028,7 +5166,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.24";
+  const APP_VERSION = "v1.25";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
