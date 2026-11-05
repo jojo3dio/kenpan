@@ -483,6 +483,13 @@
     border-radius:7px;
     transition:border-color .15s, background .15s;
   }
+  /* 見出しは折り返して全文を表示（textarea を内容の高さに合わせて伸ばす） */
+  .bm-row textarea.bm-title{
+    display:block; resize:none; overflow:hidden; box-sizing:border-box;
+    line-height:1.45; min-height:calc(1.45em + 8px); height:calc(1.45em + 8px);
+    white-space:pre-wrap; overflow-wrap:anywhere; word-break:normal;
+  }
+  .bm-row.toc-hit{box-shadow:inset 0 0 0 2px color-mix(in srgb, #f5b800 75%, transparent);}
   .bm-row .bm-title:hover{border-color:var(--line);}
   .bm-row .bm-title:focus{outline:none;border-color:var(--shu);background:var(--panel);}
   /* ページラベル：長円の白い窓の中に数字/文字を入力（ノンブル上の見た目のラベルであることを明示） */
@@ -689,6 +696,18 @@
     display:flex; flex-direction:column;
   }
   .pv-canvas-stage{position:relative; flex:1; min-height:0; background:var(--panel2);}
+  /* 各ペインの見出し帯：どちらが目次でどちらが本文かを一目で分かるようにする */
+  .pv-pane-head{
+    flex:none; display:flex; align-items:center; gap:8px;
+    padding:7px 14px; font-size:12.5px; font-weight:700; letter-spacing:.04em;
+    border-bottom:1px solid var(--line); background:var(--panel); color:var(--sub);
+  }
+  .pv-pane-head svg{width:16px; height:16px; flex:none;}
+  .pv-pane-head > span:not(.pv-pane-sub){white-space:nowrap; flex:none;}
+  .pv-pane-head .pv-pane-sub{margin-left:auto; font-size:10.5px; font-weight:500; letter-spacing:0; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;}
+  .preview-toc-pane{border:2px solid var(--shu);}
+  .preview-toc-pane .pv-pane-head{background:linear-gradient(160deg, var(--shu), var(--shu-deep)); color:#fff; border-bottom-color:var(--shu-deep);}
+  .preview-toc-pane .pv-canvas-stage{background:color-mix(in srgb, var(--shu) 7%, var(--panel2));}
   #pvCanvas, #pvTocCanvas{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab;}
   #pvCanvas.grabbing, #pvTocCanvas.grabbing{cursor:grabbing;}
   .pv-zoombar{position:absolute; right:12px; bottom:12px; z-index:2; display:flex; gap:6px;}
@@ -993,6 +1012,11 @@
     </div>
     <div class="preview-canvas-row">
       <div class="preview-canvas-wrap preview-toc-pane" id="pvTocPane" style="display:none;">
+        <div class="pv-pane-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/><path d="M6.5 8h2M6.5 11h2M15.5 8h2M15.5 11h2"/></svg>
+          <span>目次</span>
+          <span class="pv-pane-sub">しおりの行を選ぶと該当箇所が光ります</span>
+        </div>
         <div class="pv-canvas-stage" id="pvTocStage">
           <canvas id="pvTocCanvas"></canvas>
           <div class="pv-toc-copybar">
@@ -1015,6 +1039,10 @@
         </div>
       </div>
       <div class="preview-canvas-wrap">
+        <div class="pv-pane-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 15h6M9 18h4"/></svg>
+          <span>本文</span>
+        </div>
         <div class="pv-canvas-stage" id="pvStage">
           <canvas id="pvCanvas"></canvas>
           <div class="pv-navbar">
@@ -1173,7 +1201,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.13";
+const APP_VERSION = "v1.14";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1421,7 +1449,8 @@ function resolvePreviewPageInput(text, totalPages){
 //    ズーム/パンはCanvas変換で行う。目次側・本文側でそれぞれ独立したインスタンスを持つ） ──
 function createPaneViewer(canvas, stage){
   const ctx = canvas.getContext("2d");
-  const st = {content:null, contentW:0, contentH:0, zoom:1, panX:0, panY:0};
+  const st = {content:null, contentW:0, contentH:0, zoom:1, panX:0, panY:0, vp:null, hl:null};
+  let animId = 0;
 
   function viewSize(){ const r = stage.getBoundingClientRect(); return {w:r.width, h:r.height}; }
   function resizeCanvas(){
@@ -1445,6 +1474,66 @@ function createPaneViewer(canvas, stage){
     if(!st.content) return;
     ctx.imageSmoothingEnabled = st.zoom < 1.5;
     ctx.drawImage(st.content, st.panX, st.panY, st.contentW * st.zoom, st.contentH * st.zoom);
+    if(st.hl) drawHighlight();
+  }
+  // 目次の該当箇所：蛍光ペン風の黄色で塗り、赤枠を数回明滅させてから点灯のまま残す
+  function drawHighlight(){
+    const h = st.hl, z = st.zoom;
+    const x = st.panX + h.x * z, y = st.panY + h.y * z, w = h.w * z, hh = h.h * z;
+    const t = (performance.now() - h.t0) / 1000;
+    const pulse = t < 1.8 ? 0.5 - 0.5 * Math.cos(t * 2 * Math.PI / 0.6) : 0;
+    const r = Math.min(8, w / 2, hh / 2);
+    const path = () => {
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(x, y, w, hh, r); else ctx.rect(x, y, w, hh);
+    };
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = `rgba(255, 214, 0, ${0.38 + 0.22 * pulse})`;
+    path(); ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.shadowColor = "rgba(220, 38, 38, .85)";
+    ctx.shadowBlur = 4 + 16 * pulse;
+    ctx.strokeStyle = "#dc2626";
+    ctx.lineWidth = 2 + 2 * pulse;
+    path(); ctx.stroke();
+    // 最初の一瞬だけ外側へ広がる輪を出して、視線を引きつける
+    if(t < 0.7){
+      const g = 4 + t * 40, a = 1 - t / 0.7;
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(220, 38, 38, ${0.6 * a})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(x - g, y - g, w + g * 2, hh + g * 2, r + g); else ctx.rect(x - g, y - g, w + g * 2, hh + g * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function animate(){
+    if(animId) return;
+    const loop = () => {
+      draw();
+      if(st.hl && performance.now() - st.hl.t0 < 1900) animId = requestAnimationFrame(loop);
+      else { animId = 0; draw(); }
+    };
+    animId = requestAnimationFrame(loop);
+  }
+  // b: PDF座標の矩形 {x0,y0,x1,y1}。null で消す。表示範囲外なら該当箇所が中央に来るようにずらす
+  function highlight(b){
+    if(!b || !st.vp || !st.content){ st.hl = null; draw(); return; }
+    const q = st.vp.convertToViewportRectangle([b.x0, b.y0, b.x1, b.y1]);
+    const x0 = Math.min(q[0], q[2]), x1 = Math.max(q[0], q[2]);
+    const y0 = Math.min(q[1], q[3]), y1 = Math.max(q[1], q[3]);
+    const pad = 4 * (st.vp.scale || 1);
+    st.hl = {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2, t0: performance.now()};
+    const v = viewSize(), z = st.zoom, h = st.hl;
+    const sx = st.panX + h.x * z, sy = st.panY + h.y * z;
+    if(sx < 0 || sy < 0 || sx + h.w * z > v.w || sy + h.h * z > v.h){
+      st.panX = v.w / 2 - (h.x + h.w / 2) * z;
+      st.panY = v.h / 2 - (h.y + h.h / 2) * z;
+    }
+    animate();
   }
   function fit(){ resizeCanvas(); fitZoom(); draw(); }
   function zoomAt(f, cx, cy){
@@ -1465,6 +1554,7 @@ function createPaneViewer(canvas, stage){
     off.height = Math.ceil(viewport.height);
     await page.render({canvasContext: off.getContext("2d"), viewport}).promise;
     st.content = off; st.contentW = off.width; st.contentH = off.height;
+    st.vp = viewport; st.hl = null;
     fit();
   }
   function clear(){ st.content = null; resizeCanvas(); draw(); }
@@ -1491,7 +1581,7 @@ function createPaneViewer(canvas, stage){
     zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
   }, {passive:false});
 
-  return {setPage, clear, fit, zoomAt, viewSize};
+  return {setPage, clear, fit, zoomAt, viewSize, highlight};
 }
 
 const mainViewer = createPaneViewer($("pvCanvas"), $("pvStage"));
@@ -1659,6 +1749,7 @@ async function toggleTocPane(){
     $("pvToggleTocLabel").textContent = "目次を閉じる";
     await renderTocPanePage(0);
     mainViewer.fit(); // 横幅が変わったので本文側を再フィット
+    requestAnimationFrame(autosizeAllTitles);   // しおり側の幅が変わるので見出しの高さを合わせ直す
   }else{
     tocPaneShown = false;
     $("pvTocPane").style.display = "none";
@@ -1666,9 +1757,43 @@ async function toggleTocPane(){
     $("pvToggleToc").classList.remove("active");
     $("pvToggleTocLabel").textContent = "目次を並べる";
     mainViewer.fit();
+    requestAnimationFrame(autosizeAllTitles);
   }
 }
 $("pvToggleToc").addEventListener("click", toggleTocPane);
+
+// ── 階層エディタで選んだ行の、目次上の位置へジャンプして光らせる ──
+// 目次から作った行は _toc（目次の物理ページ・外接矩形）を持つ。小見出しのように目次上の位置を
+// 持たない行は、目次に載っている親の行を光らせる（手で追加した行で親も無ければ消すだけ）。
+let tocSyncToken = 0;
+function tocAnchorOf(e){
+  if(e && e._toc) return e._toc;
+  const i = bmEntries.indexOf(e);
+  if(i < 0) return null;
+  let lv = e.level || 0;
+  for(let j = i - 1; j >= 0 && lv > 0; j--){
+    const p = bmEntries[j];
+    if((p.level || 0) < lv){
+      if(p._toc) return p._toc;
+      lv = p.level || 0;
+    }
+  }
+  return null;
+}
+async function syncTocToEntry(e){
+  document.querySelectorAll("#bmList .bm-row.toc-hit").forEach(r => r.classList.remove("toc-hit"));
+  if(!tocPaneShown || !previewPdfjsDoc) return;
+  const t = tocAnchorOf(e);
+  const tok = ++tocSyncToken;
+  if(!t){ tocViewer.highlight(null); return; }
+  const idx = previewTocPages.indexOf(t.page);
+  if(idx === -1){ tocViewer.highlight(null); return; }
+  if(currentTocPreviewPage !== t.page || currentTocIndex !== idx) await renderTocPanePage(idx);
+  if(tok !== tocSyncToken) return;   // 連続して選び直した場合は最後の行だけを反映
+  tocViewer.highlight(t.bbox);
+  const row = $("bmList").children[bmEntries.indexOf(e)];
+  if(row) row.classList.add("toc-hit");
+}
 
 // ウインドウの高さ・幅が変わったらプレビューを再フィット（プレビュー表示中のみ）
 let resizeTimer = null;
@@ -1696,6 +1821,8 @@ function enterPreviewMode(startPage){
   $("pvToggleTocLabel").textContent = "目次を並べる";
   $("pvToggleToc").style.display = previewTocPages.length > 0 ? "" : "none";
   renderPreviewPage(startPage || 1);
+  // 目次から作成した場合は、目次を最初から並べて表示しておく（見比べながら直すのが基本の使い方のため）
+  if(previewTocPages.length > 0) toggleTocPane();
 }
 function exitPreviewMode(){
   $("cardTreeAnchor").parentNode.insertBefore($("cardTree"), $("cardTreeAnchor").nextSibling);
@@ -1841,7 +1968,7 @@ let redoStack = [];
 const UNDO_LIMIT = 50;
 
 function snapshot(){ return bmEntries.map(e => ({title: e.title, label: e.label, level: e.level, physIdx: e.physIdx, physFixed: e.physFixed,
-  _fixed: e._fixed, _inherited: e._inherited, _doorMissing: e._doorMissing, _subMissed: e._subMissed, _subSkipped: e._subSkipped})); }
+  _fixed: e._fixed, _inherited: e._inherited, _doorMissing: e._doorMissing, _subMissed: e._subMissed, _subSkipped: e._subSkipped, _toc: e._toc})); }
 
 // 変更を加える「前」に呼び、現在の状態を履歴へ積む
 function pushUndo(){
@@ -2275,6 +2402,36 @@ function splitVerticalTiers(items, base){
 
 // 1ページ分のテキストを抽出し、縦組み／横組みを自動判別して読み順に並んだ「行（列）」の配列を返す
 // 各要素: {x, text, vertical} … xは階層推定（インデント）に使う代表座標（横組みのみ有効）
+// 目次項目の外接矩形（PDF座標系：左下原点）。プレビューで「目次のどこか」を光らせるのに使う。
+function itemsBox(items, vertical){
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for(const it of items){
+    const fs = ITEM_FONT_SIZE(it) || 10;
+    const tx = it.transform[4], ty = it.transform[5];
+    let ax0, ax1, ay0, ay1;
+    if(vertical){
+      ax0 = tx; ax1 = tx + Math.max(it.width || 0, fs);
+      ay1 = ty; ay0 = ty - Math.max(it.height || 0, fs);
+    }else{
+      ax0 = tx; ax1 = tx + Math.max(it.width || 0, fs * 0.5);
+      ay0 = ty - fs * 0.2; ay1 = ty + fs * 0.85;
+    }
+    x0 = Math.min(x0, ax0); x1 = Math.max(x1, ax1);
+    y0 = Math.min(y0, ay0); y1 = Math.max(y1, ay1);
+  }
+  return isFinite(x0) ? {x0, y0, x1, y1} : null;
+}
+function unionBox(a, b){
+  if(!a) return b || null;
+  if(!b) return a;
+  return {x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1)};
+}
+// 別ページの行どうしを連結した場合は矩形をまとめない（後ろの行＝ページ番号のある側を採る）
+function mergeBoxes(lines){
+  const last = lines[lines.length - 1];
+  return lines.filter(l => l.page === last.page).reduce((acc, l) => unionBox(acc, l.bbox), null);
+}
+
 async function extractLines(pdfjsDoc, physIdx){
   const page = await pdfjsDoc.getPage(physIdx);
   const tc = await page.getTextContent();
@@ -2327,6 +2484,7 @@ async function extractLines(pdfjsDoc, physIdx){
       x: solids[0].transform[4],
       // yは行間（＝折り返し判定）に使う。行内のブレを拾わないよう最も上の値を代表値とする
       y: Math.max(...solids.map(o => o.transform[5])),
+      bbox: itemsBox(solids, vertical),   // 目次プレビューで該当項目を光らせるための外接矩形（PDF座標）
       text,
       vertical,
       size: dominantFontSize(solids)   // 行の代表文字サイズ（章見出しの判定・見出しと副題の連結に使う）
@@ -2493,14 +2651,25 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
     matched.forEach((i, k) => { if(i >= 0) entryIndents.push(runs[k].indent); });
     if(entryIndents.length === 0) continue;
     const bound = Math.max(...entryIndents);
+    // 項目の見出しと同じ行（列）にあるランは、その項目の一部（リーダー罫の先の執筆者名・ページ番号など）。
+    // 「第二章　墳丘から…倭王権……岸本直文　22」の「岸本直文」を小見出しと取り違えないよう除外する
+    const entryBlocks = new Set();
+    matched.forEach((i, k) => { if(i >= 0) entryBlocks.add(runs[k].block); });
 
     for(let k = 0; k < runs.length; k++){
       if(matched[k] >= 0){ ptr = matched[k]; continue; }
       const run = runs[k];
       if(ptr < 0) continue;
+      if(entryBlocks.has(run.block)) continue;         // 項目行と同じ行（列）＝執筆者名・ページ番号など
       if(!(run.indent > bound + 4)) continue;         // 項目行より深いインデントでなければ対象外
       if(run.chars < 2) continue;
       if(NUM_ONLY_RE.test(run.text)) continue;        // ノンブル・折り返しページ番号
+      // 見出しにすでに含まれている文字列（執筆者名など）は小見出しではない
+      const rn = normText(run.text).replace(/[0-9０-９〇一二三四五六七八九十百千]+$/, "");
+      if(rn.length >= 2 && normText(parsed[ptr].title).includes(rn)) continue;
+      // 「─副題─」や「（翻訳　○○）」のように副題・注記だけの行は小見出しではない
+      const rt = run.text.trim();
+      if(/^[\u2500\u2501\u2014\u2015\u301C～〜-]/.test(rt) || /^[（(〔［\[].*[）)〕］\]]$/.test(rt)) continue;
       result[ptr].push(run.text.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, ""));
     }
   }
@@ -2668,15 +2837,26 @@ async function locateDoorPages(list, pdfjsDoc, totalPages, resolveLabel, pageLab
     if(k2 && k2.length >= 2 && k2 !== keys[0]) keys.push(k2);
 
     let hit = null;
-    for(const key of keys){
-      if(!key) continue;
-      for(let p = lo; p <= hi && hit === null; p++){
-        const {runs} = await extractRuns(pdfjsDoc, p + 1);
-        const body = runs.filter(r => !NUM_ONLY_RE.test(r.text)).map(r => normText(r.text)).join("");
-        if(body.includes(key) && body.length - key.length <= 10) hit = p;
+    // 「目次」という見出しそのものは、目次ページを指す
+    if(/^目次$/.test(normText(e.title)) && previewTocPages.length > 0) hit = previewTocPages[0] - 1;
+    // 扉判定：ページの文字がほぼ見出しだけ／または見出しで始まる（扉に図版のキャプション等が添えられている場合）
+    const isDoor = (body, key, kIdx) => (body.includes(key) && body.length - key.length <= 10)
+      || (kIdx === 0 && key.length >= 4 && body.startsWith(key));
+    const scan = async (from, to) => {
+      for(let kIdx = 0; kIdx < keys.length; kIdx++){
+        const key = keys[kIdx];
+        if(!key) continue;
+        for(let p = from; p <= to; p++){
+          const {runs} = await extractRuns(pdfjsDoc, p + 1);
+          const body = runs.filter(r => !NUM_ONLY_RE.test(r.text)).map(r => normText(r.text)).join("");
+          if(isDoor(body, key, kIdx)) return p;
+        }
       }
-      if(hit !== null) break;
-    }
+      return null;
+    };
+    if(hit === null) hit = await scan(lo, hi);
+    // 目次より前に置かれた「序」などは範囲外になるため、前付（先頭40ページ以内）も探す
+    if(hit === null && lo > 0) hit = await scan(0, Math.min(lo - 1, 39));
     if(hit === null){
       log(`  ⚠ 「${e.title}」の扉ページが本文から見つかりませんでした（直後の項目のページを暫定で使います）`, "warn");
       e._doorMissing = true;
@@ -2746,7 +2926,7 @@ function mergeWrappedTocLines(lines){
     if(chain.length > 0){
       const text = chain.map(p => trimEnds(p.text)).join("") + ln.text.replace(/^[\s\u3000]+/, "");
       const r = parseTocLine(text, 120); // 連結後は見出しが長くなるため上限を緩める
-      if(r) merged = {...ln, x: chain[0].x, y: chain[0].y, text, parsed: r};
+      if(r) merged = {...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, bbox: mergeBoxes([...chain, ln])};
     }
     if(merged){
       for(const p of pending.slice(0, pending.length - chain.length)) out.push(p); // 柱等はそのまま残す
@@ -2843,7 +3023,7 @@ function mergeVerticalTocEntries(lines){
         j++;
       }
       const num = lines.slice(i, j).map(l => l.num).find(Boolean) || "";
-      out.push({...ln, text, heading: true, num});
+      out.push({...ln, text, heading: true, num, bbox: mergeBoxes(lines.slice(i, j))});
       i = j - 1;
       continue;
     }
@@ -2877,7 +3057,7 @@ function mergeVerticalTocEntries(lines){
     if(!r){ out.push(ln); continue; }
     out.splice(out.length - chain.length, chain.length);
     const num = parts.map(l => l.num).find(Boolean) || "";
-    out.push({...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, vmerged: true, num});
+    out.push({...ln, x: chain[0].x, y: chain[0].y, text, parsed: r, vmerged: true, num, bbox: mergeBoxes(parts)});
   }
   return out;
 }
@@ -2929,7 +3109,10 @@ async function autoDetectToc(){
 
     const rawLines = [];
     // 折り返し行の連結はページ単位で行う（行間の基準はページごとに求める）
-    for(const p of pages) rawLines.push(...mergeWrappedTocLines(await extractLines(pdfjsDoc, p)));
+    for(const p of pages){
+      const ls = (await extractLines(pdfjsDoc, p)).map(ln => ({...ln, page: p}));
+      rawLines.push(...mergeWrappedTocLines(ls));
+    }
 
     // 縦組みの目次では、長い見出しが「補論　日常の政治運営」「──将軍への謁見と…　二二七」のように
     // 副題の頭（ダーシ）で次の列へ送られることがある（横組みの折り返し連結は縦組みでは働かない）。
@@ -2943,7 +3126,7 @@ async function autoDetectToc(){
       if(!looksLikeRealTitle(at.trim(), 60)) continue;
       const r = parseTocLine(at + bt, 120);
       if(!r) continue;
-      rawLines.splice(i, 2, {...b, x: a.x, y: a.y, text: at + bt, parsed: r});
+      rawLines.splice(i, 2, {...b, x: a.x, y: a.y, text: at + bt, parsed: r, bbox: mergeBoxes([a, b])});
     }
     // 縦組み：章見出し（大きな文字）と「見出し＋副題」の2列組みをまとめる
     {
@@ -2959,7 +3142,7 @@ async function autoDetectToc(){
       if(ln.vmerged) vmerged++;
       else if(ln.parsed) wrapped++;
       if(r){
-        parsed.push({...r, x: ln.x, vertical: ln.vertical, num: ln.num || ""});
+        parsed.push({...r, x: ln.x, vertical: ln.vertical, num: ln.num || "", page: ln.page, bbox: ln.bbox});
         continue;
       }
       if(!ln.text.trim()) continue;
@@ -2969,7 +3152,7 @@ async function autoDetectToc(){
       const bare = ln.text.replace(/[\s\u3000.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
       const rank = markerRank(bare);
       if((rank === LV_RANK.bu || rank === LV_RANK.sho || ln.heading) && looksLikeRealTitle(bare, 60)){
-        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading, num: ln.num || ""});
+        parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading, num: ln.num || "", page: ln.page, bbox: ln.bbox});
         noFolio++;
         continue;
       }
@@ -3012,6 +3195,8 @@ async function autoDetectToc(){
     // ページ番号のない部扉・章扉は、runBookmark で本文から扉ページを探す
     parsed.forEach((e, i) => { if(!e.label && bmEntries[i]) bmEntries[i]._door = true; });
     parsed.forEach((e, i) => { if(e.heading && bmEntries[i]) bmEntries[i]._heading = true; });
+    // 目次上の位置（ページ・外接矩形）を持たせる。階層エディタで行を選ぶと目次側の該当箇所を光らせる
+    parsed.forEach((e, i) => { if(e.page && bmEntries[i]) bmEntries[i]._toc = {page: e.page, bbox: e.bbox || null}; });
     hideBmAlert();
     sanitizeEntries(bmEntries);   // 目次ページから取り出したテキストは制御文字・互換漢字が混入しやすい
     normalizeLevels(bmEntries);
@@ -3106,6 +3291,8 @@ function markerRank(title){
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*部`).test(t)) return LV_RANK.bu;
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*章`).test(t)) return LV_RANK.sho;
   if(/^(序章|終章|補章|序論|結論|補論|付論)/.test(t)) return LV_RANK.sho;
+  // 編著書の「序　○○」「結　○○」（1文字＋アキ）も章と同じ段に置く
+  if(/^[序結][\s\u3000]/.test(t)) return LV_RANK.sho;
   // 「Ⅰ　儀式・政治空間」のように全角ローマ数字だけで部を立てる本（「第」「部」が付かない）
   if(/^[\u2160-\u216B](?:[\s\u3000.．、]|$)/.test(t)) return LV_RANK.bu;
   if(new RegExp(`^第[\\s\\u3000]*[${LV_KANSUJI}]+[\\s\\u3000]*節`).test(t)) return LV_RANK.setsu;
@@ -3187,10 +3374,16 @@ function nestUnderParts(entries){
     while(end < entries.length && !isPart(entries[end]) && !isBack(entries[end])) end++;
     if(end === i + 1) continue;
     const scope = entries.slice(i + 1, end);
-    const minLv = Math.min(...scope.map(e => e.level || 0));
-    const shift = base + 1 - minLv;
-    if(shift <= 0) continue;
-    for(const e of scope){ e.level = (e.level || 0) + shift; moved++; }
+    // ずらし幅は記号付きの項目（第○章 など）で決める。記号の無いコラム等が最上位に置かれていても、
+    // それに引きずられて章と節の関係（第八章と第九章が親子になる等）が崩れないようにする
+    const marked = scope.filter(e => markerRank(e.title) !== null);
+    const ref = marked.length > 0 ? marked : scope;
+    const minLv = Math.min(...ref.map(e => e.level || 0));
+    const shift = Math.max(0, base + 1 - minLv);
+    for(const e of scope){
+      const nl = Math.max((e.level || 0) + shift, base + 1);   // 部の配下は少なくとも部の1段下
+      if(nl !== (e.level || 0)){ e.level = nl; moved++; }
+    }
   }
   return moved;
 }
@@ -3304,6 +3497,24 @@ function syncSerial(e, serialEl, labelEl){
 // 描画前にスクロール量と「編集中だったフィールド＋カーソル位置」を退避し、描画後に復元する。
 let restoringBmFocus = false;   // プログラムによるfocus復元中は focus ハンドラの副作用を止める
 
+// 見出し textarea の高さを内容に合わせる（折り返し行数ぶん伸ばす）
+function autosizeTitle(ta){
+  if(!ta || !ta.isConnected || ta.offsetParent === null) return;   // 非表示中は測れないので、表示後に合わせ直す
+  ta.style.height = "auto";
+  ta.style.height = ta.scrollHeight + 2 + "px";
+}
+function autosizeAllTitles(){
+  document.querySelectorAll("#bmList textarea.bm-title").forEach(autosizeTitle);
+}
+// しおり側の幅が変わったとき（ウインドウのリサイズ・目次ペインの開閉）に高さを合わせ直す
+if(window.ResizeObserver){
+  let lastW = 0;
+  new ResizeObserver(ents => {
+    const w = Math.round(ents[0].contentRect.width);
+    if(w !== lastW){ lastW = w; autosizeAllTitles(); }
+  }).observe($("bmList"));
+}
+
 function renderBmList(focusIndex){
   const list = $("bmList");
   const keepScroll = list.scrollTop;
@@ -3412,9 +3623,10 @@ function renderBmList(focusIndex){
     btnIn.disabled = e.level >= maxLv;
     btnIn.addEventListener("click", () => changeLevel(i, +1));
 
-    const title = document.createElement("input");
+    // 長い見出しも全文が見えるよう、折り返して表示する textarea にする（改行は入れさせない）
+    const title = document.createElement("textarea");
     title.className = "bm-title";
-    title.type = "text";
+    title.rows = 1;
     title.value = e.title;
     title.placeholder = "見出しを入力";
     title.spellcheck = false;
@@ -3422,8 +3634,23 @@ function renderBmList(focusIndex){
       if(restoringBmFocus) return;   // 再描画に伴う自動復帰では履歴もプレビューも動かさない
       pushUndo();
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+      syncTocToEntry(e);
     });
-    title.addEventListener("input", () => { e.title = title.value; updateExportDirty(); });
+    title.addEventListener("keydown", ev => {
+      // しおり名に改行は入れられないので Enter は確定（フォーカスを外す）として扱う。IME変換中の Enter は除く
+      if(ev.key === "Enter" && !ev.isComposing && ev.keyCode !== 229){ ev.preventDefault(); title.blur(); }
+    });
+    title.addEventListener("input", () => {
+      if(/[\r\n]/.test(title.value)){   // 貼り付けで改行が混ざった場合は詰める
+        const pos = title.selectionStart;
+        const before = title.value.slice(0, pos).replace(/[\r\n]+/g, "").length;
+        title.value = title.value.replace(/[\r\n]+/g, "");
+        title.setSelectionRange(before, before);
+      }
+      e.title = title.value;
+      autosizeTitle(title);
+      updateExportDirty();
+    });
     // 確定時（フォーカスアウト／変換確定後）にサニタイズ。input中に走らせるとIME入力を壊すのでchangeで行う
     title.addEventListener("change", () => {
       const clean = sanitizeTitle(title.value);
@@ -3431,6 +3658,7 @@ function renderBmList(focusIndex){
         const kinds = titleIssueKinds(title.value);
         title.value = clean;
         e.title = clean;
+        autosizeTitle(title);
         updateExportDirty();
         log(`  ⚠ 見出し「${clean}」から${kinds.length ? kinds.join("・") : "余分な書式"}を除去しました（Windowsで「□」化するため）`, "warn");
       }
@@ -3447,6 +3675,7 @@ function renderBmList(focusIndex){
       if(restoringBmFocus) return;   // 再描画に伴う自動復帰では履歴もプレビューも動かさない
       pushUndo();
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+      syncTocToEntry(e);
     });
     label.addEventListener("input", () => {
       e.label = label.value;
@@ -3512,6 +3741,7 @@ function renderBmList(focusIndex){
     // クリック時に現在のphysIdxを読むので、ラベル編集で解決先が変わっても追随する
     serial.addEventListener("click", () => {
       if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+      syncTocToEntry(e);
     });
     showSerial(e, serial);
     row.appendChild(serial);
@@ -3524,6 +3754,13 @@ function renderBmList(focusIndex){
       note.textContent = (x.sev === "err" ? "✕ " : "⚠ ") + x.text;
       row.appendChild(note);
     }
+
+    // 行の余白をクリックしても、本文・目次の該当ページへ移動する
+    row.addEventListener("click", ev => {
+      if(ev.target !== row && !ev.target.classList.contains("lv-guide")) return;
+      if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+      syncTocToEntry(e);
+    });
 
     list.appendChild(row);
 
@@ -3551,6 +3788,7 @@ function renderBmList(focusIndex){
       moveEntry(from, bmEntries.length);
     }
   };
+  autosizeAllTitles();
   list.removeEventListener("dragover", autoScrollBmList);
   list.addEventListener("dragover", autoScrollBmList);
 
