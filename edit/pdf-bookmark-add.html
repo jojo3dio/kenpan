@@ -1222,7 +1222,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.15";
+const APP_VERSION = "v1.16";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1535,16 +1535,19 @@ function createPaneViewer(canvas, stage){
   const HL_BLINK_SEC = 2.0;
   function drawHighlight(){
     const h = st.hl, z = st.zoom;
-    const x = st.panX + h.x * z, y = st.panY + h.y * z, w = h.w * z, hh = h.h * z;
     const t = (performance.now() - h.t0) / 1000;
     // 0.5秒周期で濃淡を4回繰り返し、最後は濃いまま止める
     const k = t < HL_BLINK_SEC ? 0.5 + 0.5 * Math.cos(t * 2 * Math.PI / 0.5) : 1;
-    const r = Math.min(3 * z + 2, w / 2, hh / 2);
     ctx.save();
     ctx.globalCompositeOperation = "multiply";   // 文字の黒はそのまま残し、紙の白だけを黄色に染める
     ctx.fillStyle = `rgba(255, 243, 0, ${0.15 + 0.6 * k})`;
     ctx.beginPath();
-    if(ctx.roundRect) ctx.roundRect(x, y, w, hh, r); else ctx.rect(x, y, w, hh);
+    // 小見出しが2行（2列）に折り返している場合は、行ごとの矩形をまとめて塗る
+    for(const rc of h.rects){
+      const x = st.panX + rc.x * z, y = st.panY + rc.y * z, w = rc.w * z, hh = rc.h * z;
+      const r = Math.min(3 * z + 2, w / 2, hh / 2);
+      if(ctx.roundRect) ctx.roundRect(x, y, w, hh, r); else ctx.rect(x, y, w, hh);
+    }
     ctx.fill();
     ctx.restore();
   }
@@ -1557,14 +1560,21 @@ function createPaneViewer(canvas, stage){
     };
     animId = requestAnimationFrame(loop);
   }
-  // b: PDF座標の矩形 {x0,y0,x1,y1}。null で消す。表示範囲外なら該当箇所が中央に来るようにずらす
+  // b: PDF座標の矩形 {x0,y0,x1,y1}（または矩形の配列）。null で消す。表示範囲外なら該当箇所が中央に来るようにずらす
   function highlight(b){
-    if(!b || !st.vp || !st.content){ st.hl = null; draw(); return; }
-    const q = st.vp.convertToViewportRectangle([b.x0, b.y0, b.x1, b.y1]);
-    const x0 = Math.min(q[0], q[2]), x1 = Math.max(q[0], q[2]);
-    const y0 = Math.min(q[1], q[3]), y1 = Math.max(q[1], q[3]);
+    const list = (Array.isArray(b) ? b : [b]).filter(Boolean);
+    if(list.length === 0 || !st.vp || !st.content){ st.hl = null; draw(); return; }
     const pad = 2.5 * (st.vp.scale || 1);
-    st.hl = {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2, t0: performance.now()};
+    const rects = list.map(bb => {
+      const q = st.vp.convertToViewportRectangle([bb.x0, bb.y0, bb.x1, bb.y1]);
+      const x0 = Math.min(q[0], q[2]), x1 = Math.max(q[0], q[2]);
+      const y0 = Math.min(q[1], q[3]), y1 = Math.max(q[1], q[3]);
+      return {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2};
+    });
+    // 全体の外接（表示範囲の判定・中央寄せに使う）
+    const ux0 = Math.min(...rects.map(r => r.x)), uy0 = Math.min(...rects.map(r => r.y));
+    const ux1 = Math.max(...rects.map(r => r.x + r.w)), uy1 = Math.max(...rects.map(r => r.y + r.h));
+    st.hl = {rects, x: ux0, y: uy0, w: ux1 - ux0, h: uy1 - uy0, t0: performance.now()};
     const v = viewSize(), z = st.zoom, h = st.hl;
     const sx = st.panX + h.x * z, sy = st.panY + h.y * z;
     if(sx < 0 || sy < 0 || sx + h.w * z > v.w || sy + h.h * z > v.h){
@@ -1801,8 +1811,9 @@ async function toggleTocPane(){
 $("pvToggleToc").addEventListener("click", toggleTocPane);
 
 // ── 階層エディタで選んだ行の、目次上の位置へジャンプして光らせる ──
-// 目次から作った行は _toc（目次の物理ページ・外接矩形）を持つ。小見出しのように目次上の位置を
-// 持たない行は、目次に載っている親の行を光らせる（手で追加した行で親も無ければ消すだけ）。
+// 目次から作った行は _toc（目次の物理ページ・外接矩形）を持つ。目次の「／」区切りから作った小見出しも
+// 目次上のその小見出し自身の位置を持つ（目次ページをまたぐものは書き出しのページ）。
+// 位置を持たない行（手で追加した行など）は、目次に載っている親の行を光らせる（親も無ければ消すだけ）。
 let tocSyncToken = 0;
 function tocAnchorOf(e){
   if(e && e._toc) return e._toc;
@@ -2511,6 +2522,9 @@ async function extractLines(pdfjsDoc, physIdx){
       const gap = posOf(next) - (posOf(head) + advOf(head));
       const sizeDiff = Math.abs(hs - ns) / Math.max(hs, ns, 1);
       if(head.str.trim().length <= 3 && sizeDiff > 0.15 && gap > ns * 2) solids.shift();
+      // 縦組みでは柱（「7」「目」「次」）が版面の天より大きく離れて列の頭に乗る。
+      // 文字サイズが近くても、4文字分以上離れた3文字以内の頭は柱として落とす
+      else if(vertical && head.str.trim().length <= 3 && gap > ns * 4) solids.shift();
       else break;
     }
 
@@ -2536,7 +2550,10 @@ async function extractLines(pdfjsDoc, physIdx){
 
   if(orientation === "vertical"){
     // 縦組み：X座標が近いものを1つの列としてクラスタ化し、右→左の列順・列内は上→下（Y降順）に並べる
-    const columns = clusterCoords(all, it => it.transform[4], 6);
+    // 空白だけのアイテムは列の間に浮いていることがあり、それを含めて座標をつなぐと
+    // 隣の列（柱の「7　目次」→見出し→小見出し）が数珠つなぎに1列へまとまってしまう。
+    // buildLine は空白を使わないので、列のクラスタは実体のある文字だけで作る
+    const columns = clusterCoords(solid, it => it.transform[4], 6);
     const legacy = columns.map(col => buildLine(col, true)).filter(Boolean);
     // ルビ付き・上下2段組みの目次向けに、前処理と段分けをしてから列をまとめた結果も作り、
     // 「見出し＋ページ番号」として読める行が多いほうを採用する（従来の本の読み取りは変えない）
@@ -2624,7 +2641,9 @@ async function extractRuns(pdfjsDoc, physIdx){
           text,
           chars: text.replace(/[\s\u3000]/g, "").length,
           indent: posOf(cur[0]),   // 大きいほど深いインデント（縦組みは-y、横組みはx）
-          block: blockIdx
+          block: blockIdx,
+          items: cur,              // 目次上の位置（小見出しごとに光らせる箇所）を求めるのに使う
+          vertical
         });
         cur = [];
       };
@@ -2660,6 +2679,7 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
   const result = parsed.map(() => []);
   if(parsed.length === 0) return result;
   let ptr = -1;   // 現在対象にしている parsed のindex（読み順で進める）
+  let lastTaken = null;   // 直前に小見出しとして採ったラン（1文字だけの折り返しの続きを拾うため）
 
   for(const p of tocPages){
     const {runs} = await extractRuns(pdfjsDoc, p);
@@ -2700,12 +2720,17 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
     matched.forEach((i, k) => { if(i >= 0) entryBlocks.add(runs[k].block); });
 
     for(let k = 0; k < runs.length; k++){
+      const prevTaken = lastTaken; lastTaken = null;
       if(matched[k] >= 0){ ptr = matched[k]; continue; }
       const run = runs[k];
       if(ptr < 0) continue;
       if(entryBlocks.has(run.block)) continue;         // 項目行と同じ行（列）＝執筆者名・ページ番号など
       if(!(run.indent > bound + 4)) continue;         // 項目行より深いインデントでなければ対象外
-      if(run.chars < 2) continue;
+      // 1文字のランは柱などのゴミとして捨てるが、直前の小見出し行のすぐ次の行（列）で、
+      // 同じ字下げから始まるものは折り返しの続き（「…尾張平定」→「戦」）なので採る
+      const isTail = run.chars === 1 && prevTaken && prevTaken.page === p && run.block === prevTaken.run.block + 1
+        && Math.abs(run.indent - prevTaken.run.indent) <= 4;
+      if(run.chars < 2 && !isTail) continue;
       if(NUM_ONLY_RE.test(run.text)) continue;        // ノンブル・折り返しページ番号
       // 見出しにすでに含まれている文字列（執筆者名など）は小見出しではない
       const rn = normText(run.text).replace(/[0-9０-９〇一二三四五六七八九十百千]+$/, "");
@@ -2713,16 +2738,90 @@ async function collectTocSubheads(pdfjsDoc, tocPages, parsed){
       // 「─副題─」や「（翻訳　○○）」のように副題・注記だけの行は小見出しではない
       const rt = run.text.trim();
       if(/^[\u2500\u2501\u2014\u2015\u301C～〜-]/.test(rt) || /^[（(〔［\[].*[）)〕］\]]$/.test(rt)) continue;
-      result[ptr].push(run.text.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, ""));
+      const piece = {run, page: p};
+      result[ptr].push(piece);
+      lastTaken = piece;
     }
   }
 
+  // 小見出しごとに、目次上の位置（ページと文字の外接矩形）も求めておく。
+  // 階層エディタで小見出しの行を選んだとき、目次のその箇所を光らせるのに使う
   return result.map(arr => {
     if(arr.length === 0) return [];
-    return arr.join("").split(SUB_SPLIT_RE)
-      .map(s => s.replace(/^[\s\u3000]+/, "").replace(/[\s\u3000]+$/, ""))
-      .filter(s => s.length >= 2 && !NUM_ONLY_RE.test(s));
+    const chars = [];
+    for(const pc of arr){
+      const cs = runCharBoxes(pc.run);
+      let a = 0, b = cs.length;
+      while(a < b && /[\s\u3000]/.test(cs[a].ch)) a++;
+      while(b > a && /[\s\u3000]/.test(cs[b - 1].ch)) b--;
+      for(let k = a; k < b; k++) chars.push({...cs[k], page: pc.page, run: pc.run});
+    }
+    const subs = [];
+    let seg = [];
+    const flushSeg = () => {
+      let a = 0, b = seg.length;
+      while(a < b && /[\s\u3000]/.test(seg[a].ch)) a++;
+      while(b > a && /[\s\u3000]/.test(seg[b - 1].ch)) b--;
+      const cs = seg.slice(a, b);
+      seg = [];
+      const text = cs.map(c => c.ch).join("");
+      if(text.length < 2 || NUM_ONLY_RE.test(text)) return;
+      subs.push(text);
+      subs.toc = subs.toc || [];
+      subs.toc.push(subTocPos(cs));
+    };
+    for(const c of chars){
+      if(SUB_SPLIT_RE.test(c.ch)) flushSeg();
+      else seg.push(c);
+    }
+    flushSeg();
+    return subs;
   });
+}
+// ラン1本を1文字ずつに分け、文字ごとの外接矩形（PDF座標）を付けて返す。
+// 文字の並びと間に入れるアキは extractRuns の連結と同じ規則にする（テキストが一致するように）
+function runCharBoxes(run){
+  const vertical = !!run.vertical, items = run.items || [];
+  const posOf = it => (vertical ? -it.transform[5] : it.transform[4]);
+  const advOf = it => (vertical ? (it.height || 0) : (it.width || 0));
+  const out = [];
+  const pushItem = it => {
+    const cs = Array.from(it.str), n = cs.length || 1;
+    cs.forEach((ch, k) => {
+      const t = it.transform.slice();
+      let w = it.width, h = it.height;
+      if(vertical){ h = (it.height || 0) / n; t[5] = it.transform[5] - k * h; }
+      else{ w = (it.width || 0) / n; t[4] = it.transform[4] + k * w; }
+      out.push({ch, box: /[\s\u3000]/.test(ch) ? null : itemsBox([{str: ch, transform: t, width: w, height: h}], vertical)});
+    });
+  };
+  items.forEach((it, i) => {
+    if(i > 0){
+      const prev = items[i - 1];
+      const em = Math.max(ITEM_FONT_SIZE(prev), ITEM_FONT_SIZE(it));
+      const gap = posOf(it) - (posOf(prev) + advOf(prev));
+      if(em > 0 && gap >= em * 0.7) out.push({ch: "\u3000", box: null});
+      else if(em > 0 && gap >= em * 0.22) out.push({ch: " ", box: null});
+    }
+    pushItem(it);
+  });
+  return out;
+}
+// 小見出し1件分の文字から、目次上の位置 {page, bbox:[矩形…]} を作る。
+// 行（列）をまたぐ小見出しは行ごとに矩形を分け、目次ページをまたぐ場合は書き出しのページを採る
+function subTocPos(cs){
+  const withBox = cs.filter(c => c.box);
+  if(withBox.length === 0) return null;
+  const page = withBox[0].page;
+  const boxes = [];
+  let curRun = null, cur = null;
+  for(const c of withBox){
+    if(c.page !== page) continue;
+    if(c.run !== curRun){ if(cur) boxes.push(cur); cur = null; curRun = c.run; }
+    cur = unionBox(cur, c.box);
+  }
+  if(cur) boxes.push(cur);
+  return boxes.length ? {page, bbox: boxes.length === 1 ? boxes[0] : boxes} : null;
 }
 
 // 1ページ分のランから「小見出しになりうる独立した短い行」だけを取り出す
@@ -2776,7 +2875,8 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
     for(let j = i + 1; j < list.length; j++){
       if(physList[j] !== null && physList[j] > start){ limit = physList[j]; break; }
     }
-    for(const s of subs) queue.push({ownerIdx: i, owner: list[i], sub: s, key: normText(s), start, limit, phys: null});
+    const tocs = list[i]._subsToc || [];
+    subs.forEach((s, k) => queue.push({ownerIdx: i, owner: list[i], sub: s, key: normText(s), start, limit, phys: null, toc: tocs[k] || null}));
   }
   if(queue.length === 0) return 0;
 
@@ -2830,11 +2930,13 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
     for(const q of byOwner.get(ownerIdx)){
       const label = labelForPhys(q.phys, parent.label, physList[ownerIdx], resolveLabel, pageLabels);
       if(!label){ noLabel++; (parent._subMissed = parent._subMissed || []).push(q.sub); continue; }
-      rows.push({title: sanitizeTitle(q.sub), label, level: (parent.level || 0) + 1, physIdx: q.phys});
+      const row = {title: sanitizeTitle(q.sub), label, level: (parent.level || 0) + 1, physIdx: q.phys};
+      if(q.toc) row._toc = q.toc;   // 目次上の小見出しそのものの位置（親の行ではなく、ここを光らせる）
+      rows.push(row);
     }
     if(rows.length > 0){ list.splice(ownerIdx + 1, 0, ...rows); added += rows.length; }
   }
-  for(const e of list) if(e._subs) delete e._subs;
+  for(const e of list){ if(e._subs) delete e._subs; if(e._subsToc) delete e._subsToc; }
 
   const missed = queue.filter(q => q.phys === null);
   for(const q of missed) (q.owner._subMissed = q.owner._subMissed || []).push(q.sub);
@@ -3287,6 +3389,7 @@ async function autoDetectToc(){
         subsByIndex.forEach((subs, i) => {
           if(!subs || subs.length === 0 || !bmEntries[i]) return;
           bmEntries[i]._subs = subs;
+          if(subs.toc) bmEntries[i]._subsToc = subs.toc;
           subTotal += subs.length;
           withSub++;
         });
@@ -4494,7 +4597,7 @@ async function runBookmark(opts){
         }
       }catch(e){
         // 小見出しの検出に失敗しても、目次から読んだ本体のしおりはそのまま作る
-        for(const en of bmEntries) if(en._subs) delete en._subs;
+        for(const en of bmEntries){ if(en._subs) delete en._subs; if(en._subsToc) delete en._subsToc; }
         log(`  ⚠ 小見出しの検出に失敗したため、小見出しなしで続行します：${e.message || e}`, "warn");
         console.error(e);
       }
