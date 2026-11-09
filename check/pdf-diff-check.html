@@ -389,7 +389,7 @@
 <div class="app">
   <header>
     <div class="brand"><span class="mk" style="background:none;width:26px;height:26px;transform:none;color:var(--amber);display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M7 9h0M7 13h0" stroke-linecap="round"/></svg></span>
-      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.25　·　local · no-upload</span></span>
+      <span class="brandtxt"><h1>下版PDF 差分チェッカー</h1><span class="ver">v1.26　·　local · no-upload</span></span>
     </div>
     <div class="loaders">
       <label class="drop a" id="dropA">
@@ -2546,6 +2546,24 @@ function computePlacement(){
   S.place={ax,ay,bx,by,W:Math.max(1,W),H:Math.max(1,H),aw,ah,bw,bh};
 }
 
+// v1.26 仕上がり矩形（S.aTrimPx）がこのページの紙面に合っているか。
+//  Aの文字片の中心が「仕上がり＋断ち落とし（無ければ仕上がり＋5mm）」に入っている割合で見る。
+//  スラグの日付・ファイル名などは数片なので、文字が4片以上あって半分以上が外なら矩形の方がおかしい。
+//  info は診断用（diag.trim）。判定には ok だけを使う。
+function checkTrimTrust(p){
+  const res={ok:true, info:null};
+  if(!S.alignedByBox || !S.aTrimPx || !p) return res;
+  const T=S.aTrimPx, B=S.aBleedPx;
+  const m=Math.round(5/25.4*S.dpi);
+  const x0=B?Math.min(B.x,T.x):T.x-m, y0=B?Math.min(B.y,T.y):T.y-m;
+  const x1=B?Math.max(B.x+B.w,T.x+T.w):T.x+T.w+m, y1=B?Math.max(B.y+B.h,T.y+T.h):T.y+T.h+m;
+  let inside=0, n=0;
+  for(const t of (S.aText||[])){ const cx=t.x+t.w/2, cy=t.y+t.h/2; n++; if(cx>=x0&&cx<x1&&cy>=y0&&cy<y1) inside++; }
+  res.info={ trimPx:[Math.round(T.x),Math.round(T.y),Math.round(T.w),Math.round(T.h)], pageA:[S.aW,S.aH], textIn:inside, textN:n, ok:true };
+  if(n>=4 && inside/n<0.5){ res.ok=false; res.info.ok=false;
+    res.info.note="Aの文字の大半が仕上がりの外。仕上がり矩形が紙面と合わないため、トンボ部の除外を使わずに比較"; }
+  return res;
+}
 function computeDiff(){
   computePlacement();
   S.regions=[]; S.overlay=null; S.activeRegion=-1;
@@ -2597,7 +2615,12 @@ function computeDiff(){
 
   // 比較範囲マスク（トンボ部除外）。trim=仕上がり矩形, bleed=断ち落とし矩形（共通座標）
   const scope=S.compareScope;
-  const useMask=(scope!=="full") && S.alignedByBox && S.aTrimPx;
+  // v1.26 仕上がり矩形の信頼性チェック（報告 11/06 39610009 p89：見出しの文字変更が文字比較では
+  //  2件出ていたのに、最後の「仕上がりの外は除外」で2件とも消えて0件になっていた）。
+  //  Aの文字の大半が仕上がり（＋断ち落とし）の外にあるなら、その矩形はこのページに合っていないとみなし、
+  //  トンボ部の除外（マスク・仕上がり外の除外）を使わない。
+  const trimTrust=checkTrimTrust(p);
+  const useMask=(scope!=="full") && S.alignedByBox && S.aTrimPx && trimTrust.ok;
   let tL=0,tT=0,tRr=0,tB=0,bL=0,bT=0,bRr=0,bB=0,ring=0,haveBleed=false;
   if(useMask){
     tL=p.ax+S.aTrimPx.x; tT=p.ay+S.aTrimPx.y; tRr=tL+S.aTrimPx.w; tB=tT+S.aTrimPx.h;
@@ -2817,7 +2840,8 @@ function computeDiff(){
           return true; });
       }
     }
-  }catch(e){ console.error("textDiff failed; 画素モードで続行",e); textFindings=[]; explainedBoxes=[]; }
+  }catch(e){ console.error("textDiff failed; 画素モードで続行",e); textFindings=[]; explainedBoxes=[];
+    if(S.diag) S.diag.error="文字比較の後処理で例外（文字差分は破棄）："+String(e&&e.message||e).slice(0,120); }
 
   // 色味・濃度の変化（写真の色補正など）：感度しきい値とは独立に、セル平均色差で検出。
   // テキスト領域は除外（文字のサブピクセルずれで「色が変わった」と誤検出しないため）。配置画像でまとめる。
@@ -2937,14 +2961,26 @@ function computeDiff(){
   try{ regions=addLowResRegions(regions, p, ox0, oy0, ox1, oy1); }catch(e){ console.warn("addLowResRegions",e); }
 
   // 仕上がり(trim)より外側の検出（ページ情報・トンボ等）は除外。trim既知＆全体モード以外。
-  if(S.alignedByBox && S.aTrimPx && S.compareScope!=="full"){
+  if(S.alignedByBox && S.aTrimPx && S.compareScope!=="full" && trimTrust.ok){
     const pp=S.place;
     const tx0=pp.ax+S.aTrimPx.x, ty0=pp.ay+S.aTrimPx.y, tx1=tx0+S.aTrimPx.w, ty1=ty0+S.aTrimPx.h;
     const pad=Math.round(S.dpi/72*1);   // ごく僅かな余白
     const inTrim=r=>{ const cx=r.x+r.w/2, cy=r.y+r.h/2; return cx>=tx0-pad&&cx<tx1+pad&&cy>=ty0-pad&&cy<ty1+pad; };
-    textFindings=textFindings.filter(inTrim);
+    // v1.26 文字の差分は、枠の一部でも仕上がりに掛かっていれば残す（中心だけで判定すると、
+    //  仕上がりの端に掛かった見出し・柱を落とす）。仕上がりの完全な外（スラグの日付・ファイル名）は従来どおり除外。
+    const touchTrim=r=> r.x<tx1+pad && r.x+r.w>tx0-pad && r.y<ty1+pad && r.y+r.h>ty0-pad;
+    const dropped=textFindings.filter(r=>!touchTrim(r));
+    textFindings=textFindings.filter(touchTrim);
     regions=regions.filter(inTrim);
+    // 仕上がりの外として落とした文字差分を診断に残す（v1.25 までは記録が無く、ここで消えたことが追えなかった）
+    if(S.diag && S.diag.cut && dropped.length){
+      S.diag.cut.trim=dropped.length;
+      if(!S.diag.cutSample) S.diag.cutSample=[];
+      dropped.slice(0,4).forEach(r=>{ if(S.diag.cutSample.length<12)
+        S.diag.cutSample.push('trim:「'+String((r.cls&&r.cls.expected)||"").slice(0,30)+'」→「'+String((r.cls&&r.cls.actual)||"").slice(0,30)+'」@'+Math.round(r.x)+','+Math.round(r.y)); });
+    }
   }
+  if(S.diag) S.diag.trim=trimTrust.info;
 
   textFindings.sort((a,b)=> a.y-b.y);
   // v1.25 粗さは刷版事故に直結するので一覧の先頭に出す
@@ -5166,7 +5202,7 @@ refreshPage=async function(...a){await _refresh(...a);showEmpty();};
   const FEEDBACK_ENDPOINT = "https://script.google.com/macros/s/AKfycbzIU0MdwtePu-JOYjFeajfQ82ZlBR2VrjLDxbTXJjeNu12wHRYt7cZCH6DjGdgRjbw/exec";
   /* ▲▲▲ デプロイ手順は別紙「GAS設定手順」を参照 ▲▲▲ */
 
-  const APP_VERSION = "v1.25";
+  const APP_VERSION = "v1.26";
   const $$ = s => document.querySelector(s);
   const modal=$$("#fbModal");
   let verdict="";
