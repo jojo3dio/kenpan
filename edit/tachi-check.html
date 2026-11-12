@@ -727,15 +727,16 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
    * @param img RGBA（analyzeEdges と同じ）  @param geom {view, scale}
    * @returns {{trim, bleed, corners}|{error:string}}  trim・bleed は pt（原点左下）
    */
-  function detectMarks(img, geom, o) {
+  /* 両側が白い細い線（トンボの候補）を縦・横それぞれ拾う（detectMarks・detectSingleMarks 共通） */
+  function markLines(img, geom, o) {
     o = o || {};
     const { data, width: W, height: H } = img;
-    const { view, scale: s } = geom;
+    const { scale: s } = geom;
     const pmm = s * MM;                                   // 1mm あたりの px
     const DARK = o.markInk ?? 30, LIGHT = o.markLight ?? 12;
     const off = Math.max(3, Math.round(0.4 * pmm));      // 線の両側をこれだけ離れて見る（線の太さ 0.4mm くらいまで）
     const gap = Math.max(2, Math.round(0.5 * pmm));      // 交わる線で途切れる分はつなぐ
-    const minLen = 3 * pmm, tol = (o.markTolMm ?? 1) * pmm;
+    const minLen = 3 * pmm;
     const ink = (x, y) => {
       if (x < 0 || y < 0 || x >= W || y >= H) return 0;
       const i = (y * W + x) * 4, a = data[i + 3];
@@ -768,7 +769,13 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       }
       return out;
     }
-    const V = lines(true), Hz = lines(false);
+    return { V: lines(true), Hz: lines(false), pmm, W, H, tol: (o.markTolMm ?? 1) * pmm };
+  }
+
+  function detectMarks(img, geom, o) {
+    o = o || {};
+    const { view, scale: s } = geom;
+    const { V, Hz, pmm, W, H, tol } = markLines(img, geom, o);
     const corner = (cx, cy) => {
       const vs = V.filter((v) => (cx === 'l' ? v.c < W / 2 : v.c > W / 2) && (cy === 't' ? v.a1 < H / 2 : v.a0 > H / 2));
       const hs = Hz.filter((h) => (cy === 't' ? h.c < H / 2 : h.c > H / 2) && (cx === 'l' ? h.a1 < W / 2 : h.a0 > W / 2));
@@ -886,6 +893,139 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     };
   }
 
+  /* ---------- 1本トンボ・トンボの無い書き出し（2026-11-12） ----------
+     二重トンボのほかに、次の書き出しにも対応する（中田さん）。
+      ・仕上がり位置の1本トンボ（四隅のL字。西洋式のように仕上がりから離れたものも、線の延長が仕上がり線ならよい）
+        → 仕上がり線をトンボから求め、補うときはトンボを消して（白で覆って）断ち代を足し、用紙を断ち代の外端に切りそろえる
+      ・仕上がりでカット済み（用紙＝仕上がり）、仕上がり＋断ち代でトンボなし（用紙の各辺から決まった幅の内側が仕上がり）
+        → 画像からは分からないので、利用者が「トンボが無いときの仕上がり」で選ぶ（paperTrim） */
+
+  /** 四隅の1本トンボ（仕上がり線の延長上の線）から仕上がりを求める。二重トンボが見つからなかったページだけで使う。
+   *  各隅で「縦の線（x＝仕上がりの左右）は仕上がりの天地の線より内へ入らない・横の線も同じ」で、隅との間が 6mm 以内のもの。
+   *  候補が複数あるときは一番内側（二重トンボの外側の線と内側の線を取り違えない。内側＝仕上がり線）。
+   *  @returns {{trim, erase:[{l,b,r,t}], corners, single:true}|{error}}  erase = トンボの線の範囲（pt）。補うときに白で覆う */
+  function detectSingleMarks(img, geom, o) {
+    o = o || {};
+    const { view, scale: s } = geom;
+    const { V, Hz, pmm, W, H, tol } = markLines(img, geom, o);
+    const corner = (cx, cy) => {
+      const vs = V.filter((v) => (cx === 'l' ? v.c < W * 0.45 : v.c > W * 0.55) && (cy === 't' ? v.a1 < H * 0.45 : v.a0 > H * 0.55));
+      const hs = Hz.filter((h) => (cy === 't' ? h.c < H * 0.45 : h.c > H * 0.55) && (cx === 'l' ? h.a1 < W * 0.45 : h.a0 > W * 0.55));
+      let best = null;
+      for (const v of vs) for (const h of hs) {
+        const vEnd = cy === 't' ? v.a1 : v.a0, hEnd = cx === 'l' ? h.a1 : h.a0;     // 内側の端
+        const dv = cy === 't' ? h.c - vEnd : vEnd - h.c, dh = cx === 'l' ? v.c - hEnd : hEnd - v.c;   // 隅までの隙間（px）
+        if (dv < -tol || dh < -tol || dv > 6 * pmm || dh > 6 * pmm) continue;
+        const d = (cx === 'l' ? v.c : W - v.c) + (cy === 't' ? h.c : H - h.c);
+        if (!best || d > best.d) best = { d, x: v.c, y: h.c, v, h, gapV: Math.max(0, dv), gapH: Math.max(0, dh) };
+      }
+      return best;
+    };
+    const C = { tl: corner('l', 't'), tr: corner('r', 't'), bl: corner('l', 'b'), br: corner('r', 'b') };
+    const miss = Object.keys(C).filter((k) => !C[k]);
+    if (miss.length) return { error: '1本トンボも見つかりません（' + miss.map((k) => ({ tl: '左上', tr: '右上', bl: '左下', br: '右下' })[k]).join('・') + '）' };
+    const agree = 0.5 * pmm;
+    if (Math.abs(C.tl.x - C.bl.x) > agree || Math.abs(C.tr.x - C.br.x) > agree || Math.abs(C.tl.y - C.tr.y) > agree || Math.abs(C.bl.y - C.br.y) > agree)
+      return { error: '四隅の1本トンボの位置がそろいません' };
+    const X = (px) => view.l + (px + 0.5) / s, Y = (px) => view.t - (px + 0.5) / s;
+    const trim = { l: X((C.tl.x + C.bl.x) / 2), r: X((C.tr.x + C.br.x) / 2), t: Y((C.tl.y + C.tr.y) / 2), b: Y((C.bl.y + C.br.y) / 2) };
+    if (!(trim.r - trim.l > mm2pt(20) && trim.t - trim.b > mm2pt(20))) return { error: '1本トンボから求めた仕上がりが小さすぎます' };
+    // 消す範囲：線の外接矩形を 0.3mm 広げる（アンチエイリアス・線端の形の分）
+    const pad = mm2pt(0.3), erase = [];
+    const rectOf = (L, vert) => {
+      const c0 = L.cMin - 1, c1 = L.cMax + 1;
+      const r = vert ? { l: X(c0) - 0.5 / s, r: X(c1) + 0.5 / s, t: Y(L.a0) + 0.5 / s, b: Y(L.a1) - 0.5 / s }
+        : { l: X(L.a0) - 0.5 / s, r: X(L.a1) + 0.5 / s, t: Y(c0) + 0.5 / s, b: Y(c1) - 0.5 / s };
+      return { l: r.l - pad, r: r.r + pad, b: r.b - pad, t: r.t + pad };
+    };
+    const corners = {};
+    for (const k of ['tl', 'tr', 'bl', 'br']) { erase.push(rectOf(C[k].v, true), rectOf(C[k].h, false)); corners[k] = { gapV: C[k].gapV / s, gapH: C[k].gapH / s }; }
+    return { trim, erase, corners, single: true };
+  }
+
+  /* 窓の画像で、位置 pos(pt) の縦線（vert）／横線の中心を、帯 [s0,s1](pt) の範囲だけで測る（refineSingleMarks 用） */
+  function lineCentroid(w, vert, pos, s0, s1) {
+    const half = mm2pt(0.4);
+    const { img, view, scale: s } = w, { data, width: Wd, height: Ht } = img;
+    const toI = (pt) => (vert ? (pt - view.l) * s : (view.t - pt) * s);
+    const toA = (pt) => (vert ? (view.t - pt) * s : (pt - view.l) * s);
+    const c0 = Math.max(0, Math.floor(Math.min(toI(pos - half), toI(pos + half)))), c1 = Math.min((vert ? Wd : Ht) - 1, Math.ceil(Math.max(toI(pos - half), toI(pos + half))));
+    const a0 = Math.max(0, Math.ceil(Math.min(toA(s0), toA(s1)))), a1 = Math.min((vert ? Ht : Wd) - 1, Math.floor(Math.max(toA(s0), toA(s1))));
+    if (a1 - a0 < 3 || c1 <= c0) return null;
+    const v = (c, a) => { const x = vert ? c : a, y = vert ? a : c, i = (y * Wd + x) * 4; return Math.max(255 - data[i], 255 - data[i + 1], 255 - data[i + 2]) * (data[i + 3] / 255); };
+    let side = 0; for (const c of [c0, c1]) for (let a = a0; a <= a1; a++) side = Math.max(side, v(c, a));
+    if (side > 24) return null;
+    let sw = 0, sc = 0;
+    for (let c = c0; c <= c1; c++) for (let a = a0; a <= a1; a++) { const q = v(c, a); sw += q; sc += q * c; }
+    if (sw < 255 * (a1 - a0) * 0.2) return null;
+    const ci = sc / sw + 0.5;
+    return vert ? view.l + ci / s : view.t - ci / s;
+  }
+  /** 1本トンボの四隅の窓（pt）。線の、隅から離れた 0.4〜2.5mm の所（相手の線と交わらない所）だけを測る */
+  function singleMarkWindows(m, media) {
+    const T = m.trim, out = {};
+    for (const k of ['tl', 'tr', 'bl', 'br']) {
+      const L = k[1] === 'l', Tp = k[0] === 't', g = m.corners[k];
+      const gx = g.gapH + mm2pt(2.6), gy = g.gapV + mm2pt(2.6), e = mm2pt(0.6);
+      const w = { l: L ? T.l - gx : T.r - e, r: L ? T.l + e : T.r + gx, b: Tp ? T.t - e : T.b - gy, t: Tp ? T.t + gy : T.b + e };
+      out[k] = media ? intersect(w, media) : w;
+    }
+    return out;
+  }
+  function refineSingleMarks(m, imgs) {
+    const T = m.trim, got = { x: {}, y: {} };
+    for (const k of ['tl', 'tr', 'bl', 'br']) {
+      const w = imgs[k]; if (!w) return null;
+      const L = k[1] === 'l', Tp = k[0] === 't', g = m.corners[k];
+      const xT = L ? T.l : T.r, yT = Tp ? T.t : T.b;
+      const yb = Tp ? [yT + g.gapV + mm2pt(0.4), yT + g.gapV + mm2pt(2.5)] : [yT - g.gapV - mm2pt(2.5), yT - g.gapV - mm2pt(0.4)];
+      const xb = L ? [xT - g.gapH - mm2pt(2.5), xT - g.gapH - mm2pt(0.4)] : [xT + g.gapH + mm2pt(0.4), xT + g.gapH + mm2pt(2.5)];
+      got.x[k] = lineCentroid(w, true, xT, ...yb); got.y[k] = lineCentroid(w, false, yT, ...xb);
+    }
+    const two = (o, a, b, old) => {
+      const v = [o[a], o[b]].filter((x) => x != null);
+      if (!v.length) return old;
+      const r = v.reduce((p, q) => p + q, 0) / v.length;
+      return Math.abs(r - old) < mm2pt(0.3) ? r : old;
+    };
+    return Object.assign({}, m, { trim: { l: two(got.x, 'tl', 'bl', T.l), r: two(got.x, 'tr', 'br', T.r), t: two(got.y, 'tl', 'tr', T.t), b: two(got.y, 'bl', 'br', T.b) }, refined: true });
+  }
+
+  /** トンボの無いページの仕上がり（利用者の指定）。mode = 'paper'（用紙＝仕上がり）／'inset'（用紙の各辺から insetPt 内側） */
+  function paperTrim(boxes, mode, insetPt) {
+    const P = boxes.crop || boxes.media;
+    if (mode === 'paper') return { l: P.l, b: P.b, r: P.r, t: P.t };
+    if (mode === 'inset') { const d = insetPt || 0; return { l: P.l + d, b: P.b + d, r: P.r - d, t: P.t - d }; }
+    return null;
+  }
+
+  /**
+   * 判定・補正に使う断ち代の外枠（用紙で切り詰めない）。
+   *   amountPt を指定すると、BleedBox に関係なく仕上がり＋amountPt にそろえる（「断ち代の量」3mm／5mm）。
+   *   指定しなければ BleedBox（無ければ defaultPt）。
+   * grow = 用紙（MediaBox）が断ち代の外枠より小さい＝補うときに用紙を広げる必要がある
+   */
+  function targetBleed(boxes, trim, amountPt, defaultPt) {
+    const T = trim || boxes.trim, M = boxes.media;
+    const b = amountPt ? { l: T.l - amountPt, b: T.b - amountPt, r: T.r + amountPt, t: T.t + amountPt }
+      : boxes.bleed && boxes.hasBleed ? intersect(boxes.bleed, M)
+      : { l: T.l - defaultPt, b: T.b - defaultPt, r: T.r + defaultPt, t: T.t + defaultPt };
+    const e = 0.01;
+    const grow = b.l < M.l - e || b.b < M.b - e || b.r > M.r + e || b.t > M.t + e;
+    return { bleed: b, grow };
+  }
+
+  /** 画像の矩形（pt）を白にする（判定の前に、消すトンボを絵柄と数えないように） */
+  function whiteOut(img, geom, rects) {
+    const { data, width: W, height: H } = img, { view, scale: s } = geom;
+    for (const r of rects || []) {
+      const x0 = Math.max(0, Math.floor((r.l - view.l) * s)), x1 = Math.min(W, Math.ceil((r.r - view.l) * s));
+      const y0 = Math.max(0, Math.floor((view.t - r.t) * s)), y1 = Math.min(H, Math.ceil((view.t - r.b) * s));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * W + x) * 4; data[i] = data[i + 1] = data[i + 2] = data[i + 3] = 255; }
+    }
+    return img;
+  }
+
   /* ---------- 辺の役割 ---------- */
 
   /**
@@ -927,6 +1067,35 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     }
     return NaN;
   }
+
+  /* ---------- 淡い縁（2026-11-12 ゆめのつばさ p.7） ----------
+     スキャンした絵や紙の絵は、絵の終わりぎわが淡く（濃さ 1〜10% ほど）なっていることがある。0%以外は絵柄とみなすので、
+     今は淡い縁ごと「絵柄」と数え、反転でも淡い縁が断ち代に写って白っぽい筋になる。淡い縁の幅は場所で違うので、
+     判定でも 0.5mm の段差ごとに細かく区間が割れていた（「絵柄の明るさで分割される」）。
+     ここでは、列ごとに外端から内へたどり、内側の絵柄（外端から FRINGE_MAX〜+0.5mm 奥の平均）の 75% の濃さに届くまでを
+     淡い縁とする。内側の絵柄が薄い（16%未満）列は淡い縁を見ない（明るい写真・地色は切らない）。
+     「半分の濃さ」だと、淡い縁から濃い所へ移る途中（50〜70%）が軸のすぐ外に残り、角の続き（同じ位置を縦に写す）で
+     淡い線になった（p.7 の左上）。内側の 75% に届く所を濃い所の端とする。
+     淡い縁を切るかどうかは辺ごとに利用者が選ぶ（o.cutFringe）。既定は切らない（判定はこれまでどおり） */
+  const FRINGE_INK = 64, FRINGE_SOLID = 0.75, FRINGE_MAX = mm2pt(1.5), FRINGE_REF = mm2pt(0.5), FRINGE_MIN_REF = 40, FRINGE_MIN = mm2pt(0.25);
+  /* 外端の画素 p0 から内へたどって、淡い縁の幅（px）を返す。無ければ 0。
+     avg(p) = 位置 p の辺に沿った数列の平均の濃さ、out = 外向き（±1）、s = px/pt */
+  function fringeWalk(avg, p0, out, s) {
+    const maxPx = Math.round(FRINGE_MAX * s), refPx = Math.max(2, Math.round(FRINGE_REF * s));
+    let ref = 0;
+    for (let j = 0; j < refPx; j++) ref += avg(p0 - out * (maxPx + j));
+    ref /= refPx;
+    if (ref < FRINGE_MIN_REF) return 0;
+    // 淡い縁とみなすのは濃さ 25% 未満だけ（それより濃い所はちゃんとした絵柄として残す。2026-11-12「淡い部分も絵柄があるところは残して」）
+    const thr = Math.min(ref * FRINGE_SOLID, FRINGE_INK), run = Math.max(1, Math.round(mm2pt(0.1) * s));
+    for (let j = 0; j <= maxPx; j++) {
+      let m = 0; for (let r = 0; r < run; r++) m += avg(p0 - out * (j + r));
+      // 濃い所に届いた所からさらに 0.1mm 内側までを切る（移り変わりの途中の少し薄い所を軸の外に残さない）
+      if (m / run >= thr) return j >= Math.round(FRINGE_MIN * s) ? j + Math.round(mm2pt(0.1) * s) : 0;
+    }
+    return 0;
+  }
+  const sideOpt = (v, side) => (v && typeof v === 'object' ? !!v[side] : !!v);
 
   /* 長さが min 未満の区間を、隣の区間に吸収する（いちばん短いものから順に）。
      near=true のときは値が近い方の隣へ（段差の区切り用）、それ以外は両隣と一緒にまとめる */
@@ -1036,6 +1205,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const intrPx = Math.round(intrudePt * s);
       const thickPx = Math.max(2, Math.round(mm2pt(0.3) * s));
       const inkIn = (a) => intrusionAt(inked, horiz, edgeIdx, edgePx, out, a, intrPx, thickPx);
+      // 淡い縁（NOTES 3章「淡い縁」）。fr = 淡い縁の幅（px）。cutF = この辺は淡い縁を切って判定・補正する
+      const fr = new Float32Array(n);
+      const cutF = sideOpt(o.cutFringe, side), fillIn = sideOpt(o.fillInset, side);
+      const fw = Math.max(1, Math.round(mm2pt(0.1) * s)), frMaxPx = Math.round(FRINGE_MAX * s);
 
       let inkCols = 0;
       for (let i = 0; i < n; i++) {
@@ -1055,6 +1228,23 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
           if (hit) { last = k; gap = 0; } else if (++gap > gapPx) break;
         }
         ext[i] = last + 1;
+        {
+          const avg = (d) => { let m = 0; for (let j = -fw; j <= fw; j++) { const [x, y] = P(d, a + j); m += inkOf(x, y); } return m / (2 * fw + 1); };
+          // 淡い縁は断ち代の外端をまたぐこともあるので、外端より FRINGE_MAX 先まで絵柄の終わりを探す。
+          // それより先まで絵柄が続く列（端が無い）は見ない。fr は「断ち代の中に残る淡い縁」の幅（外端より外の分は数えない）
+          let lastF = last;
+          if (last >= needPx) {
+            let g2 = 0;
+            for (let k = needPx + 2; k < needPx + 2 + frMaxPx; k++) {
+              const d = firstOut + out * k; let hit = false;
+              for (let j = -1; j <= 1 && !hit; j++) { const [x, y] = P(d, a + j); hit = inked(x, y); }
+              if (hit) { lastF = k; g2 = 0; } else if (++g2 > gapPx) break;
+            }
+            if (lastF >= needPx + frMaxPx) lastF = -2;
+          }
+          const f = lastF === -2 ? 0 : fringeWalk(avg, lastF >= 0 ? firstOut + out * lastF : firstOut - out, out, s);
+          fr[i] = f > 0 ? Math.max(0, f - (lastF - last)) : 0;
+        }
         // 端の画素の塗られ具合（アンチエイリアスの濃さ ÷ 1つ内側の画素の濃さ）で、端を1画素より細かく求める。
         // 判定（ext）には使わない。補正で「元の絵柄の端」からクリップするためだけに使う（重ねない・隙間を作らない）
         const colInk = (d) => { let m = 0; for (let j = -1; j <= 1; j++) { const [x, y] = P(d, a + j); m = Math.max(m, inkOf(x, y)); } return m; };
@@ -1072,19 +1262,58 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         const aa = cnt > 0 && mid / cnt >= 0.2;
         for (let i = 0; i < n; i++) if (!isNaN(sub[i])) sub[i] = Math.max(0, sub[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i]));
       }
+      // 淡い縁の集計（切るかどうかに関わらず出す。画面のアラート用）
+      let fringe = null;
+      {
+        let fin = 0; const ws = []; let gain = 0;
+        const needLim0 = needPx - tolPt * s;
+        for (let i = 0; i < n; i++) {
+          if (ext[i] === Infinity) continue;
+          fin++;
+          if (fr[i] > 0) { ws.push(fr[i] / s); if (ext[i] >= needLim0 && ext[i] - fr[i] < needLim0) gain++; }
+        }
+        ws.sort((x, y) => x - y);
+        if (fin && ws.length / fin >= 0.15) fringe = { ratio: ws.length / fin, medPt: percentile(ws, 0.5), maxPt: percentile(ws, 0.95), gainRatio: gain / n, cut: cutF };
+      }
+      // 淡い縁を切る：外端から淡い縁の幅だけ内側を「濃い所の端」にし、判定と反転の軸に使う（仕上がり線の内側へ入ってもよい。食い込みと同じ扱い）
+      if (cutF) for (let i = 0; i < n; i++) {
+        if (ext[i] === Infinity || !(fr[i] > 0)) continue;
+        const k1 = ext[i] - fr[i];                       // 濃い所の外端（firstOut の内側の境目から外へ px）
+        ext[i] = Math.max(0, k1);
+        sub[i] = Math.max(-intrPx, k1 + offPx - 0.5);    // 0.5px 内側へ（淡い縁を残さない側）
+      }
+      // subE = 補う範囲の内側の境目（今ある絵柄の端。淡い縁を切る辺は濃い所の端）。2026-11-12 から透明効果の無いページも
+      // ここから外だけに描く（中田さん「もともとある部分も含めて消されて反転されるのは良くない。斜めの部分も淡い部分も、
+      // 絵柄があるところは残して」）。今は sub と同じ。軸（sub）と分けておけるようにしてある
+      const subE = Float32Array.from(sub);
 
       // 食い込みの列を、隣の「足りない」列から両方向へつなぐ（断ち代 0 として扱い、端は仕上がり線の内側）
-      let intruded = 0;
+      let intruded = 0, inset = null;
       {
         const needLim0 = needPx - tolPt * s;
         const shortCol = (i) => ext[i] !== Infinity && ext[i] < needLim0;
-        const grow = (i) => { ext[i] = 0; sub[i] = intr[i]; inkCols++; intruded++; };
+        const grow = (i) => { ext[i] = 0; sub[i] = subE[i] = intr[i]; inkCols++; intruded++; };
         for (let i = 1; i < n; i++) if (ext[i] === Infinity && !isNaN(intr[i]) && shortCol(i - 1)) grow(i);
         for (let i = n - 2; i >= 0; i--) if (ext[i] === Infinity && !isNaN(intr[i]) && shortCol(i + 1)) grow(i);
+        // 残った「仕上がり線のわずかに内側で絵柄が終わる」列（隣が足りないわけではないもの）。
+        // 既定では補わず、アラートで知らせる（2026-11-12 中田さん「アラートとチェックで確認しながら」）。
+        // fillInset のときだけ、足りない（断ち代 0）として補う
+        const runMin = Math.max(3, Math.round(minRunPt * s));
+        let len = 0, deep = 0, runs = 0;
+        for (let i = 0; i < n;) {
+          if (!(ext[i] === Infinity && !isNaN(intr[i]))) { i++; continue; }
+          let j = i; while (j + 1 < n && ext[j + 1] === Infinity && !isNaN(intr[j + 1])) j++;
+          if (j - i + 1 >= runMin) {
+            len += j - i + 1; runs++;
+            for (let q = i; q <= j; q++) { deep = Math.max(deep, -intr[q]); if (fillIn) grow(q); }
+          }
+          i = j + 1;
+        }
+        if (len) inset = { lenPt: len / s, depthPt: deep / s, runs, fill: fillIn };
       }
 
       const inkRatio = n ? inkCols / n : 0;
-      if (inkRatio < minInkRatio) { res[side] = { status: 'margin', needPt, inkRatio }; continue; }
+      if (inkRatio < minInkRatio) { res[side] = { status: 'margin', needPt, inkRatio, fringe, inset }; continue; }
 
       // --- 足りている／足りないの区間に分ける（短い区間は前後に吸収して、細かく割らない） ---
       const needLim = needPx - tolPt * s;
@@ -1137,6 +1366,9 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
           if (pr && pr.v === b) pr.e = r.s + i; else parts.push({ v: b, s: r.s + i, e: r.s + i });
         }
         parts = absorb(parts, Math.max(minRunPx, Math.round(minSegPt * s)), true);
+        // 淡い縁を切る辺（スキャンした絵など）は、端が波打っていて 0.5mm の段差で細かく割れ、区間ごとに軸がずれて継ぎ目が出る。
+        // 続いている「足りない」区間は1つにまとめ、1本の（傾いた）軸で補う（2026-11-12「明るさで分割される」）
+        if (cutF && parts.length > 1) parts = [{ v: 0, s: parts[0].s, e: parts[parts.length - 1].e }];
         for (const q of parts) {
           const vals = [];
           for (let i = q.s; i <= q.e; i++) if (ext[i] !== Infinity) vals.push(ext[i]);
@@ -1144,6 +1376,37 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
           const lo = vals.length ? vals[Math.floor(0.03 * (vals.length - 1))] : 0;
           const med = vals.length ? vals[vals.length >> 1] : 0;
           segsPx.push({ s: q.s, e: q.e, lo, med });
+        }
+      }
+      // 画像（一枚もの）の範囲をフォローする：辺に接する画像の範囲の中の「足りない」区間を1つにまとめ、画像の範囲いっぱいにする
+      // （2026-11-12。スキャンした絵・写真の端は波打っていて、足りない／足りているが細かく入れ替わり、区間ごとに軸がずれて継ぎ目が出た）
+      let followed = 0;
+      if (o.objects && o.objects.length && segsPx.length) {
+        const e5 = mm2pt(0.5), in5 = mm2pt(5);
+        const reach = (R) => side === 'top' ? R.t >= trim.t - e5 && R.b < trim.t - in5 : side === 'bottom' ? R.b <= trim.b + e5 && R.t > trim.b + in5
+          : side === 'left' ? R.l <= trim.l + e5 && R.r > trim.l + in5 : R.r >= trim.r - e5 && R.l < trim.r - in5;
+        const idx = (v) => (horiz ? (v - view.l) * s - a0 : (view.t - v) * s - a0);
+        const objs = o.objects.filter(reach).map((R) => {
+          const u = horiz ? [idx(R.l), idx(R.r)] : [idx(R.t), idx(R.b)];
+          return { i0: Math.max(0, Math.ceil(Math.min(...u))), i1: Math.min(n - 1, Math.floor(Math.max(...u)) - 1) };
+        }).filter((q) => q.i1 - q.i0 + 1 >= minRunPx).sort((p1, p2) => (p2.i1 - p2.i0) - (p1.i1 - p1.i0));
+        const needLim1 = needPx - tolPt * s;
+        for (const q of objs) {
+          const mid = (g) => (g.s + g.e) / 2;
+          const grp = segsPx.filter((g) => !g.obj && mid(g) >= q.i0 && mid(g) <= q.i1);
+          if (!grp.length) continue;
+          let s0 = q.i0, s1 = q.i1;
+          // 画像の外の区間・すでにまとめた区間とは重ねない
+          for (const g of segsPx) if (!grp.includes(g)) { if (mid(g) < q.i0 || g.obj && g.e < mid(grp[0])) s0 = Math.max(s0, g.e + 1); else s1 = Math.min(s1, g.s - 1); }
+          if (s1 - s0 + 1 < minRunPx) continue;
+          const all = [], sh = [];
+          for (let i = s0; i <= s1; i++) if (ext[i] !== Infinity) { all.push(ext[i]); if (ext[i] < needLim1) sh.push(ext[i]); }
+          all.sort((x, y) => x - y); sh.sort((x, y) => x - y);
+          const lo = all.length ? all[Math.floor(0.03 * (all.length - 1))] : 0, med = sh.length ? sh[sh.length >> 1] : all.length ? all[all.length >> 1] : 0;
+          for (const g of grp) segsPx.splice(segsPx.indexOf(g), 1);
+          segsPx.push({ s: s0, e: s1, lo, med, obj: true });
+          segsPx.sort((x, y) => x.s - y.s);
+          followed++;
         }
       }
       const toPt = (i) => (horiz ? (a0 + i) / s + view.l : view.t - (a0 + i) / s);   // 画素 i の始まりの境目（pt）
@@ -1162,14 +1425,14 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
           core: ord(tEnd(q.s), tEnd(q.e + 1)),                  // 実際に足りない列の範囲（軸の当てはめに使う）
           extPt: q.med / s,                                     // この区間の今ある断ち代（中央値）
           keepPt: Math.max(0, q.lo / s - 1 / s - mm2pt(0.05)),  // 下の shapeSegments で軸から決め直す
-          atStart: q.s === 0, atEnd: q.e === n - 1,
+          atStart: q.s === 0, atEnd: q.e === n - 1, obj: !!q.obj,
         };
       });
       // 元の絵柄の端（edge）と反転の軸（axis）を、1画素より細かく測った端の位置（sub）から決める
       {
-        const A = [], D = [];
-        for (let i = 0; i < n; i++) { A.push(toPt(i + 0.5)); D.push(sub[i] / s); }
-        shapeSegments(segments, horiz ? A : A.reverse(), horiz ? D : D.reverse(), needPt, 1 / s);
+        const A = [], D = [], DA = [];
+        for (let i = 0; i < n; i++) { A.push(toPt(i + 0.5)); D.push(subE[i] / s); DA.push(sub[i] / s); }
+        shapeSegments(segments, horiz ? A : A.reverse(), horiz ? D : D.reverse(), needPt, 1 / s, horiz ? DA : DA.reverse());
       }
       const finite = []; for (let i = 0; i < n; i++) if (ext[i] !== Infinity) finite.push(ext[i] / s);
       finite.sort((x, y) => x - y);
@@ -1177,7 +1440,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const worst = segments.length ? Math.min(...segments.map((g) => g.extPt)) : null;
       res[side] = {
         status: segments.length ? 'short' : 'ok',
-        needPt, inkRatio, lightDropped, intrudedPt: intruded / s,
+        needPt, inkRatio, lightDropped, intrudedPt: intruded / s, fringe, inset, followed,
         shortRatio: shortLen / ((horiz ? trim.r - trim.l : trim.t - trim.b) || 1),   // 足りない区間の長さの割合
         partial: segments.length > 0 && shortLen < 0.97 * (horiz ? trim.r - trim.l : trim.t - trim.b),
         minPt: percentile(finite, 0.05),
@@ -1198,7 +1461,8 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
    *  ・axis：端の並びに直線を当てはめ（斜めの端にも合う）、3% 点まで内側へ寄せ、さらに 1画素＋0.05mm 内側。
    *    接している「足りない」区間がまとめて1本の直線に乗る（ずれ 0.15mm 以内）なら同じ軸にする（斜めの端が段差で区切られても継ぎ目が出ない）
    */
-  function shapeSegments(segments, A, D, needPt, pxPt) {
+  function shapeSegments(segments, A, D, needPt, pxPt, Dax) {
+    Dax = Dax || D;     // 軸は Dax（淡い縁を切る辺は濃い所の端）、edge（補う範囲の内側の境目）は D（今ある絵柄の外端）
     const n = A.length;
     if (!n || !segments.length) return;
     const F = Float64Array.from(D);       // 測れない列は近くの列で埋める
@@ -1216,7 +1480,8 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     const margin = pxPt + mm2pt(0.05);
     const fit = (list) => {
       const xs = [], ys = [];
-      for (const g of list) for (let i = idx(g.core[0]); i < n && A[i] <= g.core[1]; i++) if (!isNaN(D[i])) { xs.push(A[i]); ys.push(Math.min(D[i], maxD)); }
+      // 絵柄が断ち代の外端まである列は、端の位置が分からないので軸の当てはめに使わない（画像の範囲でまとめた区間には足りている列も入る）
+      for (const g of list) for (let i = idx(g.core[0]); i < n && A[i] <= g.core[1]; i++) if (!isNaN(Dax[i]) && Dax[i] < needPt - pxPt) { xs.push(A[i]); ys.push(Dax[i]); }
       if (xs.length < 2) return null;
       const mx = xs.reduce((t, v) => t + v, 0) / xs.length, my = ys.reduce((t, v) => t + v, 0) / ys.length;
       let sxx = 0, sxy = 0; for (let i = 0; i < xs.length; i++) { sxx += (xs[i] - mx) ** 2; sxy += (xs[i] - mx) * (ys[i] - my); }
@@ -1278,13 +1543,14 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     const needPx = Math.round(needPt * s), gapPx = Math.max(2, Math.round(gapPt * s));
     const a0 = Math.max(0, Math.ceil(horiz ? px(trim.l) : py(trim.t))), a1 = Math.min((horiz ? W : H) - 1, Math.floor(horiz ? px(trim.r) : py(trim.b)));
     const P = (d, aa) => (horiz ? [aa, d] : [d, aa]);
-    const A = [], D = [], covs = [];
+    const A = [], D = [], covs = [], cutD = [];
+    const cutF = sideOpt(o.cutFringe, side), fw = Math.max(1, Math.round(mm2pt(0.1) * s));
     for (let a = a0; a <= a1; a++) {
       let c = 0; for (let k = -1; k <= 1; k++) { const [x, y] = P(probe, a + k); if (inkOf(x, y) > whiteTol) c++; }
       A.push(horiz ? (a + 0.5) / s + view.l : view.t - (a + 0.5) / s);
       if (c < 2) {
         const v = intrusionAt((x, y) => inkOf(x, y) > whiteTol, horiz, edgeIdx, edgePx, out, a, Math.round((o.intrudePt ?? INTRUDE_PT) * s), Math.max(2, Math.round(mm2pt(0.3) * s)));
-        D.push(isNaN(v) ? NaN : v / s); covs.push(-1); continue;
+        D.push(isNaN(v) ? NaN : v / s); covs.push(-1); cutD.push(NaN); continue;
       }
       let last = -1, gap = 0;
       for (let k = 0; k < needPx + 2; k++) {
@@ -1296,18 +1562,40 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const dl = firstOut + out * last;
       const cov = Math.min(1, Math.max(0, colInk(dl) / Math.max(1, colInk(dl - out))));
       covs.push(cov); D.push(last + offPx);
+      // 淡い縁を切る辺：濃い所の外端（analyzeEdges と同じ数え方）
+      let cd = NaN;
+      if (cutF) {
+        const avg = (d) => { let m = 0; for (let j = -fw; j <= fw; j++) { const [x, y] = P(d, a + j); m += inkOf(x, y); } return m / (2 * fw + 1); };
+        let lastF = last;
+        const frMaxPx = Math.round(FRINGE_MAX * s);
+        if (last >= needPx) {
+          let g2 = 0;
+          for (let k = needPx + 2; k < needPx + 2 + frMaxPx; k++) {
+            const d = firstOut + out * k; let hit = false;
+            for (let j = -1; j <= 1 && !hit; j++) { const [x, y] = P(d, a + j); hit = inkOf(x, y) > whiteTol; }
+            if (hit) { lastF = k; g2 = 0; } else if (++g2 > gapPx) break;
+          }
+          if (lastF >= needPx + frMaxPx) lastF = -2;
+        }
+        const f = lastF === -2 ? 0 : fringeWalk(avg, lastF >= 0 ? firstOut + out * lastF : firstOut - out, out, s);
+        if (f > 0 && lastF + 1 - f < last + 1) cd = Math.max(-Math.round((o.intrudePt ?? INTRUDE_PT) * s), lastF + 1 - f + offPx - 0.5) / s;
+      }
+      cutD.push(cd);
     }
     let mid = 0, cnt = 0;
     for (let i = 0; i < D.length; i++) if (!isNaN(D[i]) && covs[i] >= 0) { cnt++; if (covs[i] > 0.02 && covs[i] < 0.99) mid++; }
     const aa = cnt > 0 && mid / cnt >= 0.2;
     for (let i = 0; i < D.length; i++) if (!isNaN(D[i]) && covs[i] >= 0) D[i] = Math.max(0, D[i] + (!aa && covs[i] >= 0.99 ? 0.5 : covs[i])) / s;
+    // Dax = 反転の軸に使う端（淡い縁を切る辺は濃い所の端）。D は今ある絵柄の外端のまま（補うのはその外側だけ）
+    for (let i = 0; i < D.length; i++) if (covs[i] >= 0 && !isNaN(cutD[i])) D[i] = cutD[i];
     if (!horiz) { A.reverse(); D.reverse(); }
-    return { A, D };
+    return { A, D, Dax: D };
   }
 
   /** 補正のための辺の帯（pt）。refineEdges に渡す画像はこの範囲を描けばよい（仕上がり線の 1mm 内側〜断ち代の外端） */
   function stripRect(side, trim, bleed) {
-    const i = INTRUDE_PT + mm2pt(0.5);
+    // 淡い縁の内側の濃さ（外端から FRINGE_MAX＋FRINGE_REF 奥）まで測れるように、仕上がり線の内側をその分含める
+    const i = INTRUDE_PT + FRINGE_MAX + FRINGE_REF + mm2pt(0.5);
     if (side === 'top') return { l: trim.l, r: trim.r, b: trim.t - i, t: bleed.t };
     if (side === 'bottom') return { l: trim.l, r: trim.r, b: bleed.b, t: trim.b + i };
     if (side === 'left') return { l: bleed.l, r: trim.l + i, b: trim.b, t: trim.t };
@@ -1322,9 +1610,9 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
   function refineEdges(edges, side, img, geom, o) {
     const e = edges[side];
     if (!e || e.status !== 'short' || !e.segments || !e.segments.length) return false;
-    const { A, D } = measureEdgeSamples(img, geom, side, o);
+    const { A, D, Dax } = measureEdgeSamples(img, geom, side, o);
     if (!A.length) return false;
-    shapeSegments(e.segments, A, D, e.needPt, 1 / geom.scale);
+    shapeSegments(e.segments, A, D, e.needPt, 1 / geom.scale, Dax);
     e.keepPt = Math.min(...e.segments.map((g) => g.keepPt));
     e.refined = geom.scale * 72;     // 測り直した解像度（dpi）
     return true;
@@ -1354,7 +1642,7 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
    * その外側だけを補う。区間ごとに足りない量が違っていても、それぞれに合わせて補える。
    *   segs[side] = [{a0, a1, keepPt}]  a0〜a1 は辺に沿う座標（天地＝x、左右＝y）
    */
-  function edgeOps(how, T, B, srcPt, keep, segs, exact) {
+  function edgeOps(how, T, B, srcPt, keep, segs, exact, noOverlap) {
     keep = keep || {}; segs = segs || {};
     const span = { top: [T.l, T.r], bottom: [T.l, T.r], left: [T.b, T.t], right: [T.b, T.t] };
     const full = { top: B.t - T.t, bottom: T.b - B.b, left: T.l - B.l, right: B.r - T.r };
@@ -1372,7 +1660,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         const axisD = (aa) => Math.min(ax.o + ax.m * (aa - ax.ref), lim);
         // 元の絵柄の端（ここから外だけに描く）。無ければ軸から
         // exact でないページ（透明効果なし）は軸から描く＝元の絵柄に少し重ねる
-        let edge = exact && g.edge && g.edge.length >= 2 ? g.edge.map(([aa, d]) => [Math.min(Math.max(aa, a0), a1), Math.min(Math.max(d, axisD(aa)), full[k])])
+        // 2026-11-12 から、透明効果の無いページも元の絵柄の端（edge）から外だけに描く（今ある絵柄を反転で描き直さない）。
+        // ぴったり接すると画面のアンチエイリアスで継ぎ目に白い筋が見えるので、透明効果の無いページは 0.1mm だけ内側へ重ねる
+        const ovE = exact ? 0 : mm2pt(0.1);
+        let edge = g.edge && g.edge.length >= 2 ? g.edge.map(([aa, d]) => [Math.min(Math.max(aa, a0), a1), Math.min(Math.max(d - ovE, axisD(aa)), full[k])])
           : [[a0, Math.max(-INTRUDE_PT, axisD(a0))], [a1, Math.max(-INTRUDE_PT, axisD(a1))]];   // 食い込みでは軸が仕上がり線の内側に来る
         const width = full[k] - Math.min(axisD(a0), axisD(a1));
         return { k, a0, a1, axisD, line: (aa) => ax.o + ax.m * (aa - ax.ref), edge, kf: how[k] === 'stretch' ? Math.max(1, width / srcPt) : 1,
@@ -1438,7 +1729,8 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         const eV = outC(kv, edgeEnd(gv, vEnd)), eH = outC(kh, edgeEnd(gh, hEnd));
         // 透明効果の無いページは、角の矩形を内側へ少し重ねる。端が仕上がり線の内側に食い込んでいると、
         // 区間と角の境目が仕上がりの中に来て、表示のアンチエイリアスで髪の毛ほどの白い筋が見えるため
-        const ov = exact ? 0 : 0.3, ix = kh === 'left' ? ov : -ov, iy = kv === 'top' ? -ov : ov;
+        // 1本トンボを消すページも重ねない（点対称に写す元＝隅の外側にトンボの角があり、仕上がりの内側に写るため）
+        const ov = exact || noOverlap ? 0 : 0.3, ix = kh === 'left' ? ov : -ov, iy = kv === 'top' ? -ov : ov;
         draw(rectPts(xo, yt + iy, eH + ix, eV), hM);                          // 左右側の続き
         draw(rectPts(eH, eV + iy, xt + ix, yo), vM);                          // 天地側の続き
         draw(rectPts(xo, eV + iy, eH + ix, yo), [hM[0], 0, 0, vM[3], hM[4], vM[5]]);    // 外側の角（縦横とも折り返す＝点対称）
@@ -1575,6 +1867,117 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     return '<< ' + out.join(' ') + ' >>';
   }
 
+  /* ---------- 配置された画像の範囲（2026-11-12） ----------
+     スキャンした絵・写真など「一枚もの」の画像は、端が波打っていたり淡かったりして、足りない／足りているが細かく入れ替わり、
+     区間ごとに軸がずれて継ぎ目が出た（中田さん「分割されるのが気になる。画像など一枚ものは配置されているものの範囲をフォローする方がいい」）。
+     ページの内容を読んで、画像（Image XObject）が見えている範囲（配置の変換 × クリップ）をページ座標で返す。
+     analyzeEdges の o.objects に渡すと、辺に接する画像の範囲の中の「足りない」区間を1つにまとめ、画像の範囲いっぱいを1本の軸で補う。
+     クリップは外接矩形で近似（InDesign の枠は矩形がほとんど）。Form の中も 4段まで見る */
+  async function placedImagesAll(buf, pageIndexes) {
+    const K = PDF();
+    const doc = await K.Doc.load(buf);
+    const pages = await doc.pages();
+    const out = {};
+    for (const i of pageIndexes || pages.map((p, j) => j)) {
+      try { out[i] = await placedImagesOf(K, doc, pages[i]); } catch (e) { out[i] = []; }
+    }
+    return out;
+  }
+  async function placedImagesOf(K, doc, page) {
+    if (!page) return [];
+    const cEnt = page.dict.map.get('/Contents');
+    const refs = !cEnt ? [] : cEnt.v.t === 'ref' ? [cEnt.v] : cEnt.v.t === 'arr' ? cEnt.v.items.filter((x) => x.t === 'ref') : [];
+    const parts = [];
+    for (const r of refs) { const so = await doc.get(r.num); if (so.v.t === 'stream') parts.push(await doc.streamData(so.v), K.bytes('\n')); }
+    const res = await pageResources(doc, page);
+    const found = [];
+    await scanContent(K, doc, K.concat(parts), res.dict, res.src, [1, 0, 0, 1, 0, 0], null, 0, found, { ops: 0 });
+    return found;
+  }
+  const mmul = (m, c) => [m[0] * c[0] + m[1] * c[2], m[0] * c[1] + m[1] * c[3], m[2] * c[0] + m[3] * c[2], m[2] * c[1] + m[3] * c[3], m[4] * c[0] + m[5] * c[2] + c[4], m[4] * c[1] + m[5] * c[3] + c[5]];
+  const tpt = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  const bboxOf = (pts) => { let l = Infinity, b = Infinity, r = -Infinity, t = -Infinity; for (const [x, y] of pts) { l = Math.min(l, x); r = Math.max(r, x); b = Math.min(b, y); t = Math.max(t, y); } return { l, b, r, t }; };
+  async function scanContent(K, doc, data, resDict, resSrc, ctm0, clip0, depth, found, cnt) {
+    if (depth > 4) return;
+    const P = new K.Parser(data);
+    const xo = resDict && resDict.map.get('/XObject') ? await doc.resolve(resDict.map.get('/XObject').v, resSrc) : null;
+    let ctm = ctm0, clip = clip0, path = [], pendingClip = false;
+    const stack = [];
+    let ops = [];
+    let p = 0;
+    while (p < data.length) {
+      p = P.skip(p);
+      if (p >= data.length) break;
+      let r;
+      try { r = P.parse(p); } catch (e) { break; }
+      p = r.end;
+      const v = r.v;
+      if (v.t !== 'kw') { ops.push(v); continue; }
+      const op = v.v, n = (k) => (ops[k] && ops[k].t === 'num' ? ops[k].v : 0);
+      if (++cnt.ops > 2e6) return;
+      if (op === 'q') stack.push({ ctm, clip });
+      else if (op === 'Q') { const g = stack.pop(); if (g) { ctm = g.ctm; clip = g.clip; } }
+      else if (op === 'cm' && ops.length >= 6) ctm = mmul([n(0), n(1), n(2), n(3), n(4), n(5)], ctm);
+      else if (op === 're' && ops.length >= 4) { const x = n(0), y = n(1), w = n(2), h = n(3); path.push(tpt(ctm, x, y), tpt(ctm, x + w, y), tpt(ctm, x, y + h), tpt(ctm, x + w, y + h)); }
+      else if ((op === 'm' || op === 'l') && ops.length >= 2) path.push(tpt(ctm, n(0), n(1)));
+      else if (op === 'c' && ops.length >= 6) path.push(tpt(ctm, n(0), n(1)), tpt(ctm, n(2), n(3)), tpt(ctm, n(4), n(5)));
+      else if ((op === 'v' || op === 'y') && ops.length >= 4) path.push(tpt(ctm, n(0), n(1)), tpt(ctm, n(2), n(3)));
+      else if (op === 'W' || op === 'W*') pendingClip = true;
+      else if (['n', 'f', 'F', 'f*', 'S', 's', 'B', 'B*', 'b', 'b*'].includes(op)) {
+        if (pendingClip && path.length) { const bb = bboxOf(path); clip = clip ? intersect(clip, bb) : bb; }
+        pendingClip = false; path = [];
+      }
+      else if (op === 'ID') {   // インライン画像の中身を飛ばす
+        let q = p + 1; while (q + 2 < data.length && !(data[q] === 0x45 && data[q + 1] === 0x49 && (q + 2 >= data.length || data[q + 2] <= 0x20) && data[q - 1] <= 0x20)) q++;
+        p = q + 2;
+      }
+      else if (op === 'Do' && ops[0] && ops[0].t === 'name' && xo && xo.v.t === 'dict') {
+        const ent = xo.v.map.get(ops[0].v);
+        if (ent && ent.v.t === 'ref') {
+          const ob = await doc.get(ent.v.num);
+          if (ob.v.t === 'stream') {
+            const d = ob.v.dict, st = d.map.get('/Subtype');
+            if (st && st.v.v === '/Image') {
+              let bb = bboxOf([tpt(ctm, 0, 0), tpt(ctm, 1, 0), tpt(ctm, 0, 1), tpt(ctm, 1, 1)]);
+              if (clip) bb = intersect(bb, clip);
+              if (bb.r - bb.l > 1 && bb.t - bb.b > 1) found.push(bb);
+            } else if (st && st.v.v === '/Form') {
+              const mE = d.map.get('/Matrix'), bE = d.map.get('/BBox');
+              const arr = async (e) => { if (!e) return null; const rr = await doc.resolve(e.v, ob.src); return rr.v.t === 'arr' ? rr.v.items.map((x) => (x.t === 'num' ? x.v : 0)) : null; };
+              const M = (await arr(mE)) || [1, 0, 0, 1, 0, 0], BB = await arr(bE);
+              const c2 = mmul(M, ctm);
+              let cl2 = clip;
+              if (BB && BB.length === 4) { const fb = bboxOf([tpt(c2, BB[0], BB[1]), tpt(c2, BB[2], BB[1]), tpt(c2, BB[0], BB[3]), tpt(c2, BB[2], BB[3])]); cl2 = cl2 ? intersect(cl2, fb) : fb; }
+              const rE = d.map.get('/Resources');
+              let rd = resDict, rs = resSrc;
+              if (rE) { const rr = await doc.resolve(rE.v, ob.src); if (rr.v.t === 'dict') { rd = rr.v; rs = rr.src; } }
+              try { await scanContent(K, doc, await doc.streamData(ob.v), rd, rs, c2, cl2, depth + 1, found, cnt); } catch (e) { /* 読めない Form は飛ばす */ }
+            }
+          }
+        }
+      }
+      ops = [];
+    }
+  }
+
+  /* 消すトンボの範囲（重なりあう矩形）を、断ち代の中・仕上がりの外だけの重ならない矩形に分ける（even-odd で切り抜くため） */
+  function eraseCells(rects, B, T) {
+    const xs = new Set([B.l, B.r, T.l, T.r]), ys = new Set([B.b, B.t, T.b, T.t]);
+    for (const r of rects) { xs.add(r.l); xs.add(r.r); ys.add(r.b); ys.add(r.t); }
+    const X = [...xs].filter((x) => x >= B.l && x <= B.r).sort((a, b) => a - b), Y = [...ys].filter((y) => y >= B.b && y <= B.t).sort((a, b) => a - b);
+    const out = [];
+    for (let j = 0; j + 1 < Y.length; j++) {
+      let run = null;
+      for (let i = 0; i + 1 < X.length; i++) {
+        const cx = (X[i] + X[i + 1]) / 2, cy = (Y[j] + Y[j + 1]) / 2;
+        const inT = cx > T.l && cx < T.r && cy > T.b && cy < T.t;
+        const on = !inT && rects.some((r) => cx > r.l && cx < r.r && cy > r.b && cy < r.t);
+        if (on) { if (run) run.r = X[i + 1]; else { run = { l: X[i], r: X[i + 1], b: Y[j], t: Y[j + 1] }; out.push(run); } } else run = null;
+      }
+    }
+    return out.filter((c) => c.r - c.l > 1e-6 && c.t - c.b > 1e-6);
+  }
+
   /**
    * 断ち代を補う。元のバイト列は残し、末尾に追記するだけ（ノド白ツールと同じ方式）。
    * @param {Uint8Array} buf
@@ -1582,6 +1985,8 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
    *        keep = 今ある断ち代の幅。これより外側（足りない分）だけを補う。省略時は仕上がり線から補う
    *        segs = 辺ごとの区間 [{a0,a1,keepPt}]（部分的な不足用）。あれば keep より優先
    *        setBoxes = true なら trim・bleed をページの /TrimBox・/BleedBox にも書く（トンボから求めたページ用）
+   *        pageBox = 用紙（/MediaBox・/CropBox）をこの範囲にする（用紙を広げる・1本トンボを切り落とす）。TrimBox・BleedBox も書く
+   *        erase = 白で覆う矩形（1本トンボ）。断ち代の中（仕上がりの外）だけ
    * @param {{srcPt?:number, useOcg?:boolean, layerName?:string}} [o]  useOcg 既定 true（ノド白と同じくレイヤーに入れる）
    * @returns {{data:Uint8Array, base:Uint8Array, warnings:string[], applied:number}}
    *          base = 追記の土台にしたファイル（補正済みを入れた場合は補正前に戻したもの）
@@ -1614,7 +2019,9 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     for (const job of jobs) {
       const how = {};
       for (const k of SIDES) how[k] = job.sides[k] === true ? 'mirror' : (job.sides[k] || '');
-      if (!SIDES.some((k) => how[k])) continue;
+      // 1本トンボを消すだけ・用紙を広げるだけのページもある（どの辺も補わなくても処理する）
+      const hasErase = !!(job.erase && job.erase.length);
+      if (!SIDES.some((k) => how[k]) && !hasErase && !job.pageBox) continue;
       const pno = job.pageIndex + 1;
       const page = pages[job.pageIndex];
       if (!page) { warnings.push(`p.${pno}: ページが存在しません`); continue; }
@@ -1633,6 +2040,18 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
         }
       } catch (e) { warnings.push(`p.${pno}: 内容を読めないため処理できません（${e.message}）`); continue; }
       if (!parts.length) { warnings.push(`p.${pno}: 内容が空のためスキップ`); continue; }
+      // 1本トンボを消す：断ち代の中（仕上がりの外）だけ、トンボの線を白（CMYK 0%）で覆う
+      let eraseOps = '';
+      if (hasErase) {
+        const cells = eraseCells(job.erase, job.bleed, job.trim);
+        const r4 = (b) => `${f4(b.l)} ${f4(b.b)} ${f4(b.r - b.l)} ${f4(b.t - b.b)} re`;
+        if (cells.length) {
+          eraseOps = 'q 0 0 0 0 k ' + cells.map(r4).join(' ') + ' f Q\n';
+          // 反転コピーの元（ページの複製）からはトンボの所を切り抜く（白で塗ると、角を仕上がりの内側へ少し重ねて
+          // 点対称に描く所に白が写る。消さずにおくと隅のL字の角が仕上がりの内側に写る。2026-11-12）
+          parts.unshift(K.bytes(`q ${r4(job.bleed)} ${cells.map(r4).join(' ')} W* n\n`)); parts.push(K.bytes('Q\n'));
+        }
+      }
       const content = K.concat(parts);
 
       const g = await K.pageGeom(doc, page);
@@ -1655,8 +2074,9 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       const guardNum = w.alloc();
       w.stream(guardNum, '', K.bytes('q\n' + MARK_GUARD + '\n'));
       const drawNum = w.alloc();
-      w.stream(drawNum, '', K.bytes('Q\n' + MARK_BEGIN + '\n' + (useOcg ? '/OC ' + RES_OC + ' BDC\n' : '') +
-        edgeOps(how, job.trim, job.bleed, srcPt, job.keep, job.segs, exact) + (useOcg ? 'EMC\n' : '') + MARK_END + '\n'));
+      // ページの上でもトンボを白で覆う（補う絵柄はこの上に描く）
+      w.stream(drawNum, '', K.bytes('Q\n' + MARK_BEGIN + '\n' + (useOcg ? '/OC ' + RES_OC + ' BDC\n' : '') + eraseOps +
+        edgeOps(how, job.trim, job.bleed, srcPt, job.keep, job.segs, exact, hasErase) + (useOcg ? 'EMC\n' : '') + MARK_END + '\n'));
 
       // (3) ページ専用のリソース辞書（/XObject に1つ足すだけ、他は元のバイト列を複製）
       // 既に同じ名前があれば差し替え（重複キーを作らない）
@@ -1685,8 +2105,10 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
       // 補正済みのPDF（トンボから TrimBox を書いたもの）を入れ直したときは、戻した元ファイルの TrimBox が job と違うので書き直す
       const curT = toBox(await K.boxOf(doc, page, '/TrimBox'));
       const differs = !curT || ['l', 'b', 'r', 't'].some((k) => Math.abs(curT[k] - job.trim[k]) > 0.01);
-      if (job.setBoxes || (back && differs)) {
-        const bx = (b) => '[' + [b.l, b.b, b.r, b.t].map(f4).join(' ') + ']';
+      const bx = (b) => '[' + [b.l, b.b, b.r, b.t].map(f4).join(' ') + ']';
+      // 用紙を変える（断ち代の量が用紙より大きい・仕上がりでカット済み・1本トンボを消して断ち代の外端に切りそろえる）
+      if (job.pageBox) { pageRepl['/MediaBox'] = bx(job.pageBox); pageRepl['/CropBox'] = bx(job.pageBox); }
+      if (job.setBoxes || job.pageBox || (back && differs)) {
         pageRepl['/TrimBox'] = bx(job.trim);
         pageRepl['/BleedBox'] = bx(job.bleed);
         // ArtBox（Illustrator は用紙全体）が BleedBox からはみ出すと PDF/X の「TrimBox・ArtBox は BleedBox の内側」に反するので、TrimBox に合わせる
@@ -1720,11 +2142,15 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     const pages = await doc.pages();
     const w = new K.Writer(doc);
     let n = 0;
-    for (const i of pageIndexes) {
+    for (const it of pageIndexes) {
+      // 数ならその番号のページの CropBox を MediaBox に。{index, box} なら MediaBox・CropBox とも box に（用紙を広げて断ち代を測る）
+      const i = typeof it === 'number' ? it : it.index;
       const page = pages[i];
       if (!page || page.num === null) continue;
       const g = await K.pageGeom(doc, page);
-      w.obj(page.num, K.rebuildDict(page.dict, page.src, { '/CropBox': '[' + g.media.map(f4).join(' ') + ']' }));
+      const repl = typeof it === 'number' ? { '/CropBox': '[' + g.media.map(f4).join(' ') + ']' }
+        : { '/MediaBox': '[' + [it.box.l, it.box.b, it.box.r, it.box.t].map(f4).join(' ') + ']', '/CropBox': '[' + [it.box.l, it.box.b, it.box.r, it.box.t].map(f4).join(' ') + ']' };
+      w.obj(page.num, K.rebuildDict(page.dict, page.src, repl));
       n++;
     }
     return n ? w.finish() : buf;
@@ -1763,7 +2189,8 @@ return { MM, Doc, Writer, Parser, rebuildDict, boxOf, pageGeom, bytes, latin, co
     return gaps;
   }
 
-  return { mm2pt, pt2mm, SIDES, toBleedGaps, readPages, effectiveBleed, needsMarks, detectMarks, markWindows, refineMarks, sideRoles, analyzeEdges, refineEdges, stripRect, fillEdges, revert, expandCropForView, BASEKEY, DEFAULT_LAYER };
+  return { mm2pt, pt2mm, SIDES, toBleedGaps, readPages, effectiveBleed, needsMarks, detectMarks, markWindows, refineMarks,
+    detectSingleMarks, singleMarkWindows, refineSingleMarks, placedImagesAll, paperTrim, targetBleed, whiteOut, unionBox: (a, b) => ({ l: Math.min(a.l, b.l), b: Math.min(a.b, b.b), r: Math.max(a.r, b.r), t: Math.max(a.t, b.t) }), sideRoles, analyzeEdges, refineEdges, stripRect, fillEdges, revert, expandCropForView, BASEKEY, DEFAULT_LAYER };
 });
 </script>
 <style>
@@ -1826,6 +2253,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .right{flex:0 0 340px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
 .right-fixed{flex:0 0 auto}
 .right-scroll{flex:1;min-height:0;overflow:auto}
+#stepDock .step{margin-top:8px}
+#stepDock .acts{margin-top:6px}
+.step .wait{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--amber);font-weight:700}
+.step .wait .spin{width:14px;height:14px;border-radius:50%;border:2.5px solid var(--amber-bg);border-top-color:var(--amber);animation:spin .8s linear infinite;flex:0 0 auto}
+.rcut{margin:2px 0 8px;font-weight:600;color:var(--ink)}
 .colhd{height:34px;line-height:34px;padding:0 13px;font-size:12px;color:var(--ink-dim);border-bottom:1px solid var(--line);
   position:sticky;top:0;background:var(--panel);z-index:3;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
 .colhd.sub{border-top:1px solid var(--line)}
@@ -1849,6 +2281,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 /* ---------- drop / empty ---------- */
 .drop{margin:auto;max-width:520px;text-align:center;padding:40px}
+.dropzone.loading{opacity:.55;pointer-events:none}
 .dropzone{border:2px dashed var(--line);border-radius:14px;padding:46px 30px;
   background:var(--panel);transition:.18s;cursor:pointer}
 .dropzone.hot{border-color:var(--amber);background:var(--amber-bg)}
@@ -2049,6 +2482,12 @@ details.adv .rin{background:var(--panel)}
 
 .rl{display:flex;flex-direction:column;gap:3px}
 .ri{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:7px;border:1px solid transparent}
+/* 淡い縁・内側の白のアラート（チェックで切り替え。2026-11-12） */
+.rq{margin:2px 0 6px 20px;padding:6px 8px;border-radius:7px;font-size:11px;line-height:1.55;background:var(--amber-bg);color:var(--ink-dim);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent)}
+.rq b{color:var(--amber)}
+.rq label{display:flex;align-items:center;gap:6px;margin-top:4px;font-weight:600;color:var(--amber);cursor:pointer}
+.rq input{accent-color:var(--amber)}
+.rq.on{background:transparent;border-style:dashed}
 .ri.ng{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 30%,transparent)}
 .ri.fixed{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
 .rdot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--ink-faint)}
@@ -2117,7 +2556,7 @@ details.adv .rin{background:var(--panel)}
       <span class="mk" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M3 3h18v18H3z" stroke-dasharray="2.2 2.2" stroke-width="1.4"/></svg>
       </span>
-      <b>断ち代チェック</b><span>天地小口の不足検出・補正 <small style="opacity:.6;font-size:11px">rev.2026-11-04</small></span>
+      <b>断ち代チェック</b><span>天地小口の不足検出・補正 <small style="opacity:.6;font-size:11px">rev.2026-11-12</small></span>
     </div>
     <div class="sp"></div>
     <div class="tools">
@@ -2179,7 +2618,8 @@ details.adv .rin{background:var(--panel)}
       <div class="toolsec">
         <div class="secttl">判定</div>
         <div class="secbody">
-          <span class="glabel">必要な断ち代</span><input type="number" id="optBleed" class="pginput" value="3" step="0.5" min="0.5" title="BleedBox が無いPDFで使う値"><span class="glabel">mm</span>
+          <span class="glabel">必要な断ち代</span><input type="number" id="optBleed" class="pginput" value="3" step="0.5" min="0.5" title="BleedBox が無いPDFで使う値（「断ち代」が「PDFのとおり」のとき）"><span class="glabel">mm</span>
+          <span class="glabel">トンボなしの用紙の断ち代</span><input type="number" id="optPaperInset" class="pginput" value="3" step="0.5" min="0" title="「トンボが無いとき」が「用紙＝仕上がり＋断ち代」のとき、用紙の各辺からこの幅の内側を仕上がりとみなす"><span class="glabel">mm</span>
           <span class="glabel">許容誤差</span><input type="number" id="optTol" class="pginput" value="0.2" step="0.1" min="0" title="これ以下の不足は問題なしとする"><span class="glabel">mm</span>
           <span class="glabel">不足とみなす最小の長さ</span><input type="number" id="optMinLen" class="pginput" value="5" step="1" min="1" title="これより短い不足（または足りている区間）は前後に含めて、細かく分けない"><span class="glabel">mm</span>
           <span class="glabel">段差とみなす差</span><input type="number" id="optStep" class="pginput" value="0.5" step="0.1" min="0.2" title="同じ辺の中で、足りない量がこれ以上違う区間は分けて補う"><span class="glabel">mm</span>
@@ -2190,6 +2630,7 @@ details.adv .rin{background:var(--panel)}
           <span class="glabel">解析の解像度</span>
           <select id="optDpi" class="sel"><option value="150">150 dpi</option><option value="200" selected>200 dpi</option><option value="300">300 dpi</option></select>
           <label class="schk" title="前後が足りている15mm以下の短い不足で、仕上がり線の内側が明るい（10%未満）ものは、写真のハイライトとみなして不足にしません"><input type="checkbox" id="optLight" checked>明るい部分の短い不足は写真の一部とみなす</label>
+          <label class="schk" title="辺に接している画像（スキャンした絵・写真など一枚もの）は、足りない所を細かく分けず、画像の範囲いっぱいを1本の軸で補います"><input type="checkbox" id="optFollow" checked>画像（一枚もの）は配置の範囲でひと続きに補う</label>
           <button class="btn" id="btnRerun" disabled>設定を反映して再チェック</button>
         </div>
       </div>
@@ -2278,6 +2719,15 @@ details.adv .rin{background:var(--panel)}
               <select id="selMethod" class="rin"><option value="mirror">反転</option><option value="stretch">引き伸ばし</option></select>
             </div>
           </div>
+          <div class="rfr">
+            <div class="rfld"><label>断ち代</label>
+              <select id="selBleed" class="rin" title="断ち代の量。「PDFのとおり」は BleedBox（無ければ詳細設定の値）。3mm・5mm を選ぶと BleedBox に関係なくその量にそろえ、用紙が足りなければ広げます"><option value="">PDFのとおり</option><option value="3">3mm にそろえる</option><option value="5">5mm にそろえる</option></select>
+            </div>
+            <div class="rfld"><label>トンボが無いとき</label>
+              <select id="selPaper" class="rin" title="TrimBox が無い（用紙全体と同じ）で、二重トンボも1本トンボも見つからないページの仕上がり"><option value="">判定しない</option><option value="paper">用紙＝仕上がり</option><option value="inset">用紙＝仕上がり＋断ち代</option></select>
+            </div>
+          </div>
+          <label class="schk rcut" title="スキャンした絵などの終わりぎわの淡い部分（1〜10%ほど）を切って、濃い所から補います。明るい写真・地色は切りません"><input type="checkbox" id="optCut" checked>絵の端の淡い部分を切ってから補う</label>
           <div class="rfld"><label>進め方</label>
             <div class="segb" id="segFlow">
               <button type="button" data-v="bulk" class="on">まとめて補う<small>不足の辺を一斉に</small></button>
@@ -2293,12 +2743,14 @@ details.adv .rin{background:var(--panel)}
       </div>
 
       <div class="right-scroll">
-        <div class="jumpsec hidden" id="jumpSec"></div>
+        <!-- 上に固定：不足の件数と前後ジャンプ（jumpNav）、その下に「このページを補う／次へ」などの操作（stepDock。2026-11-12） -->
+        <div class="jumpsec hidden" id="jumpSec"><div id="jumpNav"></div><div id="stepDock"></div></div>
         <div class="colhd sub hidden" id="pageHd">このページ</div>
         <div class="rsec hidden" id="pageSec"><div class="rl" id="sideList"></div></div>
         <div class="colhd sub hidden" id="sumHd">全体</div>
         <div class="rsec hidden" id="sumSec"><div id="sumBox"></div></div>
       </div>
+
     </div>
   </div>
   <div class="kp-strip">© FUJIWARA PRINTING.inc</div>
@@ -2406,8 +2858,20 @@ function opts() {
     dpi: parseInt($('optDpi').value, 10),
     srcPt: E.mm2pt(Math.max(0.05, parseFloat($('optSrc').value) || 0.1)),
     useOcg: $('optOcg').checked,
+    // 断ち代の量（3mm・5mm にそろえる。0 = PDFのとおり）と、トンボが無いページの仕上がり（2026-11-12）
+    bleedAmtPt: $('selBleed').value ? E.mm2pt(parseFloat($('selBleed').value)) : 0,
+    paperMode: $('selPaper').value,
+    paperInsetPt: E.mm2pt(Math.max(0, parseFloat($('optPaperInset').value) || 0)),
+    cutFringe: $('optCut').checked,       // 絵の端の淡い部分を切る（全ページ・全辺。2026-11-12 中田さん「ボタンだけでよい」）
+    follow: $('optFollow').checked,       // 画像（一枚もの）は配置の範囲でひと続きに補う
   };
 }
+// 断ち代の量・トンボが無いときの仕上がりを変えたら、仕上がり線・断ち代が変わるのでチェックし直す
+$('selBleed').onchange = () => { if (S.pages.length && !S.busy) analyzeAll(); };
+$('optCut').onchange = () => { if (S.pages.length && !S.busy) analyzeAll(); };
+$('selPaper').onchange = () => { updatePaperLabel(); if (S.pages.length && !S.busy) analyzeAll(); };
+function updatePaperLabel() { $('selPaper').options[2].textContent = `用紙＝仕上がり＋断ち代（各${parseFloat($('optPaperInset').value) || 0}mm）`; }
+updatePaperLabel();
 $('selMode').onchange = () => { $('selBind').disabled = $('selMode').value === 'sheet'; resetOutput(); refresh(); };
 $('selBind').onchange = () => { resetOutput(); refresh(); };
 $('optStart').oninput = () => { resetOutput(); refresh(); };
@@ -2465,7 +2929,8 @@ $('selMethod').onchange = () => {
   S.pages.forEach((pg) => { for (const k of SIDES) if (pg.fix[k]) pg.fix[k] = m; });
   refresh();
 };
-['optBleed', 'optTol', 'optWhite', 'optMinLen', 'optStep', 'optDpi', 'optLight'].forEach((id) => $(id).addEventListener('change', () => {
+$('optPaperInset').addEventListener('input', updatePaperLabel);
+['optBleed', 'optTol', 'optWhite', 'optMinLen', 'optStep', 'optDpi', 'optLight', 'optPaperInset', 'optFollow'].forEach((id) => $(id).addEventListener('change', () => {
   if (!S.pages.length) return;
   $('btnRerun').disabled = false; $('btnRerun').textContent = '設定を反映して再チェック（変更あり）';
 }));
@@ -2496,48 +2961,89 @@ async function load(file) {
   if (!window.pdfjsLib) { alert('PDF表示部品（pdf.js）を読み込めませんでした。ネットワークに接続した状態で開き直してください。'); return; }
   if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { alert('PDFファイルを選んでください。'); return; }
   resetAll(true);
+  // 投げ込んでからチェックが始まるまで（読み込み・最初の表示）も、何をしているか分かるように（2026-11-12）
+  S.busy = true;
+  showBusy(`「${file.name}」を読み込んでいます…`);
+  $('dropzone').classList.add('loading');
+  await new Promise(requestAnimationFrame);
   S.file = file;
   S.bytes = new Uint8Array(await file.arrayBuffer());
+  showBusy('ページを調べています…');
   try {
     const info = await E.readPages(S.bytes);
     const o = opts();
     S.pages = info.pages.map((p) => ({
-      index: p.index, boxes: p.boxes, direct: p.direct, needMarks: E.needsMarks(p.boxes), marks: null,
+      index: p.index, boxes: p.boxes, orig: p.boxes, direct: p.direct, needMarks: E.needsMarks(p.boxes), marks: null,
       bleed: p.boxes.trim ? E.effectiveBleed(p.boxes, o.defaultBleedPt) : null, fix: {}, before: null, after: null, state: 'wait',
+      inset: {},      // 辺ごとの利用者の選択：仕上がりの内側の白も補う（アラートのチェック）
+      erase: null, grow: false,
     }));
     S.revertable = !!info.base;
     S.viewBytes = await viewBytes(S.bytes);
     S.jsDoc = await openPdf(S.viewBytes);
   } catch (err) {
     console.error(err);
+    $('dropzone').classList.remove('loading'); S.busy = false; hideBusy();
     alert(/暗号化/.test(err.message || '') ? 'このPDFにはパスワード（権限）が設定されています。権限ロック解除ツールで解除してから入れてください。' : 'PDFを開けませんでした（' + (err.message || err) + '）');
     resetAll(); return;
   }
+  $('dropzone').classList.remove('loading');
+  showBusy('1ページ目を表示しています…');
   $('drop').classList.add('hidden'); $('viewer').classList.remove('hidden');
   $('zoomctl').classList.remove('hidden'); $('vbar').classList.add('show'); setPageCtl(true);
   $('btnReset').disabled = false;
   $('pgTotal').textContent = '/ ' + S.pages.length; $('pgInput').max = S.pages.length;
   S.cur = 0; S.zoom = 1;
   await renderView();
+  S.busy = false;
   analyzeAll();
 }
 const contains = (a, b) => a.l <= b.l + 0.01 && a.b <= b.b + 0.01 && a.r >= b.r - 0.01 && a.t >= b.t - 0.01;
 // 仕上がり外が CropBox で隠れていると測れないので、そのページだけ表示範囲を MediaBox に広げた複製で表示・解析する（保存には使わない）
+// 断ち代が用紙より外に出るページ（断ち代 5mm にそろえる・仕上がりでカット済みなど）は、用紙を断ち代まで広げた複製で表示・解析する
 async function viewBytes(bytes) {
-  const idx = S.pages.filter((pg) => pg.bleed && !contains(pg.boxes.crop, pg.bleed)).map((pg) => pg.index);
+  const idx = [];
+  for (const pg of S.pages) {
+    if (!pg.bleed) continue;
+    if (pg.grow) idx.push({ index: pg.index, box: E.unionBox(pg.orig.media, pg.bleed) });
+    else if (!contains(pg.orig.crop, pg.bleed)) idx.push(pg.index);
+  }
   return idx.length ? E.expandCropForView(bytes, idx) : bytes;
+}
+/* 表示用の文書を開き直す（用紙を広げたページがあるとき）。解析には使わない */
+async function reopenView(vb) { if (S.jsDoc) S.jsDoc.destroy(); S.viewBytes = vb; S.jsDoc = await openPdf(vb); renderView(); }
+/* ページの仕上がり線・断ち代を決める（トンボ・利用者の指定・断ち代の量から）。findMarks の後に呼ぶ */
+function applyGeom(pg, o) {
+  const b0 = pg.orig;
+  let bx = Object.assign({}, b0);
+  pg.erase = null;
+  if (pg.needMarks) {
+    const m = pg.marks;
+    if (m && !m.error && !m.single) bx = Object.assign(bx, { trim: m.trim, bleed: m.fillBleed, hasTrim: true, hasBleed: true, fromMarks: true });
+    else if (m && !m.error && m.single) { bx = Object.assign(bx, { trim: m.trim, bleed: null, hasTrim: true, hasBleed: false, fromMarks: true, single: true }); pg.erase = m.erase; }
+    else if (o.paperMode) bx = Object.assign(bx, { trim: E.paperTrim(b0, o.paperMode, o.paperInsetPt), bleed: null, hasTrim: true, hasBleed: false, fromPaper: o.paperMode });
+    else bx = Object.assign(bx, { trim: null, trimIsMedia: !!b0.trim });
+  }
+  pg.boxes = bx;
+  if (!bx.trim) { pg.bleed = null; pg.grow = false; return; }
+  const tb = E.targetBleed(bx, bx.trim, o.bleedAmtPt, o.defaultBleedPt);
+  pg.bleed = tb.bleed; pg.grow = tb.grow;
+  // ファイルの BleedBox と違う断ち代で補うときは、TrimBox・BleedBox も書く
+  const fb = b0.hasBleed && b0.bleed;
+  pg.writeBoxes = !!(bx.fromMarks || bx.fromPaper || pg.grow || !fb || ['l', 'b', 'r', 't'].some((k) => Math.abs(fb[k] - pg.bleed[k]) > 0.01));
 }
 
 function resetAll(keepUI) {
   resetOutput();
   if (S.jsDoc) { S.jsDoc.destroy(); S.jsDoc = null; }
   S.viewBytes = null;
-  Object.assign(S, { file: null, bytes: null, pages: [], cur: 0, busy: false, revertable: false, viewBox: null });
+  Object.assign(S, { file: null, bytes: null, pages: [], cur: 0, busy: false, revertable: false, viewBox: null, objects: null });
   if (keepUI) return;
   $('drop').classList.remove('hidden'); $('viewer').classList.add('hidden');
   $('zoomctl').classList.add('hidden'); $('vbar').classList.remove('show'); setPageCtl(false); $('pgTotal').textContent = '/ –';
   $('btnReset').disabled = true; $('btnFix').disabled = true; $('btnRerun').disabled = true; hideBusy();
   $('plist').innerHTML = '<div class="empty-msg">PDF未読込</div>';
+  $('jumpNav').innerHTML = ''; $('stepDock').innerHTML = ''; footVis();
   ['pageHd', 'pageSec', 'sumHd', 'sumSec', 'onlyNgWrap', 'jumpSec'].forEach((id) => $(id).classList.add('hidden'));
   $('btnFixLbl').textContent = '断ち代を補う';
   $('fixNote').textContent = 'PDFを開くと自動でチェックします。不足のある辺は最初から「補う」設定になっています。';
@@ -2560,6 +3066,10 @@ function resetOutput() {
 
 /* ---------- 解析 ---------- */
 async function analyzeOne(jsDoc, pg, o, refine = true) {
+  // 淡い縁を切る・内側の白も補うは補正前の判定だけ（refine=false は補正後の確かめ。補った断ち代の中の明るい所を「淡い縁」と
+  // 取り違えて不足に戻さないよう、確かめは今までどおり「0%以外は絵柄」で断ち代が埋まったかだけを見る）
+  if (refine) o = Object.assign({}, o, { cutFringe: !!o.cutFringe, fillInset: pg.inset, objects: o.follow && S.objects ? S.objects[pg.index] : null });
+  else o = Object.assign({}, o, { cutFringe: false, objects: null });
   const page = await jsDoc.getPage(pg.index + 1);
   const scale = o.dpi / 72;
   const vp = page.getViewport({ scale, rotation: 0 });
@@ -2570,7 +3080,8 @@ async function analyzeOne(jsDoc, pg, o, refine = true) {
   await page.render({ canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
   const [x1, y1, x2, y2] = page.view;
   const view = { l: Math.min(x1, x2), b: Math.min(y1, y2), r: Math.max(x1, x2), t: Math.max(y1, y2) };
-  const edges = E.analyzeEdges(ctx.getImageData(0, 0, cv.width, cv.height), { view, scale, trim: pg.boxes.trim, bleed: pg.bleed }, o);
+  // 1本トンボのページは、消すトンボを絵柄と数えないように白にしてから測る
+  const edges = E.analyzeEdges(E.whiteOut(ctx.getImageData(0, 0, cv.width, cv.height), { view, scale }, pg.erase), { view, scale, trim: pg.boxes.trim, bleed: pg.bleed }, o);
   cv.width = cv.height = 0;
   // 不足の辺は、辺の帯だけを高い解像度（1200dpi）で描いて元の絵柄の端を測り直す（判定は変えない。補正の切り抜き位置と軸だけ）。
   // 200dpi では端が ±0.03mm ほどしか分からず、乗算・不透明度の絵柄では髪の毛ほどの重なりが濃い線に見えるため（NOTES 4章）
@@ -2595,8 +3106,9 @@ async function refineSide(page, view, pg, edges, k, o) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   const vp = page.getViewport({ scale: sc, rotation: 0 });
   await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -x, -y], annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
-  E.refineEdges(edges, k, ctx.getImageData(0, 0, W, H),
-    { view: { l: view.l + x / sc, t: view.t - y / sc, r: view.l + (x + W) / sc, b: view.t - (y + H) / sc }, scale: sc, trim: pg.boxes.trim, bleed: pg.bleed }, o);
+  const v2 = { l: view.l + x / sc, t: view.t - y / sc, r: view.l + (x + W) / sc, b: view.t - (y + H) / sc };
+  E.refineEdges(edges, k, E.whiteOut(ctx.getImageData(0, 0, W, H), { view: v2, scale: sc }, pg.erase),
+    { view: v2, scale: sc, trim: pg.boxes.trim, bleed: pg.bleed }, o);
   cv.width = cv.height = 0;
 }
 
@@ -2614,23 +3126,22 @@ async function findMarks(jsDoc, pg) {
     await page.render({ canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
     const [x1, y1, x2, y2] = page.view;
     const view = { l: Math.min(x1, x2), b: Math.min(y1, y2), r: Math.max(x1, x2), t: Math.max(y1, y2) };
-    let m = E.detectMarks(ctx.getImageData(0, 0, cv.width, cv.height), { view, scale });
+    const img = ctx.getImageData(0, 0, cv.width, cv.height);
+    let m = E.detectMarks(img, { view, scale });
+    // 二重トンボが無ければ、仕上がり位置の1本トンボを探す（2026-11-12）
+    if (m.error) { const m1 = E.detectSingleMarks(img, { view, scale }); m = m1.error ? { error: m.error + '。' + m1.error } : m1; }
     cv.width = cv.height = 0;
     if (!m.error) {
       try {
-        const win = E.markWindows(m, pg.boxes.media), imgs = {};
+        const win = m.single ? E.singleMarkWindows(m, pg.orig.media) : E.markWindows(m, pg.orig.media), imgs = {};
         for (const k in win) imgs[k] = await renderWindow(page, view, win[k]);
-        m = E.refineMarks(m, imgs) || m;
+        m = (m.single ? E.refineSingleMarks(m, imgs) : E.refineMarks(m, imgs)) || m;
       } catch (err) { console.warn('marks refine', err); }
-      pg.boxes = Object.assign({}, pg.boxes, { trim: m.trim, bleed: m.fillBleed, hasTrim: true, hasBleed: true, fromMarks: true });
     }
-    // TrimBox が用紙全体と同じでトンボも見つからないページは、仕上がりが分からないので「判定不可」にする
-    // （以前は断ち代がページの外になり「表示範囲外で測れません」のまま OK 扱いになっていた。2026-10-16 wine.pdf）
-    else if (pg.boxes.trim) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
-    pg.marks = m;   // ここで page.cleanup() しない（続く analyzeOne が同じページを読み直すと写真が反転する）
+    // 仕上がり線・断ち代は applyGeom で決める（トンボが見つからず「トンボが無いとき」も指定が無ければ「判定不可」）
+    pg.marks = m;
   } catch (err) {
     console.warn('marks', err); pg.marks = { error: String(err.message || err) };
-    if (pg.boxes.trim && !pg.boxes.fromMarks) pg.boxes = Object.assign({}, pg.boxes, { trim: null, trimIsMedia: true });
   }
 }
 // ページの一部（pt の範囲 R）だけを 1200dpi で描く
@@ -2649,14 +3160,26 @@ async function renderWindow(page, view, R) {
 async function analyzeAll() {
   S.busy = true; resetOutput();
   const o = opts();
-  S.pages.forEach((pg) => { pg.bleed = pg.boxes.trim ? E.effectiveBleed(pg.boxes, o.defaultBleedPt) : null; pg.before = null; pg.fix = {}; pg.state = 'wait'; pg.error = null; });
+  S.pages.forEach((pg) => { pg.before = null; pg.fix = {}; pg.state = 'wait'; pg.error = null; });
   refresh();
+  // (1) TrimBox が無い（用紙全体と同じ）ページだけ、四隅のトンボを探す（読み込みごとに1回。用紙全体が見えるように CropBox を広げた複製で）
+  const need = S.pages.filter((pg) => pg.needMarks && !pg.marks);
+  if (need.length) {
+    const mb = await E.expandCropForView(S.bytes, need.map((pg) => pg.index));
+    await withWorkDoc(mb, async (work) => {
+      for (const [i, pg] of need.entries()) { showBusy(`トンボを探しています… ${i + 1} / ${need.length} ページ`, i / need.length); await findMarks(work, pg); }
+    });
+  }
+  // 配置された画像の範囲（読み込みごとに1回）
+  if (!S.objects) { showBusy('画像の配置を読んでいます…'); try { S.objects = await E.placedImagesAll(S.bytes); } catch (err) { console.warn('objects', err); S.objects = {}; } }
+  // (2) 仕上がり線・断ち代を決め、用紙を広げるページがあれば表示用の複製を作り直す
+  S.pages.forEach((pg) => applyGeom(pg, o));
+  const vb = await viewBytes(S.bytes);
+  if (vb !== S.viewBytes) await reopenView(vb);
   await withWorkDoc(S.viewBytes || S.bytes, async (work) => {
   for (const pg of S.pages) {
     pg.state = 'busy'; renderRow(pg);
     showBusy(`チェック中… ${pg.index + 1} / ${S.pages.length} ページ`, pg.index / S.pages.length);
-    if (pg.needMarks && !pg.marks) await findMarks(work, pg);
-    if (pg.boxes.fromMarks) pg.bleed = pg.marks.fillBleed;
     if (pg.boxes.trim) {
       try {
         pg.before = await analyzeOne(work, pg, o);
@@ -2676,6 +3199,31 @@ async function analyzeAll() {
   refresh();
 }
 
+/* 淡い縁を切る・内側の白も補うを切り替えたページだけチェックし直す（補正前のページだけ。補正済みは切り替えられない） */
+async function reanalyzePages(list, label) {
+  if (S.busy || !list.length) return;
+  S.busy = true;
+  const o = opts();
+  try {
+    await withWorkDoc(S.viewBytes || S.bytes, async (work) => {
+      for (const [i, pg] of list.entries()) {
+        showBusy(`${label || 'チェックし直しています'}… ${i + 1} / ${list.length} ページ`, i / list.length);
+        const prev = pg.fix, prevE = pg.before && pg.before.edges;
+        pg.before = await analyzeOne(work, pg, o);
+        pg.fix = {};
+        // 前から不足で「補わない」にしていた辺はそのまま。新しく不足になった辺は補う設定に
+        for (const k of SIDES) {
+          const wasShort = prevE && prevE[k] && prevE[k].status === 'short';
+          pg.fix[k] = pg.before.edges[k].status !== 'short' ? '' : wasShort ? prev[k] : o.method;
+        }
+        renderRow(pg);
+      }
+    });
+  } catch (err) { console.error(err); alert('チェックできませんでした（' + (err.message || err) + '）'); }
+  hideBusy(); S.busy = false; refresh();
+}
+const reanalyzePage = (pg) => reanalyzePages([pg]);
+
 /* ---------- 判定の読み方 ---------- */
 const rolesOf = (pg) => E.sideRoles(pg.index, opts());
 const targetSides = (pg) => { const r = rolesOf(pg); return SIDES.filter((k) => r[k] !== 'nodo'); };
@@ -2686,7 +3234,16 @@ function shortSides(pg) {
 const checkedSides = (pg) => shortSides(pg).filter((k) => pg.fix[k]);
 const fixedOk = (pg, k) => !!(S.applied.has(pg.index) && pg.after && pg.after.edges && pg.fix[k] && pg.after.edges[k].status !== 'short');
 const ngPages = () => S.pages.filter((pg) => shortSides(pg).length);
-const undecided = (pg) => !pg.decision && checkedSides(pg).length > 0;
+// 1本トンボのページは、不足の辺が無くてもトンボを消して用紙を切りそろえる
+const hasWork = (pg) => checkedSides(pg).length > 0 || !!(pg.erase && pg.before);
+const undecided = (pg) => !pg.decision && hasWork(pg);
+/* 淡い縁・仕上がりの内側の白：利用者に確かめてもらう辺（アラート）。チェックが入ったら「確認済み」 */
+function insetAsk(pg, k) {
+  const e = pg.before && pg.before.edges && pg.before.edges[k];
+  return !!(e && e.inset && rolesOf(pg)[k] !== 'nodo');
+}
+const openAsks = (pg) => SIDES.filter((k) => insetAsk(pg, k) && !pg.inset[k]);
+const askPages = () => S.pages.filter((pg) => openAsks(pg).length && !S.applied.has(pg.index));
 const sideName = (pg, k) => (opts().mode === 'sheet' ? SHEET_NAME[k] : ROLE_NAME[rolesOf(pg)[k]]);
 // 部分的な不足の書き方：「一部」「2か所」など
 function segNote(e, short) {
@@ -2717,6 +3274,7 @@ function rowInfo(pg) {
 }
 function rowHTML(pg) {
   const i = rowInfo(pg);
+  if (pg.state === 'done' && pg.before && openAsks(pg).length && !S.applied.has(pg.index)) i.txt += '・要確認';
   return `<span class="pno">p.${pg.index + 1}</span><span class="dot ${i.dot}"></span><span class="lbl ${i.cls}">${i.txt}</span>`;
 }
 function renderList() {
@@ -2742,12 +3300,24 @@ function renderSide() {
   $('pageHd').textContent = `このページ（p.${pg.index + 1}` + (o.mode === 'book' ? `・ノンブル ${o.startNombre + pg.index}・小口${roles.left === 'koguchi' ? '左' : '右'}）` : '）');
   const list = $('sideList'); list.innerHTML = '';
   const msg = (t) => { list.innerHTML = `<div class="rnote" style="margin:0">${t}</div>`; };
-  if (!pg.boxes.trim) return msg(pg.boxes.trimIsMedia
-    ? `TrimBox が用紙全体と同じ（仕上がりの情報がない）ため、四隅のトンボを探しましたが、${esc((pg.marks && pg.marks.error) || 'トンボが見つかりません')}。仕上がり線が分からないので判定できません。`
-    : 'TrimBox（仕上がりサイズ）が設定されていないため判定できません。' + (pg.marks && pg.marks.error ? `トンボも探しましたが、${esc(pg.marks.error)}。` : ''));
+  if (!pg.boxes.trim) {
+    msg((pg.boxes.trimIsMedia
+      ? `TrimBox が用紙全体と同じ（仕上がりの情報がない）ため、四隅のトンボを探しましたが、${esc((pg.marks && pg.marks.error) || 'トンボが見つかりません')}。仕上がり線が分からないので判定できません。`
+      : 'TrimBox（仕上がりサイズ）が設定されていないため判定できません。' + (pg.marks && pg.marks.error ? `トンボも探しましたが、${esc(pg.marks.error)}。` : '')) +
+      '<br>仕上がりでカットした書き出し、または断ち代付きでトンボなしの書き出しなら、下のボタンで仕上がりを指定してチェックし直せます（上の「トンボが無いとき」と同じ）。');
+    const bt = document.createElement('div'); bt.className = 'sbtns'; bt.style.marginTop = '6px';
+    const mk = (label, v) => { const b = document.createElement('button'); b.textContent = label; b.disabled = S.busy; b.onclick = () => { $('selPaper').value = v; analyzeAll(); }; bt.appendChild(b); };
+    mk('用紙＝仕上がり', 'paper'); mk(`用紙＝仕上がり＋断ち代（各${parseFloat($('optPaperInset').value) || 0}mm）`, 'inset');
+    list.appendChild(bt);
+    return;
+  }
   if (pg.error) return msg('解析できませんでした：' + esc(pg.error));
   if (!pg.before) return msg('チェック中です…');
-  if (pg.boxes.fromMarks) list.insertAdjacentHTML('beforeend', `<div class="rnote" style="margin:0 0 6px">TrimBox が用紙全体と同じだったので、<b>四隅のトンボ</b>から仕上がり線と断ち代（外トンボの線の内側まで）を求めました。補うと TrimBox・BleedBox も書き込みます。</div>`);
+  const note = (t) => list.insertAdjacentHTML('beforeend', `<div class="rnote" style="margin:0 0 6px">${t}</div>`);
+  if (pg.boxes.fromMarks && pg.boxes.single) note(`TrimBox が用紙全体と同じだったので、<b>四隅の1本トンボ</b>から仕上がり線を求めました。補うと<b>トンボを消して</b>断ち代を足し、用紙を断ち代の外端に切りそろえます（TrimBox・BleedBox も書き込みます）。`);
+  else if (pg.boxes.fromMarks) note(`TrimBox が用紙全体と同じだったので、<b>四隅のトンボ</b>から仕上がり線と断ち代（外トンボの線の内側まで）を求めました。補うと TrimBox・BleedBox も書き込みます。`);
+  else if (pg.boxes.fromPaper) note(`トンボが無いので、${pg.boxes.fromPaper === 'paper' ? '<b>用紙＝仕上がり</b>' : `<b>用紙の各辺から ${mm1(o.paperInsetPt)}mm 内側</b>`}を仕上がりとして判定しています（上の「トンボが無いとき」）。補うと TrimBox・BleedBox も書き込みます。`);
+  if (pg.grow) note(`断ち代（${mm1(Math.max(pg.boxes.trim.l - pg.bleed.l, pg.bleed.t - pg.boxes.trim.t))}mm）が用紙より外に出るので、補うと<b>用紙を断ち代の外端まで広げます</b>。`);
   const order = o.mode === 'book' ? ['top', 'bottom', roles.left === 'koguchi' ? 'left' : 'right', roles.left === 'nodo' ? 'left' : 'right'] : SIDES;
   for (const k of order) {
     const e = pg.before.edges[k], nm = sideName(pg, k);
@@ -2775,16 +3345,27 @@ function renderSide() {
       row.innerHTML = `<span class="rdot"></span><span class="rlbl">${nm}</span><span class="rsub">${t}</span>`;
     }
     list.appendChild(row);
+    // 淡い縁・仕上がりの内側の白のアラート（チェックで切り替えて、このページだけチェックし直す）
+    const lock = S.applied.has(pg.index) || S.busy;
+    if (insetAsk(pg, k)) {
+      const f = e.inset, on = !!pg.inset[k];
+      const q = document.createElement('div'); q.className = 'rq' + (on ? ' on' : '');
+      q.innerHTML = on ? `仕上がり線の内側（最大${mm1(f.depthPt)}mm）で終わっている所も補います。`
+        : `<b>仕上がり線のわずかに内側</b>（最大${mm1(f.depthPt)}mm）で絵柄が終わっている所が ${Math.round(E.pt2mm(f.lenPt))}mm あります。断裁のずれで白が見えるかもしれません。補いますか？`;
+      const lb = document.createElement('label'); lb.innerHTML = `<input type="checkbox"${on ? ' checked' : ''}${lock ? ' disabled' : ''}>内側の白も補う`;
+      lb.querySelector('input').onchange = (ev) => { pg.inset[k] = ev.target.checked; reanalyzePage(pg); };
+      q.appendChild(lb); list.appendChild(q);
+    }
   }
   renderStep();
 }
 /* 1ページずつ確認：このページを補う／見送る／取り消す */
 function renderStep() { renderStepBox(); renderActions(); }
 function renderStepBox() {
-  const old = $('stepBox'); if (old) old.remove();
+  const old = $('stepBox'); if (old) old.remove(); footVis();
 
   const pg = S.pages[S.cur];
-  if (!pg || !pg.before || !shortSides(pg).length) return;
+  if (!pg || !pg.before || !hasWork(pg)) return;
   if (!stepMode() && !S.applied.has(pg.index)) return;      // まとめてモードでは、補正済みページの「元に戻す」だけ出す
   const box = document.createElement('div'); box.className = 'step'; box.id = 'stepBox';
   const btn = (label, cls, fn, dis) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.disabled = !!dis || S.busy; b.onclick = fn; return b; };
@@ -2800,12 +3381,13 @@ function renderStepBox() {
     row.append(btn('やっぱり補う', '', () => stepApply(pg), !checkedSides(pg).length), btn(nextLbl, 'go', () => jumpNg(1, true)));
   } else {
     const n = checkedSides(pg).length;
-    t = n ? `このページの <b>${n} 辺</b>を、上の設定で補います。` : '補う辺がありません（すべて「補わない」）。';
+    t = n ? `このページの <b>${n} 辺</b>を、上の設定で補います。` + (pg.erase ? '1本トンボも消します。' : '') : pg.erase ? '補う辺はありません。1本トンボを消して用紙を切りそろえます。' : '補う辺がありません（すべて「補わない」）。';
     row.append(btn('補わずに次へ', '', () => { pushHistory(`p.${pg.index + 1} を見送る`); pg.decision = 'skipped'; renderRow(pg); jumpNg(1, true); refresh(); }),
-               btn('このページを補う', 'go', () => stepApply(pg), !n));
+               btn('このページを補う', 'go', () => stepApply(pg), !n && !pg.erase));
   }
   box.innerHTML = `<div class="stt">${t}</div>`; box.appendChild(row);
-  $('pageSec').appendChild(box);
+  if (S.busy && S.busyLabel) box.insertAdjacentHTML('beforeend', `<div class="wait" style="margin-top:8px"><span class="spin"></span>「${esc(S.busyLabel)}」を処理しています…</div>`);
+  $('stepDock').prepend(box); footVis();
 }
 function renderSummary() {
   if (!S.pages.length) return;
@@ -2829,7 +3411,7 @@ function renderSummary() {
     $('btnFix').disabled = true; return;
   }
   const shortPages = ngPages();
-  const js = $('jumpSec'); js.innerHTML = ''; js.classList.toggle('hidden', !shortPages.length);
+  const js = $('jumpNav'); js.innerHTML = '';
   if (shortPages.length) {
     // 件数（クリックで次の不足ページへ）と前後ジャンプ。右カラム上部に固定
     const pos = shortPages.findIndex((pg) => pg.index === S.cur);
@@ -2865,11 +3447,29 @@ function renderSummary() {
   const noTrim = S.pages.filter((pg) => !pg.boxes.trim).length;
   const rotated = S.pages.filter((pg) => pg.boxes.rotate).length;
   if (noTrim) sub.push(`判定できないページ ${noTrim}（TrimBoxなし、または用紙全体と同じでトンボも見つからない）`);
-  const byMarks = S.pages.filter((pg) => pg.boxes.fromMarks).length;
+  const byMarks = S.pages.filter((pg) => pg.boxes.fromMarks && !pg.boxes.single).length;
   if (byMarks) sub.push(`トンボから仕上がりを求めた ${byMarks} ページ`);
+  const bySingle = S.pages.filter((pg) => pg.boxes.single).length;
+  if (bySingle) sub.push(`1本トンボから仕上がりを求めた ${bySingle} ページ（補うときにトンボを消して断ち代の外端で切りそろえます）`);
+  const byPaper = S.pages.filter((pg) => pg.boxes.fromPaper).length;
+  if (byPaper) sub.push(`トンボが無く${o.paperMode === 'paper' ? '用紙＝仕上がり' : `用紙の各辺から ${mm1(o.paperInsetPt)}mm 内側を仕上がり`}とした ${byPaper} ページ`);
+  const grown = S.pages.filter((pg) => pg.grow).length;
+  if (grown) sub.push(`用紙を断ち代まで広げる ${grown} ページ`);
+  if (o.bleedAmtPt) sub.push(`断ち代 ${mm1(o.bleedAmtPt)}mm にそろえて判定`);
   if (rotated) sub.push(`回転指定あり ${rotated} ページ（回転前の向きで判定）`);
 
 
+  // 淡い縁・内側の白の確認（アラート）。チェックするまで「要確認」
+  {
+    const ap = askPages();
+    if (ap.length && !S.busy) {
+      const ni = ap.reduce((n, pg) => n + SIDES.filter((k) => insetAsk(pg, k) && !pg.inset[k]).length, 0);
+      const d = add('ali', `<b>確かめてほしい辺が ${ap.length} ページにあります</b><br>仕上がり線のわずかに内側で絵柄が終わる辺 ${ni}<br>「このページ」のチェックで「内側の白も補う」に切り替えます。`);
+      const b1 = document.createElement('button'); b1.textContent = '次の要確認ページへ ▶';
+      b1.onclick = () => { const idx = ap.map((pg) => pg.index); goPage(idx.find((i) => i > S.cur) ?? idx[0]); };
+      d.appendChild(b1);
+    }
+  }
   if (S.outBytes) {
     const fixed = S.pages.reduce((n, pg) => n + checkedSides(pg).filter((k) => fixedOk(pg, k)).length, 0);
     const appliedSides = S.pages.filter((pg) => S.applied.has(pg.index)).reduce((n, pg) => n + checkedSides(pg).length, 0);
@@ -2896,23 +3496,23 @@ function renderSummary() {
   $('onlyNgWrap').classList.toggle('hidden', !shortCount || S.pages.length < 2);
   if (stepMode()) {
     // 1ページずつのときは、上のボタンは隠して「このページ」の下（renderActions）に出す
-    $('btnFix').disabled = !restSides || S.busy;
+    $('btnFix').disabled = !rest.length || S.busy;
     $('btnFix').classList.add('hidden');
     if (!S.busy) $('btnFixLbl').textContent = restSides ? `残りをまとめて補う（${rest.length}ページ・${restSides}辺）` : '残りをまとめて補う';
   } else {
     $('btnFix').classList.remove('hidden');
-    $('btnFix').disabled = !restSides || S.busy;
+    $('btnFix').disabled = !rest.length || S.busy;
     if (!S.busy) $('btnFixLbl').textContent = restSides ? `断ち代を補う（${restSides} 辺）` : '断ち代を補う';
   }
-  renderActions();
+  renderActions(); footVis();
 }
 /* 「このページ」のカードの下にまとめる操作：残りをまとめて補う（1ページずつのとき）／補正をすべて取り消す */
 function renderActions() {
-  const old = $('actBox'); if (old) old.remove();
+  const old = $('actBox'); if (old) old.remove(); footVis();
   if ($('pageSec').classList.contains('hidden') || !S.pages.length) return;
   const rest = S.pages.filter(undecided);
   const restSides = rest.reduce((n, pg) => n + checkedSides(pg).length, 0);
-  const showBulk = stepMode() && restSides > 0, showUndo = !!S.outBytes;
+  const showBulk = stepMode() && rest.length > 0, showUndo = !!S.outBytes;
   if (!showBulk && !showUndo) return;
   const box = document.createElement('div'); box.className = 'acts'; box.id = 'actBox';
   if (showBulk) {
@@ -2930,8 +3530,10 @@ function renderActions() {
     u.onclick = () => undoAll();
     box.appendChild(u);
   }
-  $('pageSec').appendChild(box);
+  $('stepDock').appendChild(box); footVis();
 }
+// 上の固定枠は、不足の件数か操作のどちらかがあれば出す
+const footVis = () => $('jumpSec').classList.toggle('hidden', !$('jumpNav').children.length && !$('stepDock').children.length);
 function refresh() { renderList(); renderSide(); renderSummary(); drawOverlay(); }
 
 
@@ -2995,7 +3597,8 @@ async function renderView() {
   $('pgInput').value = pg.index + 1;
   const b = pg.boxes, T = b.trim;
   $('sbinfo').textContent = ({ before: '', after: '補正後／', swipe: 'スワイプ（左：補正前・右：補正後）／', compare: '左：補正前・右：補正後／' })[mode] +
-    (T ? `仕上がり ${E.pt2mm(T.r - T.l).toFixed(1)}×${E.pt2mm(T.t - T.b).toFixed(1)}mm／${b.fromMarks ? 'トンボから求めた仕上がり・断ち代' : b.hasBleed ? 'BleedBoxあり' : 'BleedBoxなし（既定値で判定）'}` : 'TrimBoxなし');
+    (T ? `仕上がり ${E.pt2mm(T.r - T.l).toFixed(1)}×${E.pt2mm(T.t - T.b).toFixed(1)}mm／${b.single ? '1本トンボから求めた仕上がり' : b.fromMarks ? 'トンボから求めた仕上がり・断ち代' : b.fromPaper ? (b.fromPaper === 'paper' ? '用紙＝仕上がりとして判定' : '用紙＋断ち代として判定') : b.hasBleed ? 'BleedBoxあり' : 'BleedBoxなし（既定値で判定）'}` +
+      (pg.bleed ? `／断ち代 ${E.pt2mm(T.l - pg.bleed.l).toFixed(1)}mm${pg.grow ? '（用紙を広げます）' : ''}` : '') : 'TrimBoxなし');
   drawOverlay();
 }
 function drawOverlay() {
@@ -3169,14 +3772,16 @@ ovBtn('ovTrim', 'ovTrim'); ovBtn('ovBand', 'ovBand');
    newly のページだけ補正後を再チェックする（他のページの結果は変わらない） */
 async function rebuildOutput(newly, label) {
   const o = opts();
-  const targets = S.pages.filter((pg) => S.applied.has(pg.index) && checkedSides(pg).length);
+  const targets = S.pages.filter((pg) => S.applied.has(pg.index) && hasWork(pg));
   if (!targets.length) { clearOut(); return; }
   const jobs = targets.map((pg) => {
     const sides = {}; checkedSides(pg).forEach((k) => (sides[k] = pg.fix[k]));
     // 今ある断ち代（keep）はそのまま残し、足りない分だけを補う
     // 区間ごとに、今ある断ち代は残して足りない分だけを補う（部分的な不足・段差のある不足に対応）
     const segs = {}; checkedSides(pg).forEach((k) => (segs[k] = pg.before.edges[k].segments || []));
-    return { pageIndex: pg.index, sides, trim: pg.boxes.trim, bleed: pg.bleed, segs, setBoxes: !!pg.boxes.fromMarks };
+    // 用紙を広げる（断ち代が用紙より外）・1本トンボを消して断ち代の外端で切りそろえる（2026-11-12）
+    const pageBox = pg.grow ? E.unionBox(pg.orig.media, pg.bleed) : pg.erase ? pg.bleed : null;
+    return { pageIndex: pg.index, sides, trim: pg.boxes.trim, bleed: pg.bleed, segs, setBoxes: !!pg.writeBoxes, pageBox, erase: pg.erase };
   });
   showBusy(label || '補正中…');
   const r = await E.fillEdges(S.bytes, jobs, { srcPt: o.srcPt, useOcg: o.useOcg });
@@ -3198,11 +3803,15 @@ async function rebuildOutput(newly, label) {
 async function guarded(fn, noHistory, label) {
   if (S.busy) return;
   if (!noHistory) pushHistory(label || '補正');
-  S.busy = true; $('btnFix').disabled = true; updateUndo(); renderStep();
+  S.busy = true; S.busyLabel = label || '補正'; $('btnFix').disabled = true; updateUndo(); renderStep();
+  // 押したらすぐ「動いている」と分かるように、重い処理の前に表示を一度描かせる（重いデータでは補正の準備に数秒かかる。2026-11-12）
+  showBusy(`「${S.busyLabel}」を準備しています…`);
+  $('btnFixLbl').textContent = '処理しています…';
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   try { await fn(); }
   catch (err) { console.error(err); alert('補正できませんでした（' + (err.message || err) + '）'); }
   hideBusy();
-  S.busy = false;
+  S.busy = false; S.busyLabel = '';
   updateUndo();
   refresh();
 }
