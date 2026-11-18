@@ -140,6 +140,8 @@
   .bm-row .bm-issue.err{color:var(--err); background:var(--err-dim);}
   .bm-row .bm-issue + .bm-issue{margin-top:2px;}
   .bm-row.issue-flash{animation:bmIssueFlash 1.2s ease-out 1;}
+  .bm-row.jump-flash{animation:bmJumpFlash 1.2s ease-out 1;}
+  @keyframes bmJumpFlash{0%{box-shadow:inset 0 0 0 999px color-mix(in srgb, var(--shu) 22%, transparent);}100%{box-shadow:inset 0 0 0 999px transparent;}}
   @keyframes bmIssueFlash{0%{box-shadow:inset 0 0 0 999px color-mix(in srgb, var(--warn) 30%, transparent);}100%{box-shadow:inset 0 0 0 999px transparent;}}
   .bm-alert .ba-list .ba-line{display:block;}
   /* 自動修正された行の目印 */
@@ -1222,7 +1224,7 @@ const openPdfjs = data => pdfjsLib.getDocument({data, ...PDFJS_DOC_OPTS}).promis
 const { PDFDocument, PDFName, PDFHexString } = PDFLib;
 
 // アプリのバージョン（ヘッダー表記とフィードバック送信で共用する唯一の定義）
-const APP_VERSION = "v1.16";
+const APP_VERSION = "v1.17";
 
 // ───────────────────────────────────────────
 //  状態
@@ -1236,6 +1238,7 @@ let resultName = "";
 let resultSignature = null;   // 出力済みBlobを作った時点の階層エディタの内容（変更検知用）
 let labelResolver = null;     // ページラベル→物理ページindex（runBookmark実行後に有効）
 let previewPdfjsDoc = null;   // 実行時に読み込んだPDF（ページプレビュー用に保持）
+let mainViewerDoc = null;     // 本文プレビューに今描画されているPDF
 let currentPreviewPage = 1;
 let currentTocPreviewPage = 1; // 目次側ペインで現在表示中のページ（本文側とは独立）
 let previewTocPages = [];     // 自動認識/指定した目次ページ（プレビューで並べて表示するのに使う）
@@ -1609,10 +1612,24 @@ function createPaneViewer(canvas, stage){
 
   // ドラッグ＝パン／ホイール＝ズーム（下版差分チェッカーと同じ操作感）
   let dragging = false, lastX = 0, lastY = 0;
+  // ドラッグせずに離した（＝クリック）ときだけ onClick を呼ぶ。座標はPDF座標（左下原点）で渡す
+  let downX = 0, downY = 0, downOnCanvas = false, clickCb = null;
   canvas.addEventListener("mousedown", e => {
     const r = canvas.getBoundingClientRect();
     dragging = true; lastX = e.clientX - r.left; lastY = e.clientY - r.top;
+    downX = e.clientX; downY = e.clientY; downOnCanvas = true;
     canvas.classList.add("grabbing");
+  });
+  window.addEventListener("mouseup", e => {
+    if(!downOnCanvas) return;
+    downOnCanvas = false;
+    if(Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return;   // パン操作だった
+    if(!clickCb || !st.content || !st.vp) return;
+    const r = canvas.getBoundingClientRect();
+    const px = (e.clientX - r.left - st.panX) / st.zoom, py = (e.clientY - r.top - st.panY) / st.zoom;
+    if(px < 0 || py < 0 || px > st.contentW || py > st.contentH) return;
+    const [x, y] = st.vp.convertToPdfPoint(px, py);
+    clickCb({x, y});
   });
   window.addEventListener("mousemove", e => {
     if(!dragging) return;
@@ -1629,7 +1646,8 @@ function createPaneViewer(canvas, stage){
     zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
   }, {passive:false});
 
-  return {setPage, clear, fit, zoomAt, viewSize, highlight};
+  function onClick(fn){ clickCb = fn; }
+  return {setPage, clear, fit, zoomAt, viewSize, highlight, onClick};
 }
 
 const mainViewer = createPaneViewer($("pvCanvas"), $("pvStage"));
@@ -1642,13 +1660,21 @@ $("pvTocZIn").addEventListener("click",  () => { const v = tocViewer.viewSize();
 $("pvTocZFit").addEventListener("click", () => tocViewer.fit());
 
 // ── 本文側プレビュー：左にPDFページ、右にしおり階層編集（cardTreeをその場で移動して再利用） ──
-async function renderPreviewPage(n){
+let previewRenderP = Promise.resolve();
+let previewRenderedPage = 0;   // 描画が終わっているページ（同じページへの再描画で光らせた箇所が消えないようにする）
+function renderPreviewPage(n){
+  previewRenderP = previewRenderP.then(() => renderPreviewPageNow(n)).catch(() => {});
+  return previewRenderP;
+}
+async function renderPreviewPageNow(n){
   if(!previewPdfjsDoc) return;
   const total = previewPdfjsDoc.numPages;
   n = Math.max(1, Math.min(n, total));
   currentPreviewPage = n;
+  if(n === previewRenderedPage && mainViewerDoc === previewPdfjsDoc){ $("pvPageInput").value = pageLabelFor(n); return; }
   try{
     await mainViewer.setPage(previewPdfjsDoc, n);
+    previewRenderedPage = n; mainViewerDoc = previewPdfjsDoc;
     $("pvPageInput").value = pageLabelFor(n);
     $("pvPageTotal").textContent = total;
   }catch(e){
@@ -1830,6 +1856,7 @@ function tocAnchorOf(e){
   return null;
 }
 async function syncTocToEntry(e){
+  syncBodyToEntry(e);
   document.querySelectorAll("#bmList .bm-row.toc-hit").forEach(r => r.classList.remove("toc-hit"));
   if(!tocPaneShown || !previewPdfjsDoc) return;
   const t = tocAnchorOf(e);
@@ -1843,6 +1870,114 @@ async function syncTocToEntry(e){
   const row = $("bmList").children[bmEntries.indexOf(e)];
   if(row) row.classList.add("toc-hit");
 }
+
+// ── 本文ページ上の見出しの位置（本文プレビューで光らせる・本文クリックから行を探すのに使う） ──
+let bodyLinesCache = new Map(), bodyLinesDoc = null;
+async function bodyLinesOf(physPage){
+  if(bodyLinesDoc !== previewPdfjsDoc){ bodyLinesCache = new Map(); bodyLinesDoc = previewPdfjsDoc; }
+  if(!bodyLinesCache.has(physPage)){
+    let lines = [];
+    try{ lines = await extractLines(previewPdfjsDoc, physPage); }catch(_){}
+    bodyLinesCache.set(physPage, lines);
+  }
+  return bodyLinesCache.get(physPage);
+}
+// 見出しの頭の番号（「一」「1」「第三章」など）は柱や本文と表記が違うことがあるので、照合の補助として外した形も使う
+const stripHeadNum = t => t.replace(/^(第?[0-9０-９一二三四五六七八九十百〇]+[章部節編]?|[⑴-⒇①-⑳]|付)/, "");
+async function locateHeadingInBody(e){
+  if(!previewPdfjsDoc || typeof e.physIdx !== "number") return null;
+  const title = normText(e.title);
+  if(title.length < 2) return null;
+  const titleCore = stripHeadNum(title) || title;
+  const lines = await bodyLinesOf(e.physIdx + 1);
+  let best = null, bestScore = 0;
+  for(let i = 0; i < lines.length; i++){
+    const lt = normText(lines[i].text);
+    if(lt.length < 2 || !lines[i].bbox) continue;
+    let score = 0;
+    if(lt === title || lt === titleCore) score = 100;
+    else if(title.startsWith(lt) || titleCore.startsWith(lt)) score = 60 + Math.min(lt.length, 30);
+    else if(lt.startsWith(titleCore)) score = 50 + Math.min(titleCore.length, 30);
+    else if(lt.includes(titleCore) && titleCore.length >= 3) score = 30 + Math.min(titleCore.length, 20);
+    // 柱（ページの端の小さな文字）と見出しが同じ文字列のときは、文字の大きいほう（＝見出し）を採る
+    if(score > 0) score += Math.min(lines[i].size || 0, 40) / 4;
+    if(score > bestScore){ bestScore = score; best = i; }
+  }
+  if(best === null || bestScore < 40) return null;
+  // 見出しが2行（2列）に折り返している場合は、続きの行も含めて囲む
+  const boxes = [lines[best].bbox];
+  let acc = normText(lines[best].text);
+  for(let j = best + 1; j < lines.length && acc.length < titleCore.length; j++){
+    const nt = normText(lines[j].text);
+    if(!nt || !lines[j].bbox) break;
+    if(!(title.includes(acc + nt) || titleCore.includes(acc + nt))) break;
+    acc += nt; boxes.push(lines[j].bbox);
+  }
+  return boxes;
+}
+let bodySyncToken = 0;
+async function syncBodyToEntry(e){
+  const tok = ++bodySyncToken;
+  if(!previewApp_isShown() || !e || typeof e.physIdx !== "number") return;
+  await previewRenderP;
+  if(tok !== bodySyncToken || currentPreviewPage !== e.physIdx + 1) return;
+  const boxes = await locateHeadingInBody(e);
+  if(tok !== bodySyncToken || currentPreviewPage !== e.physIdx + 1) return;
+  mainViewer.highlight(boxes);
+}
+// 階層編集の行へスクロールして一瞬光らせる
+function revealEntryRow(e){
+  const rowEl = $("bmList").children[bmEntries.indexOf(e)];
+  if(!rowEl) return;
+  rowEl.scrollIntoView({block: "center", behavior: "smooth"});
+  rowEl.classList.remove("jump-flash");
+  void rowEl.offsetWidth;
+  rowEl.classList.add("jump-flash");
+}
+function boxDist(b, x, y){
+  const dx = x < b.x0 ? b.x0 - x : (x > b.x1 ? x - b.x1 : 0);
+  const dy = y < b.y0 ? b.y0 - y : (y > b.y1 ? y - b.y1 : 0);
+  return Math.hypot(dx, dy);
+}
+const boxList = b => (Array.isArray(b) ? b : [b]).filter(Boolean);
+async function jumpToEntryFromPreview(e){
+  revealEntryRow(e);
+  if(typeof e.physIdx === "number") renderPreviewPage(e.physIdx + 1);
+  syncTocToEntry(e);
+}
+// 目次プレビューの行をクリック → 本文プレビューと階層編集のその項目へ
+tocViewer.onClick(async pt => {
+  if(!previewPdfjsDoc) return;
+  let best = null, bd = Infinity;
+  for(const e of bmEntries){
+    if(!e._toc || e._toc.page !== currentTocPreviewPage) continue;
+    for(const b of boxList(e._toc.bbox)){
+      const d = boxDist(b, pt.x, pt.y);
+      if(d < bd){ bd = d; best = e; }
+    }
+  }
+  if(best && bd <= 12) jumpToEntryFromPreview(best);
+});
+// 本文プレビューの見出しをクリック → 目次と階層編集のその項目へ
+mainViewer.onClick(async pt => {
+  if(!previewPdfjsDoc) return;
+  const page = currentPreviewPage;
+  const onPage = bmEntries.filter(e => typeof e.physIdx === "number" && e.physIdx + 1 === page);
+  if(onPage.length === 0) return;
+  let best = null, bd = Infinity, located = 0;
+  for(const e of onPage){
+    const boxes = await locateHeadingInBody(e);
+    if(!boxes) continue;
+    located++;
+    for(const b of boxes){
+      const d = boxDist(b, pt.x, pt.y);
+      if(d < bd){ bd = d; best = e; }
+    }
+  }
+  if(page !== currentPreviewPage) return;
+  if(best && bd <= 24) jumpToEntryFromPreview(best);
+  else if(located === 0 && onPage.length === 1) jumpToEntryFromPreview(onPage[0]);
+});
 
 // ウインドウの高さ・幅が変わったらプレビューを再フィット（プレビュー表示中のみ）
 let resizeTimer = null;
@@ -2486,9 +2621,22 @@ function mergeBoxes(lines){
   return lines.filter(l => l.page === last.page).reduce((acc, l) => unionBox(acc, l.bbox), null);
 }
 
+// PDFの文字コード表（ToUnicode）で、漢字が同じ形の「康熙部首」（⼀ U+2F00 など）に化けていることがある
+// （ChromeやWordから書き出したPDFでよく起きる）。見た目は同じでも「第⼀章」が漢数字と判定できず、
+// Windowsのしおりでも別の字になるので、部首の文字だけを通常の漢字に戻す（NFKCは部首の範囲にだけ使う）
+const RE_RADICAL = /[\u2E80-\u2FDF]/g;
+async function getTextContentFixed(page){
+  const tc = await page.getTextContent();
+  for(const it of tc.items){
+    if(it.str && RE_RADICAL.test(it.str)){ RE_RADICAL.lastIndex = 0; it.str = it.str.replace(RE_RADICAL, c => c.normalize("NFKC")); }
+    RE_RADICAL.lastIndex = 0;
+  }
+  return tc;
+}
+
 async function extractLines(pdfjsDoc, physIdx){
   const page = await pdfjsDoc.getPage(physIdx);
-  const tc = await page.getTextContent();
+  const tc = await getTextContentFixed(page);
   // pdf.js は「⑴」と「諸外国」の間の全角アキなどを空白だけの独立アイテムとして返す。
   // 行テキストにはこれも含めて連結し、印刷面どおりのアキを見出しに残す。
   // 一方で、行頭x座標（＝階層推定）と組み方向の判定は空白を除いた実体のある文字から求める。
@@ -2609,7 +2757,7 @@ async function extractRuns(pdfjsDoc, physIdx){
   if(runsCache.has(physIdx)) return runsCache.get(physIdx);
 
   const page = await pdfjsDoc.getPage(physIdx);
-  const tc = await page.getTextContent();
+  const tc = await getTextContentFixed(page);
   let solid = tc.items.filter(it => it.str && it.str.trim());
   let result = {vertical: false, runs: []};
 
@@ -3277,7 +3425,9 @@ async function autoDetectToc(){
     }
     // 縦組み：章見出し（大きな文字）と「見出し＋副題」の2列組みをまとめる
     {
-      const merged = mergeVerticalTocEntries(rawLines);
+      // 横組みなど連結が不要なときは同じ配列がそのまま返るため、空にする前に写しを取る
+      // （写しを取らないと rawLines ごと空になり、横組みの目次がすべて読めなくなる）
+      const merged = mergeVerticalTocEntries(rawLines).slice();
       rawLines.length = 0;
       rawLines.push(...merged);
     }
@@ -4293,7 +4443,7 @@ async function getPrintedPageNumber(pdfjsDoc, physIdx){
     const page = await pdfjsDoc.getPage(physIdx + 1);
     const H = page.getViewport({scale: 1}).height;
     const band = H * 0.12;
-    const tc = await page.getTextContent();
+    const tc = await getTextContentFixed(page);
     const items = tc.items.filter(it => it.str && it.str.trim());
     const inBand = items.filter(it => {
       const y = it.transform[5];
