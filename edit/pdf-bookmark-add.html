@@ -1929,7 +1929,13 @@ async function syncBodyToEntry(e){
 function revealEntryRow(e){
   const rowEl = $("bmList").children[bmEntries.indexOf(e)];
   if(!rowEl) return;
-  rowEl.scrollIntoView({block: "center", behavior: "smooth"});
+  // scrollIntoView はページ全体までずらしてしまうので、一覧のスクロール枠だけを動かす
+  let sc = rowEl.parentElement;
+  while(sc && sc !== document.body && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
+  if(sc && sc !== document.body){
+    const r = rowEl.getBoundingClientRect(), sr = sc.getBoundingClientRect();
+    sc.scrollTo({top: sc.scrollTop + (r.top - sr.top) - (sr.height - r.height) / 2, behavior: "smooth"});
+  }
   rowEl.classList.remove("jump-flash");
   void rowEl.offsetWidth;
   rowEl.classList.add("jump-flash");
@@ -2625,8 +2631,317 @@ function mergeBoxes(lines){
 // （ChromeやWordから書き出したPDFでよく起きる）。見た目は同じでも「第⼀章」が漢数字と判定できず、
 // Windowsのしおりでも別の字になるので、部首の文字だけを通常の漢字に戻す（NFKCは部首の範囲にだけ使う）
 const RE_RADICAL = /[\u2E80-\u2FDF]/g;
+
+// ── ActualText（置き換えテキスト）への対応 ──
+// InDesign 等が書き出したPDFでは、フォントの文字コード表（ToUnicode）が壊れている字形（例：じ・め・に が
+// すべて「は」になっている）を、/Span <</ActualText (じめに)>> BDC … EMC で正しい文字に上書きしていることがある。
+// Acrobat やコピー＆ペーストはこの ActualText を使うので正しく見えるが、pdf.js（3.x）は ActualText を読まないため
+// 「はじめに」が「はははは」になる。ここでページの描画命令を pdf-lib で直接読み、ActualText の範囲ごとに
+// 「pdf.js が出す（壊れた）文字列」と「本来の文字列」の組を作って、テキスト抽出結果を差し替える。
+let atCache = null;   // {file, docP, fonts: Map, pages: Map}
+function atBytesToStr(u8){
+  let out = "";
+  for(let i = 0; i < u8.length; i += 8192) out += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return out;
+}
+function atDecodeText(bytes){   // PDFテキスト文字列（UTF-16BE／PDFDocEncoding）→ JS文字列
+  if(bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF){
+    let t = "";
+    for(let i = 2; i + 1 < bytes.length; i += 2) t += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+    return t;
+  }
+  return String.fromCharCode.apply(null, bytes);
+}
+function atHexToStr(h){   // ToUnicode の宛先（UTF-16BE の16進）→ 文字列
+  h = h.replace(/[^0-9A-Fa-f]/g, "");
+  let t = "";
+  for(let i = 0; i + 3 < h.length; i += 4) t += String.fromCharCode(parseInt(h.substr(i, 4), 16));
+  return t;
+}
+function atParseToUnicode(text){
+  const map = new Map();
+  const reChar = /beginbfchar([\s\S]*?)endbfchar/g, reRange = /beginbfrange([\s\S]*?)endbfrange/g;
+  let m;
+  while((m = reChar.exec(text))){
+    const re = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g; let q;
+    while((q = re.exec(m[1]))) map.set(parseInt(q[1], 16), atHexToStr(q[2]));
+  }
+  while((m = reRange.exec(text))){
+    const re = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<[0-9A-Fa-f]*>|\[[^\]]*\])/g; let q;
+    while((q = re.exec(m[1]))){
+      const lo = parseInt(q[1], 16), hi = parseInt(q[2], 16);
+      if(hi - lo > 65535) continue;
+      if(q[3][0] === "["){
+        const dsts = q[3].match(/<[0-9A-Fa-f]*>/g) || [];
+        for(let c = lo; c <= hi && c - lo < dsts.length; c++) map.set(c, atHexToStr(dsts[c - lo]));
+      }else{
+        const base = atHexToStr(q[3].slice(1, -1));
+        if(!base) continue;
+        const head = base.slice(0, -1), last = base.charCodeAt(base.length - 1);
+        for(let c = lo; c <= hi; c++) map.set(c, head + String.fromCharCode(last + (c - lo)));
+      }
+    }
+  }
+  return map;
+}
+// 描画命令の字句解析（文字列・16進文字列・名前・数値・配列・辞書・演算子。インライン画像は読み飛ばす）
+function atTokenize(str, onOp){
+  const n = str.length;
+  let i = 0;
+  const stack = [];
+  const isWs = c => c === 32 || c === 10 || c === 13 || c === 9 || c === 12 || c === 0;
+  const isDelim = c => c === 40 || c === 41 || c === 60 || c === 62 || c === 91 || c === 93 || c === 123 || c === 125 || c === 47 || c === 37;
+  const MARK_ARR = {mark: "["}, MARK_DICT = {mark: "<<"};
+  while(i < n){
+    const c = str.charCodeAt(i);
+    if(isWs(c)){ i++; continue; }
+    if(c === 37){ while(i < n && str.charCodeAt(i) !== 10 && str.charCodeAt(i) !== 13) i++; continue; }
+    if(c === 40){   // (literal)
+      const bytes = []; let depth = 1; i++;
+      while(i < n && depth > 0){
+        let ch = str.charCodeAt(i++);
+        if(ch === 92){
+          const e = str.charCodeAt(i++);
+          if(e === 110) bytes.push(10); else if(e === 114) bytes.push(13); else if(e === 116) bytes.push(9);
+          else if(e === 98) bytes.push(8); else if(e === 102) bytes.push(12);
+          else if(e >= 48 && e <= 55){
+            let v = e - 48;
+            for(let k = 0; k < 2 && i < n; k++){ const d = str.charCodeAt(i); if(d < 48 || d > 55) break; v = v * 8 + d - 48; i++; }
+            bytes.push(v & 255);
+          }else if(e === 13){ if(str.charCodeAt(i) === 10) i++; }
+          else if(e === 10){}
+          else bytes.push(e);
+          continue;
+        }
+        if(ch === 40) depth++;
+        else if(ch === 41){ depth--; if(depth === 0) break; }
+        bytes.push(ch);
+      }
+      stack.push({str: bytes}); continue;
+    }
+    if(c === 60){
+      if(str.charCodeAt(i + 1) === 60){ stack.push(MARK_DICT); i += 2; continue; }
+      const j = str.indexOf(">", i);
+      const h = str.slice(i + 1, j < 0 ? n : j).replace(/[^0-9A-Fa-f]/g, "");
+      const hh = h.length % 2 ? h + "0" : h;
+      const bytes = [];
+      for(let k = 0; k < hh.length; k += 2) bytes.push(parseInt(hh.substr(k, 2), 16));
+      stack.push({str: bytes}); i = j < 0 ? n : j + 1; continue;
+    }
+    if(c === 62 && str.charCodeAt(i + 1) === 62){
+      i += 2;
+      const k = stack.lastIndexOf(MARK_DICT);
+      if(k < 0) continue;
+      const items = stack.splice(k);
+      items.shift();
+      const d = {};
+      for(let t = 0; t + 1 < items.length; t += 2) if(items[t] && items[t].name) d[items[t].name] = items[t + 1];
+      stack.push({dict: d}); continue;
+    }
+    if(c === 91){ stack.push(MARK_ARR); i++; continue; }
+    if(c === 93){
+      i++;
+      const k = stack.lastIndexOf(MARK_ARR);
+      if(k < 0) continue;
+      const items = stack.splice(k); items.shift();
+      stack.push({arr: items}); continue;
+    }
+    if(c === 47){
+      let j = i + 1;
+      while(j < n && !isWs(str.charCodeAt(j)) && !isDelim(str.charCodeAt(j))) j++;
+      stack.push({name: str.slice(i + 1, j)}); i = j; continue;
+    }
+    let j = i;
+    while(j < n && !isWs(str.charCodeAt(j)) && !isDelim(str.charCodeAt(j))) j++;
+    if(j === i){ i++; continue; }
+    const tok = str.slice(i, j); i = j;
+    if(/^[+\-.\d]/.test(tok)){ stack.push({num: parseFloat(tok)}); continue; }
+    if(tok === "true" || tok === "false" || tok === "null"){ stack.push({kw: tok}); continue; }
+    if(tok === "ID"){   // インライン画像のデータは「空白＋EI＋空白」まで読み飛ばす
+      const re = /\sEI(?=[\s]|$)/g; re.lastIndex = i;
+      const mm = re.exec(str); i = mm ? mm.index + mm[0].length : n;
+      stack.length = 0; continue;
+    }
+    if(stack.indexOf(MARK_ARR) === -1 && stack.indexOf(MARK_DICT) === -1){
+      onOp(tok, stack.splice(0));
+    }
+  }
+}
+async function atGetDoc(){
+  if(!pdfFile || typeof PDFLib === "undefined") return null;
+  if(!atCache || atCache.file !== pdfFile){
+    atCache = {file: pdfFile, fonts: new Map(), pages: new Map(), learned: new Map(), docP: null};
+    atCache.docP = pdfFile.arrayBuffer()
+      .then(b => PDFDocument.load(b, {ignoreEncryption: true, updateMetadata: false}))
+      .then(d => (d.isEncrypted ? null : d))
+      .catch(() => null);
+  }
+  return atCache.docP;
+}
+function atLookup(doc, v){ return v ? doc.context.lookup(v) : v; }
+function atFontInfo(doc, fontObj){
+  if(!fontObj) return null;
+  if(atCache.fonts.has(fontObj)) return atCache.fonts.get(fontObj);
+  let info = null;
+  try{
+    const sub = fontObj.get(PDFName.of("Subtype"));
+    const twoByte = !!sub && sub.toString() === "/Type0";
+    const bf = fontObj.get(PDFName.of("BaseFont"));
+    const key = bf ? bf.toString() : "";
+    const tuRef = fontObj.get(PDFName.of("ToUnicode"));
+    const tu = atLookup(doc, tuRef);
+    if(tu && tu.contents){
+      const bytes = PDFLib.decodePDFRawStream(tu).decode();
+      info = {twoByte, key, map: atParseToUnicode(atBytesToStr(bytes))};
+    }
+  }catch(_){ info = null; }
+  atCache.fonts.set(fontObj, info);
+  return info;
+}
+async function actualTextSpans(pageNumber){
+  const doc = await atGetDoc();
+  if(!doc) return [];
+  if(atCache.pages.has(pageNumber)) return atCache.pages.get(pageNumber);
+  const spans = [];
+  const seq = [];   // 描画順の全文字 {ch, sp}（sp: 属する ActualText 範囲の番号、無ければ -1）
+  const result = {seq, spans};
+  try{
+    const page = doc.getPages()[pageNumber - 1];
+    const res = page && page.node.Resources();
+    const fontsDict = res ? atLookup(doc, res.get(PDFName.of("Font"))) : null;
+    const propsDict = res ? atLookup(doc, res.get(PDFName.of("Properties"))) : null;
+    const contents = page ? page.node.Contents() : null;
+    let parts = [];
+    if(contents instanceof PDFLib.PDFArray) parts = contents.asArray().map(r => atLookup(doc, r));
+    else if(contents) parts = [contents];
+    let text = "";
+    for(const st of parts){
+      if(!st) continue;
+      const bytes = st.contents && st.dict ? PDFLib.decodePDFRawStream(st).decode() : st.getContents();
+      text += atBytesToStr(bytes) + "\n";
+    }
+    let font = null;
+    const fontStack = [], mcStack = [];
+    let active = null;
+    const fontFor = name => {
+      if(!fontsDict || !name) return null;
+      return atFontInfo(doc, atLookup(doc, fontsDict.get(PDFName.of(name))));
+    };
+    const glyphs = [];   // {font, code, uni, sp}
+    const show = bytes => {
+      const codes = [];
+      if(!font) codes.push(-1);
+      else if(font.twoByte){ for(let k = 0; k + 1 < bytes.length; k += 2) codes.push((bytes[k] << 8) | bytes[k + 1]); }
+      else for(const b of bytes) codes.push(b);
+      for(const code of codes){
+        const uni = font && code >= 0 ? font.map.get(code) : undefined;
+        if(active && uni === undefined) active.bad = true;
+        glyphs.push({font, code, uni, sp: active ? active.id : -1});
+        if(active) active.g++;
+      }
+    };
+    atTokenize(text, (op, args) => {
+      switch(op){
+        case "q": fontStack.push(font); break;
+        case "Q": font = fontStack.length ? fontStack.pop() : font; break;
+        case "Tf": font = fontFor(args[0] && args[0].name); break;
+        case "Tj": case "'": if(args.length && args[args.length - 1].str) show(args[args.length - 1].str); break;
+        case "\"": if(args[2] && args[2].str) show(args[2].str); break;
+        case "TJ": if(args[0] && args[0].arr) for(const x of args[0].arr) if(x.str) show(x.str); break;
+        case "BMC": mcStack.push(null); break;
+        case "BDC": {
+          let actual = null;
+          const pr = args[1];
+          if(pr && pr.dict && pr.dict.ActualText && pr.dict.ActualText.str) actual = atDecodeText(pr.dict.ActualText.str);
+          else if(pr && pr.name && propsDict){
+            const d = atLookup(doc, propsDict.get(PDFName.of(pr.name)));
+            const at = d && d.get ? atLookup(doc, d.get(PDFName.of("ActualText"))) : null;
+            if(at && at.decodeText) actual = at.decodeText();
+          }
+          const span = actual !== null && !active ? {actual, n: 0, g: 0, bad: false, id: spans.length} : null;
+          if(span) spans.push(span);
+          if(span) active = span;
+          mcStack.push(span);
+          break;
+        }
+        case "EMC": {
+          const sp = mcStack.pop();
+          if(sp && sp === active) active = null;
+          break;
+        }
+      }
+    });
+    // ActualText で「字形1つ＝1文字」と分かったものは、そのフォントの正しい対応として覚える。
+    // 同じ字形が ActualText なしで使われている箇所（柱など）も、覚えた対応で読み直せる
+    const bySpan = new Map();
+    glyphs.forEach(g => { if(g.sp >= 0){ if(!bySpan.has(g.sp)) bySpan.set(g.sp, []); bySpan.get(g.sp).push(g); } });
+    for(const [id, gs] of bySpan){
+      const act = Array.from(spans[id].actual);
+      if(act.length !== gs.length) continue;
+      gs.forEach((g, t) => {
+        if(!g.font || !g.font.key || g.code < 0) return;
+        if(!atCache.learned.has(g.font.key)) atCache.learned.set(g.font.key, new Map());
+        atCache.learned.get(g.font.key).set(g.code, act[t].replace(/[\u0000-\u001F]/g, " "));
+      });
+    }
+    let fixes = 0;
+    for(const g of glyphs){
+      const str = g.uni === undefined ? "\uFFFD" : g.uni;
+      const lm = g.sp < 0 && g.font && atCache.learned.get(g.font.key);
+      const fix = lm && lm.has(g.code) && Array.from(str).length === 1 && lm.get(g.code) !== str ? lm.get(g.code) : null;
+      if(fix !== null) fixes++;
+      for(const ch of Array.from(str)){
+        if(/\s/.test(ch)) continue;
+        seq.push({ch, sp: g.sp, fix});
+        if(g.sp >= 0) spans[g.sp].n++;
+      }
+    }
+    result.fixes = fixes;
+  }catch(_){ atCache.pages.set(pageNumber, null); return null; }
+  const out = spans.length || result.fixes ? result : null;
+  atCache.pages.set(pageNumber, out);
+  return out;
+}
+// pdf.js のテキスト（描画順）と、描画命令から作った文字列（同じく描画順）を1文字ずつ対応づけ、
+// ActualText の範囲に入る文字だけを本来の文字に差し替える。
+// 対応づけは先頭から順に照合し、ずれたら（フォームXObject内の文字など）数文字先で合う位置を探して合わせ直す。
+function applyActualText(items, at){
+  if(!at) return;
+  const seq = at.seq;
+  const pos = [];
+  const arrs = items.map(it => Array.from(it.str || ""));
+  arrs.forEach((a, ii) => a.forEach((ch, ci) => { if(!/\s/.test(ch)) pos.push([ii, ci]); }));
+  const chars = pos.map(([ii, ci]) => arrs[ii][ci]);
+  const hits = at.spans.map(() => []);   // 範囲ごとに対応した pdf.js 側の文字位置
+  const K = 3, W = 400;
+  const runEq = (a, b) => { for(let t = 0; t < K; t++){ if(a + t >= chars.length || b + t >= seq.length) return t > 0; if(chars[a + t] !== seq[b + t].ch) return false; } return true; };
+  let a = 0, b = 0;
+  while(a < chars.length && b < seq.length){
+    if(chars[a] === seq[b].ch){
+      if(seq[b].sp >= 0) hits[seq[b].sp].push(a);
+      else if(seq[b].fix !== null && seq[b].fix !== undefined){ const [ii, ci] = pos[a]; arrs[ii][ci] = seq[b].fix; }
+      a++; b++; continue;
+    }
+    let moved = false;
+    for(let d = 1; d <= W && !moved; d++){
+      if(a + d < chars.length && runEq(a + d, b)){ a += d; moved = true; }
+      else if(b + d < seq.length && runEq(a, b + d)){ b += d; moved = true; }
+    }
+    if(!moved){ a++; b++; }
+  }
+  at.spans.forEach((sp, k) => {
+    const h = hits[k];
+    if(sp.bad || h.length !== sp.n || h.length === 0) return;
+    const actual = Array.from(sp.actual.replace(/[\u0000-\u001F]/g, " "));
+    if(actual.length === h.length) h.forEach((p, t) => { const [ii, ci] = pos[p]; arrs[ii][ci] = actual[t]; });
+    else h.forEach((p, t) => { const [ii, ci] = pos[p]; arrs[ii][ci] = t === 0 ? actual.join("") : ""; });
+  });
+  items.forEach((it, ii) => { it.str = arrs[ii].join(""); });
+}
+
 async function getTextContentFixed(page){
   const tc = await page.getTextContent();
+  try{ applyActualText(tc.items, await actualTextSpans(page.pageNumber)); }catch(_){}
   for(const it of tc.items){
     if(it.str && RE_RADICAL.test(it.str)){ RE_RADICAL.lastIndex = 0; it.str = it.str.replace(RE_RADICAL, c => c.normalize("NFKC")); }
     RE_RADICAL.lastIndex = 0;
@@ -3105,6 +3420,50 @@ async function expandSubheads(list, pdfjsDoc, totalPages, resolveLabel, pageLabe
 // 探す範囲は前後の解決済み項目のあいだに限り、そのページの文字（ノンブルを除く）が
 // ほぼ見出しだけ（余分が10文字以内）であるページを扉とみなす。範囲内で最初に見つかったものを採る
 // （同じ部の柱は扉より後ろにしか出ないため）。見つからない行は従来どおり直後の項目のページを暫定で使う。
+// 逆丁：本文の後ろ（奥付・広告の手前など）に、巻末から逆順に番号を振ったページがある。
+// 最終ページとは限らないので、後ろから順に「柱に見出しがあり、ノンブルが目次の番号と同じ」ページを探す。
+// 番号が読めない場合は、見出しを含むページのうち番号の並びから推定する。
+async function locateReversePages(list, pdfjsDoc, totalPages){
+  const numOf = t => {
+    const s = String(t).replace(/[\s\u3000]/g, "").replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+    if(/^[0-9]+$/.test(s)) return parseInt(s, 10);
+    const k = kanjiToArabic(s);
+    return k === null ? null : k;
+  };
+  const lowest = Math.max(0, totalPages - 120);
+  let found = 0;
+  for(const e of list){
+    if(!e._reverse) continue;
+    const want = numOf(e._reverse);
+    const key = normText(e.title);
+    if(!key) continue;
+    const withTitle = [];   // 見出しを含むページ（後ろから）
+    let hit = null;
+    for(let p = totalPages - 1; p >= lowest; p--){
+      const {runs} = await extractRuns(pdfjsDoc, p + 1);
+      const texts = runs.map(r => normText(r.text));
+      if(!texts.some(t => t.includes(key))){
+        // 柱が片側のページにしか無い本もあるので、2ページまでの切れ目は続きとみなす
+        if(withTitle.length && withTitle[withTitle.length - 1].p - p > 2) break;
+        continue;
+      }
+      const nums = runs.filter(r => NUM_ONLY_RE.test(r.text)).map(r => numOf(r.text)).filter(v => v !== null);
+      withTitle.push({p, nums});
+      if(want !== null && nums.includes(want)){ hit = p; break; }
+    }
+    // 番号が読めなかったとき：見出しを含むページの並び（巻末側が1）から位置を推定
+    if(hit === null && withTitle.length && want !== null && want >= 1 && want <= withTitle.length) hit = withTitle[want - 1].p;
+    if(hit === null){
+      log(`  ⚠ 逆丁「${e.title}」のページが巻末から見つかりませんでした（📍でページを指定してください）`, "warn");
+      continue;
+    }
+    e.physIdx = hit; e.physFixed = true; e.label = "";
+    found++;
+    log(`  逆丁のページを特定：「${e.title}」（逆丁${e._reverse}）→ PDF ${hit + 1}ページ`);
+  }
+  return found;
+}
+
 async function locateDoorPages(list, pdfjsDoc, totalPages, resolveLabel, pageLabels){
   const physOf = e => {
     if(e.physFixed && typeof e.physIdx === "number") return e.physIdx;
@@ -3448,12 +3807,29 @@ async function autoDetectToc(){
       // リスト上で赤く示して手入力できるようにする（見出しごと捨ててしまわない）。
       const bare = ln.text.replace(/[\s\u3000.\u2024\u2025\u2026\u30FB･·]+$/, "").trim();
       const rank = markerRank(bare);
-      if((rank === LV_RANK.bu || rank === LV_RANK.sho || ln.heading) && looksLikeRealTitle(bare, 60)){
+      // 目次の先頭にページ番号なしで載る「はじめに」「序」などの前付も、前付のページから探すので残す
+      const isFront = FRONT_MATTER_RE.test(normText(bare)) && !parsed.some(q => q.label);
+      if((rank === LV_RANK.bu || rank === LV_RANK.sho || ln.heading || isFront) && looksLikeRealTitle(bare, 60)){
         parsed.push({title: bare, label: "", x: ln.x, vertical: ln.vertical, heading: !!ln.heading, num: ln.num || "", page: ln.page, bbox: ln.bbox});
         noFolio++;
         continue;
       }
       skipped++;
+    }
+
+    // 目次ページの柱（「目　次　三」）は項目ではない。「目次」の見出し自体も、他の項目をその下へ入れる大見出しにはしない
+    for(let i = parsed.length - 1; i >= 0; i--){
+      if(normText(parsed[i].title) !== "目次") continue;
+      if(parsed[i].label) parsed.splice(i, 1);
+      else parsed[i].heading = false;
+    }
+    for(const e of parsed){
+      e.title = collapseSpacedTitle(e.title);
+      // 「挿図表一覧　逆丁　1」：巻末から逆向きに組まれたページ（逆丁）。ページ番号ではなく巻末から探す
+      const rv = e.title.match(/^(.+?)[\s\u3000]*逆丁$/);
+      const lv = String(e.label || "").match(/^逆丁?[\s\u3000]*(.+)$/);
+      if(rv && e.label && rv[1] !== e.title){ e.title = rv[1]; e.reverse = e.label; e.label = ""; }
+      else if(lv){ e.reverse = normalizeLabel(lv[1]); e.label = ""; }
     }
 
     if(parsed.length === 0){
@@ -3490,7 +3866,11 @@ async function autoDetectToc(){
       bmEntries = parsed.map(e => ({title: e.title, label: e.label, level: levelOf(e.x)}));
     }
     // ページ番号のない部扉・章扉は、runBookmark で本文から扉ページを探す
-    parsed.forEach((e, i) => { if(!e.label && bmEntries[i]) bmEntries[i]._door = true; });
+    parsed.forEach((e, i) => {
+      if(!bmEntries[i]) return;
+      if(e.reverse) bmEntries[i]._reverse = e.reverse;
+      else if(!e.label) bmEntries[i]._door = true;
+    });
     parsed.forEach((e, i) => { if(e.heading && bmEntries[i]) bmEntries[i]._heading = true; });
     // 目次上の位置（ページ・外接矩形）を持たせる。階層エディタで行を選ぶと目次側の該当箇所を光らせる
     parsed.forEach((e, i) => { if(e.page && bmEntries[i]) bmEntries[i]._toc = {page: e.page, bbox: e.bbox || null}; });
@@ -3517,6 +3897,24 @@ async function autoDetectToc(){
         const hnote = `  階層：大きな文字の章見出し ${bmEntries.filter(e => e._heading).length} 件の配下 ${hn} 件を1段下げました`;
         // 「フラットで読み込みました」と並ぶと矛盾して見えるので置き換える
         levelNote = /フラットで読み込みました/.test(levelNote) ? levelNote.replace(/[^\n]*フラットで読み込みました[^\n]*/, hnote) : levelNote + "\n" + hnote;
+      }
+    }
+    // 章の中の「はじめに」「おわりに」（番号なし）は、章の見出しと同じ段ではなく、その章の節と同じ段に入れる
+    {
+      const IN_CHAPTER_RE = /^(はじめに|おわりに|むすび|小結|まとめ)$/;
+      const isChapter = t => markerRank(t) === LV_RANK.sho;
+      for(let i = 0; i < bmEntries.length; i++){
+        const e = bmEntries[i];
+        if(!IN_CHAPTER_RE.test(normText(e.title))) continue;
+        let ch = -1;
+        for(let j = i - 1; j >= 0; j--){
+          if(isChapter(bmEntries[j].title)){ ch = j; break; }
+          if(bmEntries[j].level < e.level) break;
+        }
+        if(ch < 0 || e.level > bmEntries[ch].level) continue;
+        const prev = bmEntries[i - 1], next = bmEntries[i + 1];
+        const inner = bmEntries[ch].level + 1;
+        if((prev && i - 1 !== ch && prev.level === inner) || (next && next.level === inner && !isChapter(next.title))) e.level = inner;
       }
     }
     for(const e of bmEntries) delete e._heading;
@@ -3661,6 +4059,14 @@ function nestKanjiSections(entries){
 // 縦組みで記号が拾えずフラットになった目次や、部と章が同じインデントの横組み目次では、
 // 部と章が同じ段に並んでしまうため。範囲は「部の直後から、次の部・後付（むすび／あとがき／参考文献 等）の手前まで」。
 // すでに配下が部より深い段にある場合（記号から階層が取れた場合）は何もしない。戻り値は下げた件数。
+// 目次にページ番号なしで載ることが多い前付（本文より前の見出し）
+const FRONT_MATTER_RE = /^(はじめに|始めに|まえがき|前書き?|序|序文|序言|序章|序論|緒言|凡例|プロローグ|刊行に(あたって|寄せて)|序にかえて)$/;
+// 均等割り・字間ありで組まれた見出し（「は じ め に」）は、字間の半角アキを詰める
+// （全角アキは「一　目的」のような番号と見出しの区切りなので残す）
+function collapseSpacedTitle(t){
+  const s = String(t || "");
+  return /^\S( \S)+$/.test(s) ? s.replace(/ /g, "") : s;
+}
 const BACK_MATTER_RE = /^(むすび|おわりに|終わりに|あとがき|後書|参考文献|引用文献|主要参考文献|文献|索引|補論|付論|終章|結論|結語|付録|附録|解説|年表|初出)/;
 function nestUnderParts(entries){
   const isPart = e => markerRank(e.title) === LV_RANK.bu;
@@ -4752,6 +5158,19 @@ async function runBookmark(opts){
         console.error(e);
       }
     }
+
+    // 逆丁（巻末から逆向きに組まれたページ）の項目を巻末から探す
+    if(bmEntries.some(e => e._reverse)){
+      try{
+        log("── 逆丁のページを巻末から検出中 ──");
+        const n = await locateReversePages(bmEntries, pdfjsDoc, totalPages);
+        if(n > 0) renderBmList();
+      }catch(e){
+        log(`  ⚠ 逆丁ページの検出に失敗しました：${e.message || e}`, "warn");
+        console.error(e);
+      }
+    }
+    for(const en of bmEntries) if(en._reverse) delete en._reverse;
 
     // 目次にページ番号が無かった部扉・章扉のページを本文から探す
     if(bmEntries.some(e => e._door && !(e.label || "").trim())){
