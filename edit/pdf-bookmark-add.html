@@ -5185,6 +5185,28 @@ async function runBookmark(opts){
     }
     for(const en of bmEntries) if(en._door) delete en._door;
 
+    // 目次の先頭にページ番号なしで並ぶ前付（「目次」「はじめに」など）は、目次の並びではなく
+    // 実際のページ順にそろえる（「はじめに」が目次より前にある本では、しおりも先に来るように）
+    {
+      const physOf = e => {
+        if(e.physFixed && typeof e.physIdx === "number") return e.physIdx;
+        if(!e.label || !e.label.trim()) return null;
+        const p = resolveLabel(e.label);
+        return (p === null || p === undefined) ? null : p;
+      };
+      let end = 0;
+      while(end < bmEntries.length && !(bmEntries[end].label || "").trim()) end++;
+      const head = bmEntries.slice(0, end);
+      if(head.length >= 2 && head.every(e => physOf(e) !== null && (e.level || 0) === 0)){
+        const sorted = head.map((e, i) => ({e, i, p: physOf(e)})).sort((x, y) => x.p - y.p || x.i - y.i).map(x => x.e);
+        if(sorted.some((e, i) => e !== head[i])){
+          bmEntries.splice(0, end, ...sorted);
+          log("  前付の項目を実際のページ順に並べ替えました：" + sorted.map(e => `「${e.title}」`).join("→"));
+          renderBmList();
+        }
+      }
+    }
+
     // 未解決ラベルの事前確認（該当行は赤くハイライトし、スキップして続行）
     // ラベルが空の行（目次にページ番号が無かった部扉・章扉）は「間違ったラベル」ではないので、
     // ここでは警告の対象にせず、後段でページを引き継がせる。
